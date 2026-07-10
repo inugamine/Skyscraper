@@ -24,7 +24,6 @@ enum Deco {
 
 // MARK: - 自作シェイプ
 
-// 横長の六角形（左右が尖った形）
 struct Hexagon: Shape {
     var inset: CGFloat = 9
     func path(in rect: CGRect) -> Path {
@@ -42,7 +41,6 @@ struct Hexagon: Shape {
     }
 }
 
-// ジグザグの装飾罫線
 struct Zigzag: Shape {
     var teeth: Int = 14
     func path(in rect: CGRect) -> Path {
@@ -60,7 +58,6 @@ struct Zigzag: Shape {
     }
 }
 
-// 三角形（塔の尖塔用）
 struct Triangle: Shape {
     func path(in rect: CGRect) -> Path {
         var p = Path()
@@ -72,20 +69,75 @@ struct Triangle: Shape {
     }
 }
 
-// MARK: - ブックマーク
+// MARK: - ブックマーク（保存対応）
 
-struct Bookmark: Identifiable {
-    let id = UUID()
-    let title: String
-    let url: String
+struct Bookmark: Identifiable, Codable, Hashable {
+    var id = UUID()
+    var title: String
+    var url: String
 }
 
-let defaultBookmarks: [Bookmark] = [
-    Bookmark(title: "Apple",       url: "https://www.apple.com"),
-    Bookmark(title: "GitHub",      url: "https://github.com"),
-    Bookmark(title: "Hacker News", url: "https://news.ycombinator.com"),
-    Bookmark(title: "Wikipedia",   url: "https://www.wikipedia.org"),
-]
+@MainActor
+final class BookmarkStore: ObservableObject {
+    @Published var bookmarks: [Bookmark] {
+        didSet { save() }
+    }
+
+    private let key = "skyscraper.bookmarks.v1"
+
+    init() {
+        // 保存済みがあれば読み込む。無ければ初期セット
+        if let data = UserDefaults.standard.data(forKey: key),
+           let decoded = try? JSONDecoder().decode([Bookmark].self, from: data) {
+            bookmarks = decoded
+        } else {
+            bookmarks = [
+                Bookmark(title: "Apple",       url: "https://www.apple.com"),
+                Bookmark(title: "GitHub",      url: "https://github.com"),
+                Bookmark(title: "Hacker News", url: "https://news.ycombinator.com"),
+                Bookmark(title: "Wikipedia",   url: "https://www.wikipedia.org"),
+            ]
+        }
+    }
+
+    private func save() {
+        if let data = try? JSONEncoder().encode(bookmarks) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+
+    func isBookmarked(_ url: String) -> Bool {
+        bookmarks.contains { $0.url == url }
+    }
+
+    // 星ボタン用：登録済みなら外す、無ければ足す
+    func toggle(title: String, url: String) {
+        guard !url.isEmpty else { return }
+        if let idx = bookmarks.firstIndex(where: { $0.url == url }) {
+            bookmarks.remove(at: idx)
+        } else {
+            bookmarks.append(Bookmark(title: title.isEmpty ? url : title, url: url))
+        }
+    }
+
+    func addBlank() {
+        bookmarks.append(Bookmark(title: String(localized: "New bookmark"), url: "https://"))
+    }
+
+    func remove(_ bm: Bookmark) {
+        bookmarks.removeAll { $0.id == bm.id }
+    }
+
+    func moveUp(_ i: Int) {
+        guard i > 0, i < bookmarks.count else { return }
+        bookmarks.swapAt(i, i - 1)
+    }
+
+    func moveDown(_ i: Int) {
+        guard i >= 0, i < bookmarks.count - 1 else { return }
+        bookmarks.swapAt(i, i + 1)
+    }
+}
 
 // MARK: - WKWebView ラッパー
 
@@ -107,7 +159,7 @@ final class Tab: ObservableObject, Identifiable {
     @Published var canGoForward: Bool = false
     @Published var isLoading: Bool = false
     @Published var pageTitle: String = ""
-    @Published var isHome: Bool = true      // 新規タブページ（ロビー）を表示中か
+    @Published var isHome: Bool = true
 
     private var observers: [NSKeyValueObservation] = []
 
@@ -128,7 +180,6 @@ final class Tab: ObservableObject, Identifiable {
             Task { @MainActor in self?.pageTitle = wv.title ?? "" }
         })
 
-        // url が渡されたら読み込む。無ければロビーのまま
         if let url {
             urlText = url
             load()
@@ -136,13 +187,32 @@ final class Tab: ObservableObject, Identifiable {
     }
 
     func load() {
-        var text = urlText.trimmingCharacters(in: .whitespaces)
-        if !text.hasPrefix("http://") && !text.hasPrefix("https://") {
-            text = "https://" + text
-        }
-        guard let url = URL(string: text) else { return }
-        isHome = false          // web に出発するのでロビーを抜ける
+        guard let url = Tab.resolveURL(from: urlText) else { return }
+        isHome = false
         webView.load(URLRequest(url: url))
+    }
+
+    // 入力が URL か検索語かを見分ける。URL ならそのまま、そうでなければ Google 検索にする
+    static func resolveURL(from input: String) -> URL? {
+        let text = input.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return nil }
+
+        // すでに http/https が付いていれば URL として扱う
+        if text.hasPrefix("http://") || text.hasPrefix("https://") {
+            return URL(string: text)
+        }
+
+        // 空白が無く、ドットを含む（または localhost）ならホスト名とみなす
+        let looksLikeHost = !text.contains(" ")
+            && (text.contains(".") || text.hasPrefix("localhost"))
+        if looksLikeHost, let url = URL(string: "https://" + text) {
+            return url
+        }
+
+        // それ以外は Google 検索に流す
+        var comps = URLComponents(string: "https://www.google.com/search")!
+        comps.queryItems = [URLQueryItem(name: "q", value: text)]
+        return comps.url
     }
 
     func goBack()    { webView.goBack() }
@@ -163,7 +233,6 @@ final class TabManager: ObservableObject {
         tabs.first { $0.id == selectedID }
     }
 
-    // url を渡さなければ新規タブページ（ロビー）で開く
     func addTab(url: String? = nil) {
         let tab = Tab(url: url)
         tabs.append(tab)
@@ -192,7 +261,6 @@ extension Array {
 
 struct SkyscraperMark: View {
     var color: Color = Deco.gold
-
     var body: some View {
         VStack(spacing: 0) {
             Triangle().stroke(color, lineWidth: 1).frame(width: 3, height: 16)
@@ -202,7 +270,6 @@ struct SkyscraperMark: View {
             tier(74, 22)
         }
     }
-
     private func tier(_ w: CGFloat, _ h: CGFloat) -> some View {
         Rectangle().stroke(color, lineWidth: 1).frame(width: w, height: h)
     }
@@ -212,13 +279,12 @@ struct SkyscraperMark: View {
 
 struct NewTabPage: View {
     @ObservedObject var tab: Tab
+    @EnvironmentObject var store: BookmarkStore
 
     var body: some View {
         VStack(spacing: 22) {
             Spacer()
-
             SkyscraperMark()
-
             VStack(spacing: 6) {
                 Text("SKYSCRAPER")
                     .font(.system(size: 16, design: .serif))
@@ -230,9 +296,8 @@ struct NewTabPage: View {
                     .foregroundColor(Deco.faintGold)
             }
 
-            // クイックリンク
             HStack(spacing: 12) {
-                ForEach(defaultBookmarks) { bm in
+                ForEach(Array(store.bookmarks.prefix(5))) { bm in
                     Button {
                         tab.urlText = bm.url
                         tab.load()
@@ -264,7 +329,6 @@ struct VerticalTabStrip: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-
             HStack(spacing: 8) {
                 Image(systemName: "diamond")
                     .font(.system(size: 13))
@@ -339,7 +403,7 @@ struct DecoTabRow: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Text(tab.pageTitle.isEmpty ? "新規タブ" : tab.pageTitle)
+            (tab.pageTitle.isEmpty ? Text("New Tab") : Text(verbatim: tab.pageTitle))
                 .font(.system(size: 12, design: .serif))
                 .foregroundColor(isSelected ? Deco.cream : Deco.dimGold)
                 .lineLimit(1)
@@ -376,7 +440,6 @@ struct NavButton: View {
     let system: String
     let disabled: Bool
     let action: () -> Void
-
     var body: some View {
         Button(action: action) {
             Image(systemName: system)
@@ -393,6 +456,8 @@ struct NavButton: View {
 
 struct BookmarkBar: View {
     @ObservedObject var tab: Tab
+    @EnvironmentObject var store: BookmarkStore
+    @State private var showingManager = false
 
     var body: some View {
         HStack(spacing: 2) {
@@ -401,7 +466,7 @@ struct BookmarkBar: View {
                 .foregroundColor(Deco.faintGold)
                 .padding(.trailing, 6)
 
-            ForEach(defaultBookmarks) { bm in
+            ForEach(store.bookmarks) { bm in
                 Button {
                     tab.urlText = bm.url
                     tab.load()
@@ -409,13 +474,27 @@ struct BookmarkBar: View {
                     Text(bm.title)
                         .font(.system(size: 11, design: .serif))
                         .foregroundColor(Deco.dimGold)
+                        .lineLimit(1)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                 }
                 .buttonStyle(.plain)
+                .contextMenu {
+                    Button("Delete", role: .destructive) { store.remove(bm) }
+                }
             }
 
             Spacer()
+
+            Button {
+                showingManager = true
+            } label: {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 11))
+                    .foregroundColor(Deco.dimGold)
+            }
+            .buttonStyle(.plain)
+            .help("Edit bookmarks")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 4)
@@ -423,6 +502,109 @@ struct BookmarkBar: View {
         .overlay(alignment: .bottom) {
             Rectangle().fill(Deco.faintGold).frame(height: 1)
         }
+        .sheet(isPresented: $showingManager) {
+            BookmarkManager()
+                .environmentObject(store)
+        }
+    }
+}
+
+// MARK: - ブックマーク管理シート
+
+struct BookmarkManager: View {
+    @EnvironmentObject var store: BookmarkStore
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // ヘッダー
+            HStack {
+                Text("Bookmarks")
+                    .font(.system(size: 15, design: .serif))
+                    .tracking(2)
+                    .foregroundColor(Deco.cream)
+                Spacer()
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12))
+                        .foregroundColor(Deco.dimGold)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(16)
+
+            Zigzag(teeth: 20)
+                .stroke(Deco.gold, lineWidth: 1)
+                .frame(height: 5)
+                .padding(.horizontal, 16)
+
+            // 一覧
+            ScrollView {
+                VStack(spacing: 8) {
+                    ForEach($store.bookmarks) { $bm in
+                        let idx = store.bookmarks.firstIndex(where: { $0.id == bm.id }) ?? 0
+                        HStack(spacing: 8) {
+                            VStack(spacing: 2) {
+                                Button { store.moveUp(idx) } label: {
+                                    Image(systemName: "chevron.up").font(.system(size: 9))
+                                        .foregroundColor(idx == 0 ? Deco.faintGold : Deco.gold)
+                                }
+                                .buttonStyle(.plain).disabled(idx == 0)
+                                Button { store.moveDown(idx) } label: {
+                                    Image(systemName: "chevron.down").font(.system(size: 9))
+                                        .foregroundColor(idx == store.bookmarks.count - 1 ? Deco.faintGold : Deco.gold)
+                                }
+                                .buttonStyle(.plain).disabled(idx == store.bookmarks.count - 1)
+                            }
+
+                            TextField("Name", text: $bm.title)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 12, design: .serif))
+                                .foregroundColor(Deco.cream)
+                                .padding(.horizontal, 10).padding(.vertical, 6)
+                                .background(Deco.field)
+                                .overlay(Rectangle().stroke(Deco.faintGold, lineWidth: 0.5))
+                                .frame(width: 130)
+
+                            TextField("URL", text: $bm.url)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 12, design: .serif))
+                                .foregroundColor(Deco.gold)
+                                .padding(.horizontal, 10).padding(.vertical, 6)
+                                .background(Deco.field)
+                                .overlay(Rectangle().stroke(Deco.faintGold, lineWidth: 0.5))
+
+                            Button { store.remove(bm) } label: {
+                                Image(systemName: "trash").font(.system(size: 11))
+                                    .foregroundColor(Deco.dimGold)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .padding(16)
+            }
+
+            // フッター
+            HStack {
+                Button { store.addBlank() } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "plus").font(.system(size: 11))
+                        Text("Add").font(.system(size: 12, design: .serif)).tracking(1)
+                    }
+                    .foregroundColor(Deco.gold)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .overlay(Hexagon(inset: 7).stroke(Deco.faintGold, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                Spacer()
+            }
+            .padding(16)
+        }
+        .frame(minWidth: 520, minHeight: 420)
+        .background(Deco.ink)
     }
 }
 
@@ -430,6 +612,7 @@ struct BookmarkBar: View {
 
 struct BrowserPane: View {
     @ObservedObject var tab: Tab
+    @EnvironmentObject var store: BookmarkStore
 
     var body: some View {
         VStack(spacing: 0) {
@@ -439,7 +622,7 @@ struct BrowserPane: View {
                 NavButton(system: "chevron.right", disabled: !tab.canGoForward) { tab.goForward() }
                 NavButton(system: "arrow.clockwise", disabled: false)           { tab.reload() }
 
-                TextField("URL を入力", text: $tab.urlText, onCommit: { tab.load() })
+                TextField("Search or enter address", text: $tab.urlText, onCommit: { tab.load() })
                     .textFieldStyle(.plain)
                     .font(.system(size: 12, design: .serif))
                     .foregroundColor(Deco.gold)
@@ -447,6 +630,18 @@ struct BrowserPane: View {
                     .padding(.vertical, 7)
                     .background(Hexagon(inset: 6).fill(Deco.field))
                     .overlay(Hexagon(inset: 6).stroke(Deco.faintGold, lineWidth: 1))
+
+                // 星ボタン：現在のページを登録／解除
+                Button {
+                    store.toggle(title: tab.pageTitle, url: tab.urlText)
+                } label: {
+                    Image(systemName: store.isBookmarked(tab.urlText) ? "star.fill" : "star")
+                        .font(.system(size: 13))
+                        .foregroundColor(tab.isHome ? Deco.faintGold : Deco.gold)
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .disabled(tab.isHome)
 
                 if tab.isLoading {
                     ProgressView()
@@ -476,6 +671,7 @@ struct BrowserPane: View {
 
 struct ContentView: View {
     @StateObject private var manager = TabManager()
+    @StateObject private var bookmarks = BookmarkStore()
 
     var body: some View {
         HStack(spacing: 0) {
@@ -490,6 +686,8 @@ struct ContentView: View {
         }
         .frame(minWidth: 900, minHeight: 600)
         .background(Deco.ink)
+        .environmentObject(bookmarks)
+        .preferredColorScheme(.dark)
     }
 }
 
