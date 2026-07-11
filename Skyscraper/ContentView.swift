@@ -187,6 +187,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         // トラックパッドの2本指スワイプで戻る／進む
         webView.allowsBackForwardNavigationGestures = true
         webView.navigationDelegate = self
+        webView.uiDelegate = self
 
         observers.append(webView.observe(\.url, options: [.new]) { [weak self] wv, _ in
             Task { @MainActor in if let u = wv.url { self?.urlText = u.absoluteString } }
@@ -278,6 +279,92 @@ extension Tab: WKNavigationDelegate {
             return
         }
         decisionHandler(.allow)
+    }
+
+    // ブラウザが表示できない応答（PDF以外のファイルなど）はダウンロードに回す
+    nonisolated func webView(_ webView: WKWebView,
+                             decidePolicyFor response: WKNavigationResponse,
+                             decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        decisionHandler(response.canShowMIMEType ? .allow : .download)
+    }
+
+    // ナビゲーションがダウンロードに化けた場合
+    nonisolated func webView(_ webView: WKWebView,
+                             navigationAction: WKNavigationAction,
+                             didBecome download: WKDownload) {
+        Task { @MainActor in download.delegate = self }
+    }
+
+    nonisolated func webView(_ webView: WKWebView,
+                             navigationResponse: WKNavigationResponse,
+                             didBecome download: WKDownload) {
+        Task { @MainActor in download.delegate = self }
+    }
+}
+
+// MARK: - ダウンロードの受け取り
+
+extension Tab: WKDownloadDelegate {
+    nonisolated func download(_ download: WKDownload,
+                             decideDestinationUsing response: URLResponse,
+                             suggestedFilename: String,
+                             completionHandler: @escaping (URL?) -> Void) {
+        Task { @MainActor in
+            // 保存パネルを出して、保存先はユーザーに決めてもらう
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = suggestedFilename
+            panel.canCreateDirectories = true
+            panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory,
+                                                          in: .userDomainMask).first
+
+            let result = await panel.begin()
+            guard result == .OK, let url = panel.url else {
+                completionHandler(nil)   // キャンセル
+                return
+            }
+            // 同名ファイルがあれば退かす（WebKit は上書きしてくれない）
+            try? FileManager.default.removeItem(at: url)
+            completionHandler(url)
+        }
+    }
+
+    nonisolated func download(_ download: WKDownload,
+                             didFailWithError error: Error,
+                             resumeData: Data?) {
+        Task { @MainActor in
+            print("Download failed: \(error.localizedDescription)")
+        }
+    }
+}
+
+// MARK: - UI の仓役（target="_blank" などの新規ウィンドウ要求をタブで受ける）
+
+extension Tab: WKUIDelegate {
+    nonisolated func webView(_ webView: WKWebView,
+                             createWebViewWith configuration: WKWebViewConfiguration,
+                             for navigationAction: WKNavigationAction,
+                             windowFeatures: WKWindowFeatures) -> WKWebView? {
+        if let url = navigationAction.request.url?.absoluteString {
+            Task { @MainActor in self.openInNewTab?(url) }
+        }
+        return nil   // 新しいウィンドウは作らず、タブで開く
+    }
+
+    // macOS ではこれを自分で実装しないと、ファイル選択パネルが出ない
+    // （iOS は自動だが、Mac はアプリ側の責任）
+    nonisolated func webView(_ webView: WKWebView,
+                             runOpenPanelWith parameters: WKOpenPanelParameters,
+                             initiatedByFrame frame: WKFrameInfo,
+                             completionHandler: @escaping ([URL]?) -> Void) {
+        Task { @MainActor in
+            let panel = NSOpenPanel()
+            panel.canChooseFiles = true
+            panel.canChooseDirectories = parameters.allowsDirectories
+            panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+
+            let result = await panel.begin()
+            completionHandler(result == .OK ? panel.urls : nil)
+        }
     }
 }
 
@@ -880,15 +967,13 @@ struct BrowserPane: View {
             BookmarkBar(tab: tab, manager: manager)
 
             // ── 中身：ロビー or Web ──
-            // タブを舞台に上げるのは「選択中」か「まだ読み込みを終えてない」場合だけ。
-            // 読み込みが終わった裏タブは降ろして休ませる（メモリと電力の節約）
+            // 全タブの WebView を常に画面に置いておき、選択中の一枚だけを見せる。
+            // 一度でも画面から外すと WebKit がページを読み直してしまうので、降ろさない
             ZStack {
                 ForEach(manager.tabs) { t in
-                    if shouldStage(t) {
-                        WebView(webView: t.webView)
-                            .opacity(t.id == tab.id && !t.isHome ? 1 : 0)
-                            .allowsHitTesting(t.id == tab.id && !t.isHome)
-                    }
+                    WebView(webView: t.webView)
+                        .opacity(t.id == tab.id && !t.isHome ? 1 : 0)
+                        .allowsHitTesting(t.id == tab.id && !t.isHome)
                 }
                 if tab.isHome {
                     NewTabPage(tab: tab)
@@ -899,13 +984,6 @@ struct BrowserPane: View {
         .onChange(of: tab.addressBarFocusTrigger) { _, _ in
             addressFocused = true
         }
-    }
-
-    // このタブを画面に置いておく必要があるか
-    private func shouldStage(_ t: Tab) -> Bool {
-        if t.id == tab.id { return true }        // 選択中は当然必要
-        if t.isHome { return false }             // ロビーは WebView 不要
-        return !t.hasLoadedOnce                  // 読み込み中の間だけ置いておく
     }
 }
 
