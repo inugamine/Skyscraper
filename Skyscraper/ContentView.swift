@@ -160,6 +160,7 @@ final class Tab: ObservableObject, Identifiable {
     @Published var isLoading: Bool = false
     @Published var pageTitle: String = ""
     @Published var isHome: Bool = true
+    @Published var addressBarFocusTrigger: Int = 0
 
     private var observers: [NSKeyValueObservation] = []
 
@@ -218,6 +219,17 @@ final class Tab: ObservableObject, Identifiable {
     func goBack()    { webView.goBack() }
     func goForward() { webView.goForward() }
     func reload()    { webView.reload() }
+
+    // アドレスバーにフォーカスを移す合図を送る
+    func focusAddressBar() { addressBarFocusTrigger += 1 }
+
+    // ズーム（ページの拡大率を 50%〜300% の範囲で変える）
+    func zoomIn()    { setZoom(webView.pageZoom + 0.1) }
+    func zoomOut()   { setZoom(webView.pageZoom - 0.1) }
+    func zoomReset() { setZoom(1.0) }
+    private func setZoom(_ value: CGFloat) {
+        webView.pageZoom = min(max(value, 0.5), 3.0)
+    }
 }
 
 // MARK: - タブ全体を束ねる管理役
@@ -226,6 +238,9 @@ final class Tab: ObservableObject, Identifiable {
 final class TabManager: ObservableObject {
     @Published var tabs: [Tab] = []
     @Published var selectedID: UUID?
+
+    // 閉じたタブの復元用スタック（URL。空文字はロビー）
+    private var recentlyClosed: [String] = []
 
     init() { addTab() }
 
@@ -241,6 +256,10 @@ final class TabManager: ObservableObject {
 
     func closeTab(_ tab: Tab) {
         guard let idx = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        // 復元用に、閉じるタブの URL を控える（ロビーなら空文字）。控えは最大20件
+        let restoreURL = tab.isHome ? "" : (tab.webView.url?.absoluteString ?? tab.urlText)
+        recentlyClosed.append(restoreURL)
+        if recentlyClosed.count > 20 { recentlyClosed.removeFirst() }
         tabs.remove(at: idx)
         if selectedID == tab.id {
             selectedID = tabs[safe: idx]?.id ?? tabs.last?.id
@@ -249,6 +268,22 @@ final class TabManager: ObservableObject {
     }
 
     func select(_ tab: Tab) { selectedID = tab.id }
+
+    func closeSelected() {
+        if let tab = selectedTab { closeTab(tab) }
+    }
+
+    // 直近に閉じたタブを開き直す
+    func reopenClosed() {
+        guard let url = recentlyClosed.popLast() else { return }
+        addTab(url: url.isEmpty ? nil : url)
+    }
+
+    // 番号でタブを選ぶ（0始まり）
+    func selectTab(at index: Int) {
+        guard tabs.indices.contains(index) else { return }
+        selectedID = tabs[index].id
+    }
 }
 
 extension Array {
@@ -613,6 +648,7 @@ struct BookmarkManager: View {
 struct BrowserPane: View {
     @ObservedObject var tab: Tab
     @EnvironmentObject var store: BookmarkStore
+    @FocusState private var addressFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -624,6 +660,7 @@ struct BrowserPane: View {
 
                 TextField("Search or enter address", text: $tab.urlText, onCommit: { tab.load() })
                     .textFieldStyle(.plain)
+                    .focused($addressFocused)
                     .font(.system(size: 12, design: .serif))
                     .foregroundColor(Deco.gold)
                     .padding(.horizontal, 14)
@@ -664,14 +701,17 @@ struct BrowserPane: View {
             }
         }
         .navigationTitle(tab.pageTitle.isEmpty ? "Skyscraper" : tab.pageTitle)
+        .onChange(of: tab.addressBarFocusTrigger) { _, _ in
+            addressFocused = true
+        }
     }
 }
 
 // MARK: - 全体
 
 struct ContentView: View {
-    @StateObject private var manager = TabManager()
-    @StateObject private var bookmarks = BookmarkStore()
+    @ObservedObject var manager: TabManager
+    @ObservedObject var bookmarks: BookmarkStore
 
     var body: some View {
         HStack(spacing: 0) {
@@ -692,5 +732,5 @@ struct ContentView: View {
 }
 
 #Preview {
-    ContentView()
+    ContentView(manager: TabManager(), bookmarks: BookmarkStore())
 }
