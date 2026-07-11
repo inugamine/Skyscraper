@@ -94,9 +94,6 @@ final class BookmarkStore: ObservableObject {
         } else {
             bookmarks = [
                 Bookmark(title: "Apple",       url: "https://www.apple.com"),
-                Bookmark(title: "GitHub",      url: "https://github.com"),
-                Bookmark(title: "Hacker News", url: "https://news.ycombinator.com"),
-                Bookmark(title: "Wikipedia",   url: "https://www.wikipedia.org"),
             ]
         }
     }
@@ -165,7 +162,7 @@ struct WebView: NSViewRepresentable {
 // MARK: - タブ一枚ぶんの状態
 
 @MainActor
-final class Tab: ObservableObject, Identifiable {
+final class Tab: NSObject, ObservableObject, Identifiable {
     let id = UUID()
     let webView = WKWebView()
 
@@ -176,10 +173,21 @@ final class Tab: ObservableObject, Identifiable {
     @Published var pageTitle: String = ""
     @Published var isHome: Bool = true
     @Published var addressBarFocusTrigger: Int = 0
+    // 一度でも読み込みを完了したか（完了したタブは休ませてよい）
+    @Published var hasLoadedOnce: Bool = false
+
+    // ⌘クリックされたリンクを新規タブで開くための連絡先（TabManager が入れる）
+    var openInNewTab: ((String) -> Void)?
 
     private var observers: [NSKeyValueObservation] = []
 
     init(url: String? = nil) {
+        super.init()
+
+        // トラックパッドの2本指スワイプで戻る／進む
+        webView.allowsBackForwardNavigationGestures = true
+        webView.navigationDelegate = self
+
         observers.append(webView.observe(\.url, options: [.new]) { [weak self] wv, _ in
             Task { @MainActor in if let u = wv.url { self?.urlText = u.absoluteString } }
         })
@@ -190,7 +198,11 @@ final class Tab: ObservableObject, Identifiable {
             Task { @MainActor in self?.canGoForward = wv.canGoForward }
         })
         observers.append(webView.observe(\.isLoading, options: [.new]) { [weak self] wv, _ in
-            Task { @MainActor in self?.isLoading = wv.isLoading }
+            Task { @MainActor in
+                self?.isLoading = wv.isLoading
+                // 読み込みが終わったら、以降は休ませてよいと印を付ける
+                if !wv.isLoading { self?.hasLoadedOnce = true }
+            }
         })
         observers.append(webView.observe(\.title, options: [.new]) { [weak self] wv, _ in
             Task { @MainActor in self?.pageTitle = wv.title ?? "" }
@@ -205,6 +217,7 @@ final class Tab: ObservableObject, Identifiable {
     func load() {
         guard let url = Tab.resolveURL(from: urlText) else { return }
         isHome = false
+        hasLoadedOnce = false   // 新しく読み込むので、また舞台に上げる
         webView.load(URLRequest(url: url))
     }
 
@@ -247,6 +260,27 @@ final class Tab: ObservableObject, Identifiable {
     }
 }
 
+// MARK: - ナビゲーションの判断役（⌘クリックを新規タブへ回す）
+
+extension Tab: WKNavigationDelegate {
+    nonisolated func webView(_ webView: WKWebView,
+                             decidePolicyFor action: WKNavigationAction,
+                             decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        // リンクを踏んだ操作で、⌘が押されているか
+        let isLinkClick = action.navigationType == .linkActivated
+        let commandHeld = action.modifierFlags.contains(.command)
+        let url = action.request.url?.absoluteString
+
+        if isLinkClick, commandHeld, let url {
+            // このタブでは開かず、新規タブへ回す
+            decisionHandler(.cancel)
+            Task { @MainActor in self.openInNewTab?(url) }
+            return
+        }
+        decisionHandler(.allow)
+    }
+}
+
 // MARK: - タブ全体を束ねる管理役
 
 @MainActor
@@ -264,9 +298,24 @@ final class TabManager: ObservableObject {
     }
 
     func addTab(url: String? = nil) {
-        let tab = Tab(url: url)
+        let tab = makeTab(url: url)
         tabs.append(tab)
         selectedID = tab.id
+    }
+
+    // ⌘クリック用：裏で開いて、今のタブに留まる
+    func addTabInBackground(url: String) {
+        let tab = makeTab(url: url)
+        tabs.append(tab)
+    }
+
+    private func makeTab(url: String?) -> Tab {
+        let tab = Tab(url: url)
+        // ⌘クリックされたら、この管理人に連絡が来るようにする
+        tab.openInNewTab = { [weak self] link in
+            self?.addTabInBackground(url: link)
+        }
+        return tab
     }
 
     func closeTab(_ tab: Tab) {
@@ -506,8 +555,11 @@ struct NavButton: View {
 
 struct BookmarkBar: View {
     @ObservedObject var tab: Tab
+    @ObservedObject var manager: TabManager
     @EnvironmentObject var store: BookmarkStore
     @State private var showingManager = false
+    // 挿入位置の金の縦バー。信号が途切えたら自動で消える（人感センサー方式）
+    @StateObject private var indicatorModel = DropIndicatorModel()
 
     var body: some View {
         HStack(spacing: 2) {
@@ -517,7 +569,7 @@ struct BookmarkBar: View {
                 .padding(.trailing, 6)
 
             ForEach(store.bookmarks) { bm in
-                BookmarkBarItem(bm: bm, tab: tab)
+                BookmarkBarItem(bm: bm, tab: tab, manager: manager, indicatorModel: indicatorModel)
             }
 
             Spacer()
@@ -547,19 +599,64 @@ struct BookmarkBar: View {
 
 enum DropSide { case before, after }
 
-// ブックマークバーの一項目（左右判定付きドラッグ＆ドロップ対応）
+// どの項目のどっち側にバーを立てるか
+struct DropIndicator: Equatable {
+    let id: UUID
+    let side: DropSide
+}
+
+// 挿入バーの自動消灯モデル。
+// 「立てろ」の信号（dropUpdated）が来続ける間は点いたまま、
+// 信号が途絶えたら0.25秒で勝手に消える。「消せ」の信号には一切頼らない。
+@MainActor
+final class DropIndicatorModel: ObservableObject {
+    @Published var indicator: DropIndicator? = nil
+    private var generation = 0
+
+    // バーを立てる／立て直す。呼ばれるたびに寿命が延長される
+    func show(_ new: DropIndicator) {
+        if indicator != new { indicator = new }
+        generation += 1
+        let current = generation
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard let self else { return }
+            // 寝てる間に新しい信号が来ていたら、この消灯は無効
+            if self.generation == current {
+                self.indicator = nil
+            }
+        }
+    }
+
+    // 即時消灯（ドロップ成立時など、確実に消せる場面用）
+    func clear() {
+        generation += 1
+        indicator = nil
+    }
+}
+
+// ブックマークバーの一項目（左右判定付きドラッグ＆ドロップ）
 struct BookmarkBarItem: View {
     let bm: Bookmark
     @ObservedObject var tab: Tab
+    @ObservedObject var manager: TabManager
     @EnvironmentObject var store: BookmarkStore
+    @ObservedObject var indicatorModel: DropIndicatorModel
 
-    @State private var side: DropSide? = nil
     @State private var itemWidth: CGFloat = 1
+
+    private var showBefore: Bool { indicatorModel.indicator == DropIndicator(id: bm.id, side: .before) }
+    private var showAfter:  Bool { indicatorModel.indicator == DropIndicator(id: bm.id, side: .after) }
 
     var body: some View {
         Button {
-            tab.urlText = bm.url
-            tab.load()
+            // ⌘を押しながらなら、裏の新規タブで開く
+            if NSEvent.modifierFlags.contains(.command) {
+                manager.addTabInBackground(url: bm.url)
+            } else {
+                tab.urlText = bm.url
+                tab.load()
+            }
         } label: {
             Text(bm.title)
                 .font(.system(size: 11, design: .serif))
@@ -580,18 +677,18 @@ struct BookmarkBarItem: View {
                     .onChange(of: geo.size.width) { _, w in itemWidth = w }
             }
         )
-        // ドラッグの持ち出し（項目のIDを運ぶ）
         .onDrag { NSItemProvider(object: bm.id.uuidString as NSString) }
-        // 落とし先。左右はカーソル位置で判定し、金の縦バーで示す
-        .onDrop(of: [.text], delegate: BookmarkDropDelegate(bm: bm, store: store, width: itemWidth, side: $side))
+        .onDrop(of: [.text], delegate: BookmarkDropDelegate(
+            bm: bm, store: store, width: itemWidth, indicatorModel: indicatorModel
+        ))
         .overlay(alignment: .leading) {
-            if side == .before {
+            if showBefore {
                 Rectangle().fill(Deco.gold).frame(width: 2, height: 18)
                     .offset(x: -1).allowsHitTesting(false)
             }
         }
         .overlay(alignment: .trailing) {
-            if side == .after {
+            if showAfter {
                 Rectangle().fill(Deco.gold).frame(width: 2, height: 18)
                     .offset(x: 1).allowsHitTesting(false)
             }
@@ -599,26 +696,28 @@ struct BookmarkBarItem: View {
     }
 }
 
-// ブックマークの左右判定ドロップを扱う
+// 各項目のドロップ（左半分＝前、右半分＝後ろ）
 struct BookmarkDropDelegate: DropDelegate {
     let bm: Bookmark
     let store: BookmarkStore
     let width: CGFloat
-    @Binding var side: DropSide?
+    let indicatorModel: DropIndicatorModel
+
+    private func side(_ info: DropInfo) -> DropSide {
+        info.location.x < width / 2 ? .before : .after
+    }
 
     func dropEntered(info: DropInfo) {
-        side = info.location.x < width / 2 ? .before : .after
+        indicatorModel.show(DropIndicator(id: bm.id, side: side(info)))
     }
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        side = info.location.x < width / 2 ? .before : .after
+        // カーソルが乗っている間、連続で呼ばれ続ける＝バーの寿命が延び続ける
+        indicatorModel.show(DropIndicator(id: bm.id, side: side(info)))
         return DropProposal(operation: .move)
     }
-    func dropExited(info: DropInfo) {
-        side = nil
-    }
     func performDrop(info: DropInfo) -> Bool {
-        let after = info.location.x >= width / 2
-        side = nil
+        let after = side(info) == .after
+        indicatorModel.clear()
         guard let provider = info.itemProviders(for: [.text]).first else { return false }
         provider.loadObject(ofClass: NSString.self) { obj, _ in
             guard let idString = obj as? String else { return }
@@ -733,6 +832,7 @@ struct BookmarkManager: View {
 
 struct BrowserPane: View {
     @ObservedObject var tab: Tab
+    @ObservedObject var manager: TabManager
     @EnvironmentObject var store: BookmarkStore
     @FocusState private var addressFocused: Bool
 
@@ -777,19 +877,35 @@ struct BrowserPane: View {
             .background(Deco.panel)
 
             // ── ブックマークバー ──
-            BookmarkBar(tab: tab)
+            BookmarkBar(tab: tab, manager: manager)
 
             // ── 中身：ロビー or Web ──
-            if tab.isHome {
-                NewTabPage(tab: tab)
-            } else {
-                WebView(webView: tab.webView)
+            // タブを舞台に上げるのは「選択中」か「まだ読み込みを終えてない」場合だけ。
+            // 読み込みが終わった裏タブは降ろして休ませる（メモリと電力の節約）
+            ZStack {
+                ForEach(manager.tabs) { t in
+                    if shouldStage(t) {
+                        WebView(webView: t.webView)
+                            .opacity(t.id == tab.id && !t.isHome ? 1 : 0)
+                            .allowsHitTesting(t.id == tab.id && !t.isHome)
+                    }
+                }
+                if tab.isHome {
+                    NewTabPage(tab: tab)
+                }
             }
         }
         .navigationTitle(tab.pageTitle.isEmpty ? "Skyscraper" : tab.pageTitle)
         .onChange(of: tab.addressBarFocusTrigger) { _, _ in
             addressFocused = true
         }
+    }
+
+    // このタブを画面に置いておく必要があるか
+    private func shouldStage(_ t: Tab) -> Bool {
+        if t.id == tab.id { return true }        // 選択中は当然必要
+        if t.isHome { return false }             // ロビーは WebView 不要
+        return !t.hasLoadedOnce                  // 読み込み中の間だけ置いておく
     }
 }
 
@@ -804,8 +920,7 @@ struct ContentView: View {
             VerticalTabStrip(manager: manager)
 
             if let tab = manager.selectedTab {
-                BrowserPane(tab: tab)
-                    .id(tab.id)
+                BrowserPane(tab: tab, manager: manager)
             } else {
                 Spacer()
             }
