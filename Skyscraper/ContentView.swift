@@ -8,6 +8,7 @@
 import SwiftUI
 import WebKit
 import Combine
+import UniformTypeIdentifiers
 
 // MARK: - アール・デコ配色
 
@@ -136,6 +137,20 @@ final class BookmarkStore: ObservableObject {
     func moveDown(_ i: Int) {
         guard i >= 0, i < bookmarks.count - 1 else { return }
         bookmarks.swapAt(i, i + 1)
+    }
+
+    // ドラッグでの並べ替え：draggedID の項目を targetID の前または後ろに挿す
+    func move(draggedID: String, target targetID: UUID, after: Bool) {
+        guard draggedID != targetID.uuidString else { return }
+        var arr = bookmarks
+        guard let from = arr.firstIndex(where: { $0.id.uuidString == draggedID }) else { return }
+        let moved = arr.remove(at: from)
+        if let base = arr.firstIndex(where: { $0.id == targetID }) {
+            arr.insert(moved, at: after ? base + 1 : base)
+        } else {
+            arr.append(moved)
+        }
+        bookmarks = arr
     }
 }
 
@@ -502,21 +517,7 @@ struct BookmarkBar: View {
                 .padding(.trailing, 6)
 
             ForEach(store.bookmarks) { bm in
-                Button {
-                    tab.urlText = bm.url
-                    tab.load()
-                } label: {
-                    Text(bm.title)
-                        .font(.system(size: 11, design: .serif))
-                        .foregroundColor(Deco.dimGold)
-                        .lineLimit(1)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                }
-                .buttonStyle(.plain)
-                .contextMenu {
-                    Button("Delete", role: .destructive) { store.remove(bm) }
-                }
+                BookmarkBarItem(bm: bm, tab: tab)
             }
 
             Spacer()
@@ -541,6 +542,91 @@ struct BookmarkBar: View {
             BookmarkManager()
                 .environmentObject(store)
         }
+    }
+}
+
+enum DropSide { case before, after }
+
+// ブックマークバーの一項目（左右判定付きドラッグ＆ドロップ対応）
+struct BookmarkBarItem: View {
+    let bm: Bookmark
+    @ObservedObject var tab: Tab
+    @EnvironmentObject var store: BookmarkStore
+
+    @State private var side: DropSide? = nil
+    @State private var itemWidth: CGFloat = 1
+
+    var body: some View {
+        Button {
+            tab.urlText = bm.url
+            tab.load()
+        } label: {
+            Text(bm.title)
+                .font(.system(size: 11, design: .serif))
+                .foregroundColor(Deco.dimGold)
+                .lineLimit(1)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button("Delete", role: .destructive) { store.remove(bm) }
+        }
+        // 幅を測っておく（左右判定に使う）
+        .background(
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { itemWidth = geo.size.width }
+                    .onChange(of: geo.size.width) { _, w in itemWidth = w }
+            }
+        )
+        // ドラッグの持ち出し（項目のIDを運ぶ）
+        .onDrag { NSItemProvider(object: bm.id.uuidString as NSString) }
+        // 落とし先。左右はカーソル位置で判定し、金の縦バーで示す
+        .onDrop(of: [.text], delegate: BookmarkDropDelegate(bm: bm, store: store, width: itemWidth, side: $side))
+        .overlay(alignment: .leading) {
+            if side == .before {
+                Rectangle().fill(Deco.gold).frame(width: 2, height: 18)
+                    .offset(x: -1).allowsHitTesting(false)
+            }
+        }
+        .overlay(alignment: .trailing) {
+            if side == .after {
+                Rectangle().fill(Deco.gold).frame(width: 2, height: 18)
+                    .offset(x: 1).allowsHitTesting(false)
+            }
+        }
+    }
+}
+
+// ブックマークの左右判定ドロップを扱う
+struct BookmarkDropDelegate: DropDelegate {
+    let bm: Bookmark
+    let store: BookmarkStore
+    let width: CGFloat
+    @Binding var side: DropSide?
+
+    func dropEntered(info: DropInfo) {
+        side = info.location.x < width / 2 ? .before : .after
+    }
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        side = info.location.x < width / 2 ? .before : .after
+        return DropProposal(operation: .move)
+    }
+    func dropExited(info: DropInfo) {
+        side = nil
+    }
+    func performDrop(info: DropInfo) -> Bool {
+        let after = info.location.x >= width / 2
+        side = nil
+        guard let provider = info.itemProviders(for: [.text]).first else { return false }
+        provider.loadObject(ofClass: NSString.self) { obj, _ in
+            guard let idString = obj as? String else { return }
+            Task { @MainActor in
+                store.move(draggedID: idString, target: bm.id, after: after)
+            }
+        }
+        return true
     }
 }
 
