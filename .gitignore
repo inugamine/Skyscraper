@@ -1,0 +1,42 @@
+# ─────────────────────────────────
+# ビルド生成物（リリースのたびに作り直されるもの）
+# ─────────────────────────────────
+dist/
+build/
+DerivedData/
+*.dmg
+*.zip
+
+# ─────────────────────────────────
+# Xcode
+# ─────────────────────────────────
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+xcuserdata/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.swiftpm/
+.build/
+Packages/
+
+# ─────────────────────────────────
+# macOS
+# ─────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+# ─────────────────────────────────
+# 追跡するもの（念のため明示）
+# ─────────────────────────────────
+# release.sh          … リリース手順そのもの。環境が飛んでも復元できるように残す
+# dmg-background.png  … dmg の背景。ソース素材として残す
+# appcast.xml         … 自動更新の台帳。GitHub から参照されるので必須
