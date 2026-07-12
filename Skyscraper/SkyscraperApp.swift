@@ -12,12 +12,18 @@ struct SkyscraperApp: App {
     // 管理人はアプリの最上位に置き、画面からもメニューからも使えるようにする
     @StateObject private var manager = TabManager()
     @StateObject private var bookmarks = BookmarkStore()
+    @StateObject private var updater = Updater()
 
     var body: some Scene {
         WindowGroup {
             ContentView(manager: manager, bookmarks: bookmarks)
         }
         .commands {
+            // アプリメニュー：「Skyscraper について」の下にアップデート確認を置く
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") { updater.checkForUpdates() }
+                    .disabled(!updater.canCheckForUpdates)
+            }
             // File メニュー：タブの新規・クローズ・復元・アドレスバー
             CommandGroup(replacing: .newItem) {
                 Button("New Tab") { manager.addTab() }

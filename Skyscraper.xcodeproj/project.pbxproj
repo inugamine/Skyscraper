@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		F1F66E5230033734004BBCE1 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = F1F66E5130033734004BBCE1 /* Sparkle */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		F15697DB3001792F00C19AB2 /* Skyscraper.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Skyscraper.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -23,6 +27,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F1F66E5230033734004BBCE1 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -65,6 +70,7 @@
 			);
 			name = Skyscraper;
 			packageProductDependencies = (
+				F1F66E5130033734004BBCE1 /* Sparkle */,
 			);
 			productName = Skyscraper;
 			productReference = F15697DB3001792F00C19AB2 /* Skyscraper.app */;
@@ -95,6 +101,9 @@
 			);
 			mainGroup = F15697D23001792F00C19AB2;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				F1F66E5030033734004BBCE1 /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = F15697DC3001792F00C19AB2 /* Products */;
 			projectDirPath = "";
@@ -263,6 +272,9 @@
 				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_SUEnableInstallerLauncherService = YES;
+				INFOPLIST_KEY_SUFeedURL = "https://raw.githubusercontent.com/inugamine/Skyscraper/master/appcast.xml";
+				INFOPLIST_KEY_SUPublicEDKey = "Ws0ahm+WarB3Ih6WwGgDHTxmPtsxn/R8blQY53MixXQ=";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -297,6 +309,9 @@
 				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_SUEnableInstallerLauncherService = YES;
+				INFOPLIST_KEY_SUFeedURL = "https://raw.githubusercontent.com/inugamine/Skyscraper/master/appcast.xml";
+				INFOPLIST_KEY_SUPublicEDKey = "Ws0ahm+WarB3Ih6WwGgDHTxmPtsxn/R8blQY53MixXQ=";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -336,6 +351,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		F1F66E5030033734004BBCE1 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.9.4;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		F1F66E5130033734004BBCE1 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F1F66E5030033734004BBCE1 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = F15697D33001792F00C19AB2 /* Project object */;
 }

@@ -69,6 +69,22 @@
         }
       }
     },
+    "Check for Updates…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check for Updates…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アップデートを確認…"
+          }
+        }
+      }
+    },
     "Close Tab" : {
       "localizations" : {
         "en" : {
