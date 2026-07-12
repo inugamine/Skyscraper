@@ -87,14 +87,12 @@ final class BookmarkStore: ObservableObject {
     private let key = "skyscraper.bookmarks.v1"
 
     init() {
-        // 保存済みがあれば読み込む。無ければ初期セット
+        // 保存済みがあれば読み込む。無ければ空から始める
         if let data = UserDefaults.standard.data(forKey: key),
            let decoded = try? JSONDecoder().decode([Bookmark].self, from: data) {
             bookmarks = decoded
         } else {
-            bookmarks = [
-                Bookmark(title: "Apple",       url: "https://www.apple.com"),
-            ]
+            bookmarks = []
         }
     }
 
