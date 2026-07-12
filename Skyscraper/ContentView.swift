@@ -159,6 +159,19 @@ struct WebView: NSViewRepresentable {
 
 // MARK: - タブ一枚ぶんの状態
 
+private final class WeakScriptMessageHandler: NSObject, WKScriptMessageHandler {
+    weak var delegate: WKScriptMessageHandler?
+
+    init(delegate: WKScriptMessageHandler) {
+        self.delegate = delegate
+    }
+
+    func userContentController(_ userContentController: WKUserContentController,
+                               didReceive message: WKScriptMessage) {
+        delegate?.userContentController(userContentController, didReceive: message)
+    }
+}
+
 @MainActor
 final class Tab: NSObject, ObservableObject, Identifiable {
     let id = UUID()
@@ -173,9 +186,79 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     @Published var addressBarFocusTrigger: Int = 0
     // 一度でも読み込みを完了したか（完了したタブは休ませてよい）
     @Published var hasLoadedOnce: Bool = false
+    // 音を鳴らしているか（🔊インジケータ用）
+    @Published var isPlayingAudio: Bool = false
+    // ミュート中か
+    @Published var isMuted: Bool = false
 
     // ⌘クリックされたリンクを新規タブで開くための連絡先（TabManager が入れる）
     var openInNewTab: ((String) -> Void)?
+
+    private static let mediaStateMessageHandlerName = "skyscraperMediaState"
+    private static let mediaPlaybackObserverScript = WKUserScript(
+        source: """
+        (() => {
+            if (window.__skyscraperMediaObserverInstalled) {
+                window.__skyscraperReportMediaState?.(true);
+                return;
+            }
+
+            window.__skyscraperMediaObserverInstalled = true;
+            let lastState = null;
+            let scanScheduled = false;
+            let reportScheduled = false;
+
+            const currentState = () => {
+                return Array.from(document.querySelectorAll('audio, video')).some(element => {
+                    return !element.paused && !element.ended && !element.muted && element.volume > 0;
+                });
+            };
+
+            const report = (force = false) => {
+                const isPlayingAudio = currentState();
+                if (!force && isPlayingAudio === lastState) { return; }
+                lastState = isPlayingAudio;
+                window.webkit?.messageHandlers?.skyscraperMediaState?.postMessage(isPlayingAudio);
+            };
+
+            const scheduleReport = () => {
+                if (reportScheduled) { return; }
+                reportScheduled = true;
+                setTimeout(() => {
+                    reportScheduled = false;
+                    report();
+                }, 150);
+            };
+
+            const attach = element => {
+                if (element.__skyscraperMediaObserverAttached) { return; }
+                element.__skyscraperMediaObserverAttached = true;
+                ['play', 'playing', 'pause', 'ended', 'volumechange', 'emptied', 'abort'].forEach(eventName => {
+                    element.addEventListener(eventName, scheduleReport, true);
+                });
+            };
+
+            const scan = () => {
+                scanScheduled = false;
+                document.querySelectorAll('audio, video').forEach(attach);
+                scheduleReport();
+            };
+
+            const scheduleScan = () => {
+                if (scanScheduled) { return; }
+                scanScheduled = true;
+                setTimeout(scan, 250);
+            };
+
+            window.__skyscraperReportMediaState = report;
+            new MutationObserver(scheduleScan).observe(document.documentElement, { childList: true, subtree: true });
+            document.addEventListener('visibilitychange', scheduleReport, true);
+            scan();
+        })();
+        """,
+        injectionTime: .atDocumentEnd,
+        forMainFrameOnly: true
+    )
 
     private var observers: [NSKeyValueObservation] = []
 
@@ -186,7 +269,11 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         webView.allowsBackForwardNavigationGestures = true
         webView.navigationDelegate = self
         webView.uiDelegate = self
-
+        webView.configuration.userContentController.addUserScript(Self.mediaPlaybackObserverScript)
+        webView.configuration.userContentController.add(
+            WeakScriptMessageHandler(delegate: self),
+            name: Self.mediaStateMessageHandlerName
+        )
         observers.append(webView.observe(\.url, options: [.new]) { [weak self] wv, _ in
             Task { @MainActor in if let u = wv.url { self?.urlText = u.absoluteString } }
         })
@@ -206,7 +293,6 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         observers.append(webView.observe(\.title, options: [.new]) { [weak self] wv, _ in
             Task { @MainActor in self?.pageTitle = wv.title ?? "" }
         })
-
         if let url {
             urlText = url
             load()
@@ -250,12 +336,41 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // アドレスバーにフォーカスを移す合図を送る
     func focusAddressBar() { addressBarFocusTrigger += 1 }
 
+    // ミュートの切り替え
+    func toggleMute() {
+        isMuted.toggle()
+        let mutedValue = isMuted ? "true" : "false"
+        let script = """
+        document.querySelectorAll('video, audio').forEach(element => {
+            element.muted = \(mutedValue);
+        });
+        window.__skyscraperReportMediaState?.();
+        """
+        webView.evaluateJavaScript(script)
+    }
+
     // ズーム（ページの拡大率を 50%〜300% の範囲で変える）
     func zoomIn()    { setZoom(webView.pageZoom + 0.1) }
     func zoomOut()   { setZoom(webView.pageZoom - 0.1) }
     func zoomReset() { setZoom(1.0) }
     private func setZoom(_ value: CGFloat) {
         webView.pageZoom = min(max(value, 0.5), 3.0)
+    }
+}
+
+// MARK: - ページ内メディア状態の受け取り
+
+extension Tab: WKScriptMessageHandler {
+    func userContentController(_ userContentController: WKUserContentController,
+                               didReceive message: WKScriptMessage) {
+        guard message.name == "skyscraperMediaState" else { return }
+
+        let isPlayingAudio = (message.body as? Bool)
+            ?? (message.body as? NSNumber)?.boolValue
+            ?? false
+
+        guard isPlayingAudio != self.isPlayingAudio else { return }
+        self.isPlayingAudio = isPlayingAudio
     }
 }
 
@@ -409,6 +524,10 @@ final class TabManager: ObservableObject {
         let restoreURL = tab.isHome ? "" : (tab.webView.url?.absoluteString ?? tab.urlText)
         recentlyClosed.append(restoreURL)
         if recentlyClosed.count > 20 { recentlyClosed.removeFirst() }
+        // 動画・音声の再生を確実に止めてから退去させる
+        // （配列から外すだけだと WebView がしばらく生き残り、音だけ鳴り続ける）
+        tab.webView.stopLoading()
+        tab.webView.load(URLRequest(url: URL(string: "about:blank")!))
         tabs.remove(at: idx)
         if selectedID == tab.id {
             selectedID = tabs[safe: idx]?.id ?? tabs.last?.id
@@ -587,6 +706,17 @@ struct DecoTabRow: View {
 
     var body: some View {
         HStack(spacing: 6) {
+            // 音を鳴らしている／ミュート中のインジケータ
+            if tab.isMuted {
+                Image(systemName: "speaker.slash.fill")
+                    .font(.system(size: 9))
+                    .foregroundColor(Deco.faintGold)
+            } else if tab.isPlayingAudio {
+                Image(systemName: "speaker.wave.2.fill")
+                    .font(.system(size: 9))
+                    .foregroundColor(Deco.gold)
+            }
+
             (tab.pageTitle.isEmpty ? Text("New Tab") : Text(verbatim: tab.pageTitle))
                 .font(.system(size: 12, design: .serif))
                 .foregroundColor(isSelected ? Deco.cream : Deco.dimGold)
@@ -615,6 +745,9 @@ struct DecoTabRow: View {
         .onTapGesture { onSelect() }
         .onHover { hovering = $0 }
         .animation(.easeInOut(duration: 0.12), value: hovering)
+        .contextMenu {
+            Button(tab.isMuted ? "Unmute Tab" : "Mute Tab") { tab.toggleMute() }
+        }
     }
 }
 
@@ -920,6 +1053,7 @@ struct BrowserPane: View {
     @ObservedObject var manager: TabManager
     @EnvironmentObject var store: BookmarkStore
     @FocusState private var addressFocused: Bool
+    @State private var addressText: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -929,7 +1063,7 @@ struct BrowserPane: View {
                 NavButton(system: "chevron.right", disabled: !tab.canGoForward) { tab.goForward() }
                 NavButton(system: "arrow.clockwise", disabled: false)           { tab.reload() }
 
-                TextField("Search or enter address", text: $tab.urlText, onCommit: { tab.load() })
+                TextField("Search or enter address", text: $addressText, onCommit: submitAddress)
                     .textFieldStyle(.plain)
                     .focused($addressFocused)
                     .font(.system(size: 12, design: .serif))
@@ -968,20 +1102,34 @@ struct BrowserPane: View {
             // 全タブの WebView を常に画面に置いておき、選択中の一枚だけを見せる。
             // 一度でも画面から外すと WebKit がページを読み直してしまうので、降ろさない
             ZStack {
-                ForEach(manager.tabs) { t in
-                    WebView(webView: t.webView)
-                        .opacity(t.id == tab.id && !t.isHome ? 1 : 0)
-                        .allowsHitTesting(t.id == tab.id && !t.isHome)
-                }
                 if tab.isHome {
                     NewTabPage(tab: tab)
+                } else {
+                    WebView(webView: tab.webView)
                 }
             }
         }
         .navigationTitle(tab.pageTitle.isEmpty ? "Skyscraper" : tab.pageTitle)
+        .onAppear {
+            addressText = tab.urlText
+        }
+        .onChange(of: tab.id) { _, _ in
+            addressText = tab.urlText
+        }
+        .onChange(of: tab.urlText) { _, newValue in
+            if !addressFocused {
+                addressText = newValue
+            }
+        }
         .onChange(of: tab.addressBarFocusTrigger) { _, _ in
+            addressText = tab.urlText
             addressFocused = true
         }
+    }
+
+    private func submitAddress() {
+        tab.urlText = addressText
+        tab.load()
     }
 }
 
@@ -997,6 +1145,7 @@ struct ContentView: View {
 
             if let tab = manager.selectedTab {
                 BrowserPane(tab: tab, manager: manager)
+                    .id(tab.id)
             } else {
                 Spacer()
             }
