@@ -63,8 +63,14 @@ if ! command -v gh >/dev/null 2>&1; then
     exit 1
 fi
 
-if git rev-parse "v$VERSION" >/dev/null 2>&1; then
-    echo "エラー: タグ v$VERSION がもうある。バージョンを上げ忘れてないか？"
+if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
+    echo "エラー: ローカルにタグ v${VERSION} がもうある。バージョンを上げ忘れてないか？"
+    exit 1
+fi
+
+if gh release view "v${VERSION}" >/dev/null 2>&1; then
+    echo "エラー: GitHub に v${VERSION} のリリースがもうある。"
+    echo "       手で作ったんなら消せ:  gh release delete v${VERSION} --cleanup-tag"
     exit 1
 fi
 
@@ -126,10 +132,10 @@ read -r -p "この内容で GitHub に公開していいか？ [y/N] " ans
 # ─────────────────────────────────────────
 
 echo ""
-echo "▸ GitHub Release を作成（タグ: v$VERSION）..."
-gh release create "v$VERSION" \
+echo "▸ GitHub Release を作成 (タグ: v${VERSION})..."
+gh release create "v${VERSION}" \
     "$DMG" "$ZIP" \
-    --title "Skyscraper $VERSION" \
+    --title "Skyscraper ${VERSION}" \
     --notes-file "$NOTES_FILE"
 echo "  OK"
 
@@ -190,8 +196,8 @@ echo "  OK"
 echo ""
 echo "▸ appcast.xml を push..."
 git add appcast.xml
-git commit -m "Update appcast for $VERSION"
-git push origin HEAD
+git commit -m "Update appcast for ${VERSION}"
+git push
 echo "  OK（ここで初めて、既存ユーザーに更新が見える）"
 
 # ─────────────────────────────────────────
@@ -208,7 +214,7 @@ fi
 
 echo ""
 echo "══════════════════════════════════════"
-echo " Skyscraper $VERSION、出荷完了"
+echo " Skyscraper ${VERSION} 出荷完了"
 echo "══════════════════════════════════════"
 echo ""
 echo "確認しとけ:"
