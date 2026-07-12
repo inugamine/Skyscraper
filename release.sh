@@ -26,7 +26,7 @@ NOTARY_PROFILE="${NOTARY_PROFILE:-Skyscraper}"
 # Developer ID Application 証明書の名前
 SIGN_ID="Developer ID Application: Shota Nakamura (3WNHDR762B)"
 
-# dmg の背景画像
+# dmg の背景画像（等倍 660x420。--window-size と必ず一致させること）
 BG_IMAGE="$(dirname "$0")/dmg-background.png"
 
 # ─────────────────────────────────────────
@@ -92,9 +92,9 @@ DMG_ARGS=(
     --volname "Skyscraper"
     --window-pos 200 120
     --window-size 660 420
-    --icon-size 110
-    --icon "Skyscraper.app" 195 200
-    --app-drop-link 465 200
+    --icon-size 100
+    --icon "Skyscraper.app" 165 190
+    --app-drop-link 495 190
     --no-internet-enable
 )
 
@@ -174,7 +174,7 @@ echo "  配布用   : $DMG_PATH"
 echo "  自動更新用: $ZIP_PATH"
 echo ""
 echo "次にやること:"
-echo "  1. GitHub Releases に zip と dmg を上げる（タグ: v$VERSION）"
+echo "  1. GitHub Releases に zip と dmg を上げる（タグ: v${VERSION}）"
 echo "  2. appcast.xml を更新する:"
 if [ -n "$SIG_LINE" ]; then
     echo "     $SIG_LINE"
