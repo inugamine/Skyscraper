@@ -275,7 +275,11 @@ final class Tab: NSObject, ObservableObject, Identifiable {
             name: Self.mediaStateMessageHandlerName
         )
         observers.append(webView.observe(\.url, options: [.new]) { [weak self] wv, _ in
-            Task { @MainActor in if let u = wv.url { self?.urlText = u.absoluteString } }
+            Task { @MainActor in
+                guard let urlText = wv.url?.absoluteString,
+                      self?.urlText != urlText else { return }
+                self?.urlText = urlText
+            }
         })
         observers.append(webView.observe(\.canGoBack, options: [.new]) { [weak self] wv, _ in
             Task { @MainActor in self?.canGoBack = wv.canGoBack }
@@ -1102,8 +1106,6 @@ struct BrowserPane: View {
             BookmarkBar(tab: tab, manager: manager)
 
             // ── 中身：ロビー or Web ──
-            // 全タブの WebView を常に画面に置いておき、選択中の一枚だけを見せる。
-            // 一度でも画面から外すと WebKit がページを読み直してしまうので、降ろさない
             ZStack {
                 if tab.isHome {
                     NewTabPage(tab: tab)
@@ -1111,6 +1113,7 @@ struct BrowserPane: View {
                     WebView(webView: tab.webView)
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .navigationTitle(tab.pageTitle.isEmpty ? "Skyscraper" : tab.pageTitle)
         .onAppear {
@@ -1131,8 +1134,9 @@ struct BrowserPane: View {
     }
 
     private func submitAddress() {
-        tab.urlText = addressText
-        tab.load()
+        let targetTab = manager.selectedTab ?? tab
+        targetTab.urlText = addressText
+        targetTab.load()
     }
 }
 
@@ -1148,7 +1152,6 @@ struct ContentView: View {
 
             if let tab = manager.selectedTab {
                 BrowserPane(tab: tab, manager: manager)
-                    .id(tab.id)
             } else {
                 Spacer()
             }
