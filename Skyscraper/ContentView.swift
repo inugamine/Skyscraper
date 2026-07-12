@@ -707,14 +707,17 @@ struct DecoTabRow: View {
     var body: some View {
         HStack(spacing: 6) {
             // 音を鳴らしている／ミュート中のインジケータ
-            if tab.isMuted {
-                Image(systemName: "speaker.slash.fill")
-                    .font(.system(size: 9))
-                    .foregroundColor(Deco.faintGold)
-            } else if tab.isPlayingAudio {
-                Image(systemName: "speaker.wave.2.fill")
-                    .font(.system(size: 9))
-                    .foregroundColor(Deco.gold)
+            if tab.isMuted || tab.isPlayingAudio {
+                Button {
+                    tab.toggleMute()
+                } label: {
+                    Image(systemName: tab.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                        .font(.system(size: 9))
+                        .foregroundColor(tab.isMuted ? Deco.faintGold : Deco.gold)
+                        .frame(width: 14, height: 14)
+                }
+                .buttonStyle(.plain)
+                .help(tab.isMuted ? "Unmute Tab" : "Mute Tab")
             }
 
             (tab.pageTitle.isEmpty ? Text("New Tab") : Text(verbatim: tab.pageTitle))
