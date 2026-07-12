@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>Skyscraper</title>
+    <link>https://raw.githubusercontent.com/inugamine/Skyscraper/master/appcast.xml</link>
+    <description>Art Deco web browser for macOS</description>
+    <language>en</language>
+
+    <item>
+      <title>Version 1.0</title>
+      <pubDate>Sun, 12 Jul 2026 12:00:00 +0900</pubDate>
+      <sparkle:version>1</sparkle:version>
+      <sparkle:shortVersionString>1.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>Skyscraper 1.0</h2>
+        <p>The first public release.</p>
+        <ul>
+          <li>Vertical hexagonal tabs with an Art Deco theme</li>
+          <li>Bookmark bar with drag-and-drop reordering</li>
+          <li>Full keyboard shortcut suite and page zoom</li>
+          <li>File downloads and uploads</li>
+          <li>English and Japanese localization</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://github.com/inugamine/Skyscraper/releases/download/v1.0/Skyscraper-1.0.zip"
+        sparkle:edSignature="iZQRnk65p3l5timDesKb0LutStDYwGsE65VJVNR8pBT1JmG1h77R0mTfPOEqzbBlEyGsBfx/HyvFpvNsVoZ4Dw=="
+        length="1319301"
+        type="application/octet-stream" />
+    </item>
+
+  </channel>
+</rss>
