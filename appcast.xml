@@ -7,6 +7,23 @@
     <language>en</language>
 
     <item>
+      <title>Version 1.5</title>
+      <pubDate>Sun, 12 Jul 2026 18:30:31 +0900</pubDate>
+      <sparkle:version>5</sparkle:version>
+      <sparkle:shortVersionString>1.5</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>Skyscraper 1.5</h2>
+        <ul>
+          <li>自動更新に対応したはず</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://github.com/inugamine/Skyscraper/releases/download/v1.5/Skyscraper-1.5.zip"
+        sparkle:edSignature="lH7UIzasEmYGYY/YwhpzIIW6aD+WOMEROrf4wwX3lPyBKMoTUbj0elZ9BsHho2NexLMPGu/QHgvRw4D80SmRCg=="
+        length="1182159"
+        type="application/octet-stream" />
+    </item>    <item>
       <title>Version 1.4</title>
       <pubDate>Sun, 12 Jul 2026 18:23:12 +0900</pubDate>
       <sparkle:version>4</sparkle:version>
