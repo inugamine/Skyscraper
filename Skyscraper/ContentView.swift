@@ -184,8 +184,6 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     @Published var pageTitle: String = ""
     @Published var isHome: Bool = true
     @Published var addressBarFocusTrigger: Int = 0
-    // 一度でも読み込みを完了したか（完了したタブは休ませてよい）
-    @Published var hasLoadedOnce: Bool = false
     // 音を鳴らしているか（🔊インジケータ用）
     @Published var isPlayingAudio: Bool = false
     // ミュート中か
@@ -207,6 +205,13 @@ final class Tab: NSObject, ObservableObject, Identifiable {
             let lastState = null;
             let scanScheduled = false;
             let reportScheduled = false;
+            let muted = false;
+
+            const applyMuted = () => {
+                document.querySelectorAll('audio, video').forEach(element => {
+                    element.muted = muted;
+                });
+            };
 
             const currentState = () => {
                 return Array.from(document.querySelectorAll('audio, video')).some(element => {
@@ -233,6 +238,9 @@ final class Tab: NSObject, ObservableObject, Identifiable {
             const attach = element => {
                 if (element.__skyscraperMediaObserverAttached) { return; }
                 element.__skyscraperMediaObserverAttached = true;
+                // ミュート中に現れた・再生を始めた要素にもミュートを適用する
+                if (muted) { element.muted = true; }
+                element.addEventListener('play', () => { if (muted) { element.muted = true; } }, true);
                 ['play', 'playing', 'pause', 'ended', 'volumechange', 'emptied', 'abort'].forEach(eventName => {
                     element.addEventListener(eventName, scheduleReport, true);
                 });
@@ -241,6 +249,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
             const scan = () => {
                 scanScheduled = false;
                 document.querySelectorAll('audio, video').forEach(attach);
+                if (muted) { applyMuted(); }
                 scheduleReport();
             };
 
@@ -251,6 +260,11 @@ final class Tab: NSObject, ObservableObject, Identifiable {
             };
 
             window.__skyscraperReportMediaState = report;
+            window.__skyscraperSetMuted = value => {
+                muted = !!value;
+                applyMuted();
+                report(true);
+            };
             new MutationObserver(scheduleScan).observe(document.documentElement, { childList: true, subtree: true });
             document.addEventListener('visibilitychange', scheduleReport, true);
             scan();
@@ -289,9 +303,12 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         })
         observers.append(webView.observe(\.isLoading, options: [.new]) { [weak self] wv, _ in
             Task { @MainActor in
-                self?.isLoading = wv.isLoading
-                // 読み込みが終わったら、以降は休ませてよいと印を付ける
-                if !wv.isLoading { self?.hasLoadedOnce = true }
+                guard let self else { return }
+                self.isLoading = wv.isLoading
+                // ページ遷移後もミュートを貼り直す（スクリプトはページごとに入れ直るため）
+                if !wv.isLoading, self.isMuted {
+                    wv.evaluateJavaScript("window.__skyscraperSetMuted?.(true);")
+                }
             }
         })
         observers.append(webView.observe(\.title, options: [.new]) { [weak self] wv, _ in
@@ -306,7 +323,6 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     func load() {
         guard let url = Tab.resolveURL(from: urlText) else { return }
         isHome = false
-        hasLoadedOnce = false   // 新しく読み込むので、また舞台に上げる
         webView.load(URLRequest(url: url))
     }
 
@@ -340,17 +356,11 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // アドレスバーにフォーカスを移す合図を送る
     func focusAddressBar() { addressBarFocusTrigger += 1 }
 
-    // ミュートの切り替え
+    // ミュートの切り替え。ページ側のスクリプトが状態を記憶し、
+    // 新しいメディア要素にも自動で適用する
     func toggleMute() {
         isMuted.toggle()
-        let mutedValue = isMuted ? "true" : "false"
-        let script = """
-        document.querySelectorAll('video, audio').forEach(element => {
-            element.muted = \(mutedValue);
-        });
-        window.__skyscraperReportMediaState?.();
-        """
-        webView.evaluateJavaScript(script)
+        webView.evaluateJavaScript("window.__skyscraperSetMuted?.(\(isMuted));")
     }
 
     // ズーム（ページの拡大率を 50%〜300% の範囲で変える）
@@ -454,7 +464,7 @@ extension Tab: WKDownloadDelegate {
     }
 }
 
-// MARK: - UI の仓役（target="_blank" などの新規ウィンドウ要求をタブで受ける）
+// MARK: - UI の窓口役（target="_blank" などの新規ウィンドウ要求をタブで受ける）
 
 extension Tab: WKUIDelegate {
     nonisolated func webView(_ webView: WKWebView,
@@ -1106,11 +1116,18 @@ struct BrowserPane: View {
             BookmarkBar(tab: tab, manager: manager)
 
             // ── 中身：ロビー or Web ──
+            // 全タブの WebView を常に画面に置き、選択中の一枚だけを見せる。
+            // NSViewRepresentable は一度作った NSView を使い回すので、
+            // 単一の WebView 枚だとタブを切り替えても最初の WebView が表示され続ける。
+            // また、常時マウントにより裏タブの読み込み・タイトル更新も進む
             ZStack {
+                ForEach(manager.tabs) { t in
+                    WebView(webView: t.webView)
+                        .opacity(t.id == tab.id && !t.isHome ? 1 : 0)
+                        .allowsHitTesting(t.id == tab.id && !t.isHome)
+                }
                 if tab.isHome {
                     NewTabPage(tab: tab)
-                } else {
-                    WebView(webView: tab.webView)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
