@@ -70,6 +70,39 @@ struct Triangle: Shape {
     }
 }
 
+// 半円のサンバースト（扇）。下辺中央を要にして上に開く
+struct Sunburst: Shape {
+    var rays: Int = 5                     // 放射線の本数
+    var arcRatios: [CGFloat] = [1.0, 0.62] // 円弧の半径比（外側から）
+
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        let center = CGPoint(x: rect.midX, y: rect.maxY)
+        let radius = min(rect.width / 2, rect.height)
+
+        // 円弧（180°→360°、上側を通る）
+        for ratio in arcRatios {
+            let r = radius * ratio
+            p.move(to: CGPoint(x: center.x - r, y: center.y))
+            p.addArc(center: center, radius: r,
+                     startAngle: .degrees(180), endAngle: .degrees(360),
+                     clockwise: false)
+        }
+
+        // 要から伸びる放射線（両端は除き、等間隔に並べる）
+        for i in 1...rays {
+            let angle = Angle.degrees(180 + 180 * Double(i) / Double(rays + 1))
+            let end = CGPoint(
+                x: center.x + radius * cos(angle.radians),
+                y: center.y + radius * sin(angle.radians)
+            )
+            p.move(to: center)
+            p.addLine(to: end)
+        }
+        return p
+    }
+}
+
 // MARK: - ブックマーク（保存対応）
 
 struct Bookmark: Identifiable, Codable, Hashable {
@@ -681,10 +714,11 @@ struct VerticalTabStrip: View {
 
             Spacer(minLength: 0)
 
-            Zigzag(teeth: 14)
-                .stroke(Deco.faintGold, lineWidth: 1)
-                .frame(height: 5)
-                .padding(.horizontal, 14)
+            // サイドバー下端の扇飾り（フィニアル）
+            Sunburst(rays: 5)
+                .stroke(Deco.dimGold, lineWidth: 0.8)
+                .frame(width: 68, height: 34)
+                .frame(maxWidth: .infinity)
                 .padding(.top, 8)
 
             Button(action: { manager.addTab() }) {
