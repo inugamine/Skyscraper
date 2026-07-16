@@ -103,6 +103,80 @@ struct Sunburst: Shape {
     }
 }
 
+// 扇を横に連ねた飾り罫（フリーズ）。ロゴ下の区切りに使う。
+// 各扇は根元がすぼまったパルメット形（釣鐘を逆さにした輪郭）
+struct FanFrieze: Shape {
+    var fans: Int = 5       // 手前の段の扇の個数
+    var rays: Int = 4       // 各扇の放射線の本数
+    var overlap: CGFloat = 0.62  // 扇の幅（step に対する半径の比）
+    var tiers: Int = 1      // 段数（2 で鱗紋になる）
+
+    // 弧の振り幅。深く回して胴を膨らませる（両端は中心から sin150°=0.5r 下）
+    private let startDeg = 150.0
+    private let endDeg   = 390.0
+    // 要（根元）は円の中心から半径×1.15 下。弧端（0.5r）との差が絞りの深さになる
+    private let pinchDrop: CGFloat = 1.15
+
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        let step = rect.width / CGFloat(max(fans, 1))
+        // 扇一つの全高は (1 + pinchDrop) × 半径。段の持ち上げも足して果に収める
+        let lift: CGFloat = 0.85   // 奧の段の持ち上げ（半径比）。絞った根元が谷に深く収まる
+        let unitH = 1 + pinchDrop
+        let maxRadius = tiers > 1 ? rect.height / (unitH + lift) : rect.height / unitH
+        let radius = min(step * overlap, maxRadius)
+
+        func arcPoint(_ c: CGPoint, _ deg: Double) -> CGPoint {
+            let a = Angle.degrees(deg).radians
+            return CGPoint(x: c.x + radius * cos(a), y: c.y + radius * sin(a))
+        }
+
+        func drawFan(base: CGPoint) {
+            // 円の中心は要の真上
+            let c = CGPoint(x: base.x, y: base.y - radius * pinchDrop)
+            let left  = arcPoint(c, startDeg)
+            let right = arcPoint(c, endDeg)
+            // 両脇は )( のように内に凹む曲線。制御点を軸の近く・低めに置くと、
+            // 要からはほぼ垂直に立ち上がり、上で外へ翻る
+            let waistL = CGPoint(x: base.x - radius * 0.06, y: base.y - radius * 0.50)
+            let waistR = CGPoint(x: base.x + radius * 0.06, y: base.y - radius * 0.50)
+            p.move(to: base)
+            p.addQuadCurve(to: left, control: waistL)
+            p.addArc(center: c, radius: radius,
+                     startAngle: .degrees(startDeg), endAngle: .degrees(endDeg),
+                     clockwise: false)
+            p.addQuadCurve(to: base, control: waistR)
+            // 放射線：要から弧の全域へ。輪郭と同じ絞りに沿わせて、
+            // 根元で束ねられてから外へ開く曲線にする
+            for i in 1...rays {
+                let t = Double(i) / Double(rays + 1)
+                let end = arcPoint(c, startDeg + (endDeg - startDeg) * t)
+                let control = CGPoint(
+                    x: base.x + (end.x - base.x) * 0.10,
+                    y: base.y - radius * 0.50
+                )
+                p.move(to: base)
+                p.addQuadCurve(to: end, control: control)
+            }
+        }
+
+        // 奧の段：半歩ずらして一段高く
+        if tiers > 1 {
+            for f in 0..<(fans - 1) {
+                drawFan(base: CGPoint(x: rect.minX + step * (CGFloat(f) + 1.0),
+                                      y: rect.maxY - radius * lift))
+            }
+        }
+
+        // 手前の段
+        for f in 0..<fans {
+            drawFan(base: CGPoint(x: rect.minX + step * (CGFloat(f) + 0.5),
+                                  y: rect.maxY))
+        }
+        return p
+    }
+}
+
 // MARK: - ブックマーク（保存対応）
 
 struct Bookmark: Identifiable, Codable, Hashable {
@@ -692,9 +766,17 @@ struct VerticalTabStrip: View {
             .padding(.top, 16)
             .padding(.bottom, 10)
 
-            Zigzag(teeth: 14)
-                .stroke(Deco.gold, lineWidth: 1)
-                .frame(height: 5)
+            // ロゴ下の扇の飾り罫（二段の鱗紋。下に向かって闇に沈む）
+            // 横の重なりは浅く（肩が触れる程度）、絞った腿が隠れないようにする
+            FanFrieze(fans: 5, rays: 6, overlap: 0.5, tiers: 2)
+                .stroke(
+                    LinearGradient(
+                        colors: [Deco.gold, Deco.gold.opacity(0.35)],
+                        startPoint: .top, endPoint: .bottom
+                    ),
+                    lineWidth: 0.8
+                )
+                .frame(height: 34)
                 .padding(.horizontal, 14)
                 .padding(.bottom, 12)
 
@@ -714,11 +796,11 @@ struct VerticalTabStrip: View {
 
             Spacer(minLength: 0)
 
-            // サイドバー下端の扇飾り（フィニアル）
-            Sunburst(rays: 5)
-                .stroke(Deco.dimGold, lineWidth: 0.8)
-                .frame(width: 68, height: 34)
-                .frame(maxWidth: .infinity)
+            // サイドバー下端のジグザグ罫（New Tab ボタンの仕切り）
+            Zigzag(teeth: 14)
+                .stroke(Deco.faintGold, lineWidth: 1)
+                .frame(height: 5)
+                .padding(.horizontal, 14)
                 .padding(.top, 8)
 
             Button(action: { manager.addTab() }) {
