@@ -7,6 +7,24 @@
     <language>en</language>
 
     <item>
+      <title>Version 1.6</title>
+      <pubDate>Thu, 16 Jul 2026 19:51:04 +0900</pubDate>
+      <sparkle:version>6</sparkle:version>
+      <sparkle:shortVersionString>1.6</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>Skyscraper 1.6</h2>
+        <ul>
+          <li>デザインを一部変更</li>
+          <li>動画再生周りの不具合を修正</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://github.com/inugamine/Skyscraper/releases/download/v1.6/Skyscraper-1.6.zip"
+        sparkle:edSignature="EOxqRhvtsgXaUCpPt799/yoDVGhCSDs8HAC3qeR8i/aKgDkE0eqya3DyFo4AeDJDToypAZGVztn3SU9i53OjDg=="
+        length="1198242"
+        type="application/octet-stream" />
+    </item>    <item>
       <title>Version 1.5</title>
       <pubDate>Sun, 12 Jul 2026 18:30:31 +0900</pubDate>
       <sparkle:version>5</sparkle:version>
