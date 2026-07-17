@@ -524,6 +524,12 @@ final class Tab: NSObject, ObservableObject, Identifiable {
 
         // トラックパッドの2本指スワイプで戻る／進む
         webView.allowsBackForwardNavigationGestures = true
+        // WKWebView 素の UA だと YouTube などに「古いブラウザ」と誤判定される。
+        // 実機 Safari（macOS 27 / Version 27.0）の UA を名乗って回避する。
+        // OS 部分の 10_15_7 は Safari 自身が凍結している値なので、これで正しい
+        webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Safari/605.1.15"
+        // 広告・トラッカーの遮断ルールを適用（初回はコンパイル後に非同期で効く）
+        AdBlocker.shared.apply(to: webView)
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.configuration.userContentController.addUserScript(Self.mediaPlaybackObserverScript)
