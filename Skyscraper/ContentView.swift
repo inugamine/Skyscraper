@@ -827,9 +827,13 @@ extension Array {
 
 struct SkyscraperMark: View {
     var color: Color = Deco.gold
+    // 胴を背景色で塗り潰し、背後の飾り（サンバースト等）が透けないようにする
+    var fill: Color = Deco.ink
     var body: some View {
         VStack(spacing: 0) {
-            Triangle().stroke(color, lineWidth: 1).frame(width: 3, height: 16)
+            Triangle().fill(fill)
+                .overlay(Triangle().stroke(color, lineWidth: 1))
+                .frame(width: 3, height: 16)
             tier(18, 18)
             tier(34, 24)
             tier(52, 28)
@@ -837,7 +841,9 @@ struct SkyscraperMark: View {
         }
     }
     private func tier(_ w: CGFloat, _ h: CGFloat) -> some View {
-        Rectangle().stroke(color, lineWidth: 1).frame(width: w, height: h)
+        Rectangle().fill(fill)
+            .overlay(Rectangle().stroke(color, lineWidth: 1))
+            .frame(width: w, height: h)
     }
 }
 
@@ -850,7 +856,21 @@ struct NewTabPage: View {
     var body: some View {
         VStack(spacing: 22) {
             Spacer()
-            SkyscraperMark()
+
+            // ロゴ背後のサンバースト。ビルの足元から放射する淡い光。
+            // 円弧は置かず線だけにして、密度を上げすぎない
+            ZStack(alignment: .bottom) {
+                Sunburst(rays: 9, arcRatios: [])
+                    .stroke(
+                        // 要（下）から先端（上）に向かって闇に溶ける
+                        LinearGradient(colors: [Deco.faintGold, Deco.faintGold.opacity(0.10)],
+                                       startPoint: .bottom, endPoint: .top),
+                        lineWidth: 0.8
+                    )
+                    .frame(width: 330, height: 150)
+                SkyscraperMark()
+            }
+
             VStack(spacing: 6) {
                 Text("SKYSCRAPER")
                     .font(.system(size: 16, design: .serif))
