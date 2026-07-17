@@ -177,6 +177,142 @@ struct FanFrieze: Shape {
     }
 }
 
+// MARK: - ロビーの額縁飾り
+
+// 四隅の飾り。入れ子のL字罫＋対角に降りる段々（ビルの写し）
+// 左上向きに描き、他の隅は反転で使い回す
+struct CornerOrnament: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        let s = min(rect.width, rect.height)
+
+        // 入れ子のL字罫（外から3本）
+        for i in 0..<3 {
+            let inset = s * 0.10 * CGFloat(i)
+            p.move(to: CGPoint(x: inset, y: s))
+            p.addLine(to: CGPoint(x: inset, y: inset))
+            p.addLine(to: CGPoint(x: s, y: inset))
+        }
+
+        // 対角に降りる階段（段々ビルのモチーフを隅に落とし込む）
+        let step = s * 0.11
+        var pt = CGPoint(x: s * 0.92, y: s * 0.36)
+        p.move(to: pt)
+        for _ in 0..<4 {
+            pt.x -= step
+            p.addLine(to: pt)
+            pt.y += step
+            p.addLine(to: pt)
+        }
+        return p
+    }
+}
+
+// ロビー全面に被せる額縁。二重の枠と四隅の飾り
+struct LobbyFrame: View {
+    private let corner: CGFloat = 58
+    private let pad: CGFloat = 26
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack {
+                Rectangle()
+                    .stroke(Deco.gold.opacity(0.6), lineWidth: 1.2)
+                    .padding(12)
+                Rectangle()
+                    .stroke(Deco.faintGold, lineWidth: 0.8)
+                    .padding(20)
+
+                ornament(flipX: false, flipY: false)
+                    .position(x: pad + corner / 2, y: pad + corner / 2)
+                ornament(flipX: true, flipY: false)
+                    .position(x: geo.size.width - pad - corner / 2, y: pad + corner / 2)
+                ornament(flipX: false, flipY: true)
+                    .position(x: pad + corner / 2, y: geo.size.height - pad - corner / 2)
+                ornament(flipX: true, flipY: true)
+                    .position(x: geo.size.width - pad - corner / 2,
+                              y: geo.size.height - pad - corner / 2)
+            }
+        }
+        // 飾りはクリックを拾わない（下のボタン操作を邪魔しない）
+        .allowsHitTesting(false)
+    }
+
+    private func ornament(flipX: Bool, flipY: Bool) -> some View {
+        CornerOrnament()
+            .stroke(
+                LinearGradient(colors: [Deco.gold, Deco.gold.opacity(0.35)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing),
+                lineWidth: 1
+            )
+            .frame(width: corner, height: corner)
+            .scaleEffect(x: flipX ? -1 : 1, y: flipY ? -1 : 1)
+    }
+}
+
+// 扇の両脇に置く、外に向かって降りる段々の袖。
+// 高い辺が左（扇寄り）の右袖を描き、左袖は反転で使い回す
+struct SteppedWing: Shape {
+    var steps: Int = 4
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        let sw = rect.width / CGFloat(max(steps, 1))
+        let sh = rect.height / CGFloat(max(steps, 1))
+        p.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+        p.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
+        var x = rect.minX
+        var y = rect.minY
+        for _ in 0..<max(steps, 1) {
+            x += sw
+            p.addLine(to: CGPoint(x: x, y: y))
+            y += sh
+            p.addLine(to: CGPoint(x: x, y: y))
+        }
+        p.closeSubpath()
+        return p
+    }
+}
+
+// ロビー下端中央の扇飾り。既存の Sunburst を流用し、
+// 両脇に段々の袖、要にダイヤを一粒置く
+struct LobbyBottomFan: View {
+    // 袖のグラデーション：内（扇寄り）が明るく、外に向かって沈む。
+    // 左袖は反転で描くので、同じ定義のまま左右対称になる
+    private let wingGradient = LinearGradient(
+        colors: [Deco.gold, Deco.gold.opacity(0.25)],
+        startPoint: .leading, endPoint: .trailing
+    )
+
+    var body: some View {
+        VStack(spacing: 8) {
+            HStack(alignment: .bottom, spacing: 12) {
+                SteppedWing(steps: 4)
+                    .stroke(wingGradient, lineWidth: 1)
+                    .frame(width: 68, height: 32)
+                    .scaleEffect(x: -1)
+
+                Sunburst(rays: 7, arcRatios: [1.0, 0.62])
+                    .stroke(
+                        // 要（下）を明るく、先端（上）を闇に沈ませる
+                        LinearGradient(colors: [Deco.gold.opacity(0.30), Deco.gold],
+                                       startPoint: .top, endPoint: .bottom),
+                        lineWidth: 1
+                    )
+                    .frame(width: 200, height: 68)
+
+                SteppedWing(steps: 4)
+                    .stroke(wingGradient, lineWidth: 1)
+                    .frame(width: 68, height: 32)
+            }
+
+            Rectangle()
+                .stroke(Deco.gold, lineWidth: 1)
+                .frame(width: 9, height: 9)
+                .rotationEffect(.degrees(45))
+        }
+    }
+}
+
 // MARK: - ブックマーク（保存対応）
 
 struct Bookmark: Identifiable, Codable, Hashable {
@@ -740,9 +876,13 @@ struct NewTabPage: View {
             .padding(.top, 10)
 
             Spacer()
+
+            LobbyBottomFan()
+                .padding(.bottom, 32)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Deco.ink)
+        .overlay { LobbyFrame() }
     }
 }
 
