@@ -844,7 +844,8 @@ struct DecoTabRow: View {
                     Image(systemName: tab.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
                         .font(.system(size: 9))
                         .foregroundColor(tab.isMuted ? Deco.faintGold : Deco.gold)
-                        .frame(width: 14, height: 14)
+                        .frame(width: 18, height: 18)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help(tab.isMuted ? "Unmute Tab" : "Mute Tab")
@@ -863,6 +864,9 @@ struct DecoTabRow: View {
                     Image(systemName: "xmark")
                         .font(.system(size: 9))
                         .foregroundColor(Deco.dimGold)
+                        // 見た目は小さな×のまま、押せる範囲だけを 20×20 に広げる
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
