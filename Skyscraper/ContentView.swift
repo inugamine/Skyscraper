@@ -392,6 +392,83 @@ final class BookmarkStore: ObservableObject {
     }
 }
 
+// MARK: - コンテキストメニューを引き受ける WKWebView
+
+// 素の WKWebView は、右クリックの「画像をダウンロード」「リンク先のファイルをダウンロード」を
+// 選んでも WKDownloadDelegate を一切呼ばず、内部で保存先が決まらないまま
+// "Could not create a sandbox extension for ''" を吐いて黙って失敗する（WebKit の既知の不具合）。
+// そこで右クリック位置を控えておき、該当メニュー項目の飛び先を自前の処理に差し替えて、
+// startDownload(using:) で既存のダウンロード経路（NSSavePanel の流れ）に合流させる。
+final class SkyscraperWebView: WKWebView {
+    // 直近の右クリック位置（CSS ピクセル・左上原点）。elementFromPoint に渡す
+    private var lastRightClick: CGPoint = .zero
+
+    override func rightMouseDown(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        // ビューの上下向きとページ拡大率を JS 座標系に合わせる
+        let topY = isFlipped ? p.y : bounds.height - p.y
+        lastRightClick = CGPoint(x: p.x / pageZoom, y: topY / pageZoom)
+        super.rightMouseDown(with: event)
+    }
+
+    override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
+        super.willOpenMenu(menu, with: event)
+        for item in menu.items {
+            switch item.identifier?.rawValue {
+            case "WKMenuItemIdentifierDownloadImage":
+                item.target = self
+                item.action = #selector(downloadImageAtLastClick(_:))
+            case "WKMenuItemIdentifierDownloadLinkedFile":
+                item.target = self
+                item.action = #selector(downloadLinkAtLastClick(_:))
+            default:
+                break
+            }
+        }
+    }
+
+    @objc private func downloadImageAtLastClick(_ sender: Any?) {
+        // クリック位置から親を辿って画像を探す。<img> が無ければ背景画像も見る
+        let js = """
+        (() => {
+            let el = document.elementFromPoint(\(lastRightClick.x), \(lastRightClick.y));
+            while (el) {
+                if (el.tagName === 'IMG') { return el.currentSrc || el.src || null; }
+                const bg = window.getComputedStyle(el).backgroundImage || '';
+                const m = bg.match(/url\\(["']?([^"')]+)["']?\\)/);
+                if (m) { return m[1]; }
+                el = el.parentElement;
+            }
+            return null;
+        })();
+        """
+        startDownload(fromJS: js)
+    }
+
+    @objc private func downloadLinkAtLastClick(_ sender: Any?) {
+        let js = """
+        (() => {
+            const el = document.elementFromPoint(\(lastRightClick.x), \(lastRightClick.y));
+            const a = el ? el.closest('a[href]') : null;
+            return a ? a.href : null;
+        })();
+        """
+        startDownload(fromJS: js)
+    }
+
+    private func startDownload(fromJS js: String) {
+        evaluateJavaScript(js) { [weak self] result, _ in
+            guard let self,
+                  let urlString = result as? String,
+                  let url = URL(string: urlString) else { return }
+            self.startDownload(using: URLRequest(url: url)) { download in
+                // 保存先の決定は Tab（navigationDelegate）の既存処理に任せる
+                download.delegate = self.navigationDelegate as? WKDownloadDelegate
+            }
+        }
+    }
+}
+
 // MARK: - WKWebView ラッパー
 
 struct WebView: NSViewRepresentable {
@@ -418,7 +495,7 @@ private final class WeakScriptMessageHandler: NSObject, WKScriptMessageHandler {
 @MainActor
 final class Tab: NSObject, ObservableObject, Identifiable {
     let id = UUID()
-    let webView = WKWebView()
+    let webView: WKWebView = SkyscraperWebView()
 
     @Published var urlText: String = ""
     @Published var canGoBack: Bool = false
@@ -688,7 +765,15 @@ extension Tab: WKDownloadDelegate {
         Task { @MainActor in
             // 保存パネルを出して、保存先はユーザーに決めてもらう
             let panel = NSSavePanel()
-            panel.nameFieldStringValue = suggestedFilename
+            // Twitter の画像 URL（…?format=jpg&name=large）のように拡張子が落ちる場合は
+            // 応答の MIME タイプから補う
+            var filename = suggestedFilename
+            if (filename as NSString).pathExtension.isEmpty,
+               let mime = response.mimeType,
+               let ext = UTType(mimeType: mime)?.preferredFilenameExtension {
+                filename += "." + ext
+            }
+            panel.nameFieldStringValue = filename
             panel.canCreateDirectories = true
             panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory,
                                                           in: .userDomainMask).first
