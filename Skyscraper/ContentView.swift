@@ -836,6 +836,12 @@ final class TabManager: ObservableObject {
     @Published var tabs: [Tab] = []
     @Published var selectedID: UUID?
 
+    // タブの自動グループ化（Apple Intelligence）。
+    // 使えない環境では何もせず、従来のフラット表示のまま動く
+    let grouper = TabGrouper()
+    // 各タブのタイトル確定を見張る購読（タブIDごと）
+    private var titleWatchers: [UUID: AnyCancellable] = [:]
+
     // 閉じたタブの復元用スタック（URL。空文字はロビー）
     private var recentlyClosed: [String] = []
 
@@ -863,6 +869,14 @@ final class TabManager: ObservableObject {
         tab.openInNewTab = { [weak self] link in
             self?.addTabInBackground(url: link)
         }
+        // タイトルが確定・変化したらグループを組み直す。
+        // デバウンスは grouper 側が持つので、ここは遠慮なく呼ぶ
+        titleWatchers[tab.id] = tab.$pageTitle
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.grouper.scheduleRegroup(for: self.tabs)
+            }
         return tab
     }
 
@@ -877,6 +891,10 @@ final class TabManager: ObservableObject {
         tab.webView.stopLoading()
         tab.webView.load(URLRequest(url: URL(string: "about:blank")!))
         tabs.remove(at: idx)
+        // 監視とグループ割り当てを片付け、残りのタブで組み直す
+        titleWatchers[tab.id] = nil
+        grouper.forget(tab.id)
+        grouper.scheduleRegroup(for: tabs)
         if selectedID == tab.id {
             selectedID = tabs[safe: idx]?.id ?? tabs.last?.id
         }
@@ -899,6 +917,24 @@ final class TabManager: ObservableObject {
     func selectTab(at index: Int) {
         guard tabs.indices.contains(index) else { return }
         selectedID = tabs[index].id
+    }
+
+    // ドラッグでの並べ替え：draggedID のタブを target の前または後ろに挿す。
+    // グループ表示中は、落とした先のタブと同じグループへ入れる（手動扱い）
+    func moveTab(draggedID: String, target: Tab, after: Bool) {
+        guard draggedID != target.id.uuidString,
+              let from = tabs.firstIndex(where: { $0.id.uuidString == draggedID })
+        else { return }
+        let moved = tabs.remove(at: from)
+        if let base = tabs.firstIndex(where: { $0.id == target.id }) {
+            tabs.insert(moved, at: after ? base + 1 : base)
+        } else {
+            tabs.append(moved)
+        }
+        // グループが一つも無い（従来表示）なら並び順だけ変える
+        if !grouper.assignments.isEmpty {
+            grouper.assignManually(moved.id, to: grouper.assignments[target.id])
+        }
     }
 }
 
@@ -999,8 +1035,75 @@ struct NewTabPage: View {
 
 // MARK: - 垂直タブバー
 
+// サイドバーのセクション一つぶん。name が nil なら「グループ無し」のまとまり
+private struct TabSection: Identifiable {
+    let id: String
+    let name: String?
+    let tabs: [Tab]
+}
+
+// グループ見出し。細い罫の間にダイヤとグループ名を挟むアール・デコ調
+private struct TabGroupHeader: View {
+    let name: String
+    var body: some View {
+        HStack(spacing: 7) {
+            Rectangle().fill(Deco.faintGold).frame(height: 0.7)
+            Image(systemName: "diamond.fill")
+                .font(.system(size: 4))
+                .foregroundColor(Deco.dimGold)
+            Text(name)
+                .font(.system(size: 10, design: .serif))
+                .tracking(2)
+                .foregroundColor(Deco.dimGold)
+                .lineLimit(1)
+                .fixedSize()
+            Image(systemName: "diamond.fill")
+                .font(.system(size: 4))
+                .foregroundColor(Deco.dimGold)
+            Rectangle().fill(Deco.faintGold).frame(height: 0.7)
+        }
+        .padding(.top, 8)
+        .padding(.horizontal, 6)
+    }
+}
+
 struct VerticalTabStrip: View {
     @ObservedObject var manager: TabManager
+    @ObservedObject var grouper: TabGrouper
+
+    // タブの挿入位置を示す金の横バー（ブックマークと同じ人感センサー方式）
+    @StateObject private var dropModel = DropIndicatorModel()
+
+    // グループ見出し付きのセクション一覧を組み立てる。
+    // tabs 配列の並び順は変えず、グループは初出順、
+    // どこにも属さないタブは末尾に見出し無しでまとめる。
+    // 割り当てが空（Apple Intelligence 無効・タブが少ない）なら
+    // セクションは一つだけになり、従来と全く同じ見た目になる
+    private var sections: [TabSection] {
+        var grouped: [(name: String, tabs: [Tab])] = []
+        var ungrouped: [Tab] = []
+        for tab in manager.tabs {
+            if let name = grouper.assignments[tab.id] {
+                if let idx = grouped.firstIndex(where: { $0.name == name }) {
+                    grouped[idx].tabs.append(tab)
+                } else {
+                    grouped.append((name, [tab]))
+                }
+            } else {
+                ungrouped.append(tab)
+            }
+        }
+        var result = grouped.map { TabSection(id: "group:" + $0.name, name: $0.name, tabs: $0.tabs) }
+        if !ungrouped.isEmpty {
+            result.append(TabSection(id: "__ungrouped__", name: nil, tabs: ungrouped))
+        }
+        return result
+    }
+
+    // コンテキストメニュー用：現在あるグループ名の一覧（初出順）
+    private var groupNames: [String] {
+        sections.compactMap { $0.name }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1033,13 +1136,25 @@ struct VerticalTabStrip: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 7) {
-                    ForEach(manager.tabs) { tab in
-                        DecoTabRow(
-                            tab: tab,
-                            isSelected: tab.id == manager.selectedID,
-                            onSelect: { manager.select(tab) },
-                            onClose:  { manager.closeTab(tab) }
-                        )
+                    ForEach(sections) { section in
+                        if let name = section.name {
+                            TabGroupHeader(name: name)
+                        } else if sections.count > 1 {
+                            // グループ無しのまとまりとの区切り（見出しは無し）
+                            Rectangle().fill(Deco.faintGold)
+                                .frame(height: 0.7)
+                                .padding(.top, 8)
+                                .padding(.horizontal, 6)
+                        }
+                        ForEach(section.tabs) { tab in
+                            DraggableTabRow(
+                                manager: manager,
+                                grouper: grouper,
+                                indicatorModel: dropModel,
+                                tab: tab,
+                                groupNames: groupNames
+                            )
+                        }
                     }
                 }
                 .padding(.horizontal, 10)
@@ -1054,19 +1169,47 @@ struct VerticalTabStrip: View {
                 .padding(.horizontal, 14)
                 .padding(.top, 8)
 
-            Button(action: { manager.addTab() }) {
-                HStack(spacing: 8) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 12))
-                    Text("New Tab")
-                        .font(.system(size: 12, design: .serif))
-                        .tracking(2)
+            HStack(spacing: 0) {
+                Button(action: { manager.addTab() }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 12))
+                        Text("New Tab")
+                            .font(.system(size: 12, design: .serif))
+                            .tracking(2)
+                    }
+                    .foregroundColor(Deco.dimGold)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
                 }
-                .foregroundColor(Deco.dimGold)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .buttonStyle(.plain)
+
+                Spacer(minLength: 0)
+
+                // タブグループの再生成ボタン。
+                // Apple Intelligence が使えない環境では出さない。
+                // ⌥＋クリックで手動割り当てもご破算にして組み直す
+                if grouper.isWorking {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .tint(Deco.gold)
+                        .padding(.trailing, 16)
+                } else if grouper.isAvailable {
+                    Button {
+                        let reset = NSEvent.modifierFlags.contains(.option)
+                        grouper.regroupNow(tabs: manager.tabs, clearingManual: reset)
+                    } label: {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 11))
+                            .foregroundColor(Deco.gold)
+                            .frame(width: 20, height: 20)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Regroup Tabs (⌥-click: reset manual grouping)")
+                    .padding(.trailing, 12)
+                }
             }
-            .buttonStyle(.plain)
         }
         .frame(width: 200)
         .background(Deco.panel)
@@ -1076,13 +1219,99 @@ struct VerticalTabStrip: View {
     }
 }
 
+// タブ一行にドラッグ＆ドロップを着せる包み。
+// 上半分に落とせば前、下半分なら後ろに挿さる（ブックマークの左右判定の縦版）
+private struct DraggableTabRow: View {
+    @ObservedObject var manager: TabManager
+    @ObservedObject var grouper: TabGrouper
+    @ObservedObject var indicatorModel: DropIndicatorModel
+    let tab: Tab
+    let groupNames: [String]
+
+    @State private var rowHeight: CGFloat = 1
+
+    private var showBefore: Bool { indicatorModel.indicator == DropIndicator(id: tab.id, side: .before) }
+    private var showAfter:  Bool { indicatorModel.indicator == DropIndicator(id: tab.id, side: .after) }
+
+    var body: some View {
+        DecoTabRow(
+            tab: tab,
+            grouper: grouper,
+            groupNames: groupNames,
+            isSelected: tab.id == manager.selectedID,
+            onSelect: { manager.select(tab) },
+            onClose:  { manager.closeTab(tab) }
+        )
+        // 高さを測っておく（上下判定に使う）
+        .background(
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { rowHeight = geo.size.height }
+                    .onChange(of: geo.size.height) { _, h in rowHeight = h }
+            }
+        )
+        .onDrag { NSItemProvider(object: tab.id.uuidString as NSString) }
+        .onDrop(of: [.text], delegate: TabDropDelegate(
+            tab: tab, manager: manager, height: rowHeight, indicatorModel: indicatorModel
+        ))
+        .overlay(alignment: .top) {
+            if showBefore {
+                Rectangle().fill(Deco.gold).frame(height: 2)
+                    .offset(y: -1).allowsHitTesting(false)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if showAfter {
+                Rectangle().fill(Deco.gold).frame(height: 2)
+                    .offset(y: 1).allowsHitTesting(false)
+            }
+        }
+    }
+}
+
+// 各タブ行のドロップ（上半分＝前、下半分＝後ろ）
+private struct TabDropDelegate: DropDelegate {
+    let tab: Tab
+    let manager: TabManager
+    let height: CGFloat
+    let indicatorModel: DropIndicatorModel
+
+    private func side(_ info: DropInfo) -> DropSide {
+        info.location.y < height / 2 ? .before : .after
+    }
+
+    func dropEntered(info: DropInfo) {
+        indicatorModel.show(DropIndicator(id: tab.id, side: side(info)))
+    }
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        indicatorModel.show(DropIndicator(id: tab.id, side: side(info)))
+        return DropProposal(operation: .move)
+    }
+    func performDrop(info: DropInfo) -> Bool {
+        let after = side(info) == .after
+        indicatorModel.clear()
+        guard let provider = info.itemProviders(for: [.text]).first else { return false }
+        provider.loadObject(ofClass: NSString.self) { obj, _ in
+            guard let idString = obj as? String else { return }
+            Task { @MainActor in
+                manager.moveTab(draggedID: idString, target: tab, after: after)
+            }
+        }
+        return true
+    }
+}
+
 struct DecoTabRow: View {
     @ObservedObject var tab: Tab
+    @ObservedObject var grouper: TabGrouper
+    let groupNames: [String]
     let isSelected: Bool
     let onSelect: () -> Void
     let onClose: () -> Void
 
     @State private var hovering = false
+    @State private var showingNewGroup = false
+    @State private var newGroupName = ""
     private let shape = Hexagon(inset: 9)
 
     var body: some View {
@@ -1135,6 +1364,30 @@ struct DecoTabRow: View {
         .animation(.easeInOut(duration: 0.12), value: hovering)
         .contextMenu {
             Button(tab.isMuted ? "Unmute Tab" : "Mute Tab") { tab.toggleMute() }
+            Menu("Move to Group") {
+                ForEach(groupNames, id: \.self) { name in
+                    Button {
+                        grouper.assignManually(tab.id, to: name)
+                    } label: {
+                        if grouper.assignments[tab.id] == name {
+                            Label { Text(verbatim: name) } icon: { Image(systemName: "checkmark") }
+                        } else {
+                            Text(verbatim: name)
+                        }
+                    }
+                }
+                if !groupNames.isEmpty { Divider() }
+                Button("New Group…") { showingNewGroup = true }
+                Button("No Group") { grouper.assignManually(tab.id, to: nil) }
+            }
+        }
+        .alert("New Group", isPresented: $showingNewGroup) {
+            TextField("Group name", text: $newGroupName)
+            Button("Create") {
+                grouper.assignManually(tab.id, to: newGroupName)
+                newGroupName = ""
+            }
+            Button("Cancel", role: .cancel) { newGroupName = "" }
         }
     }
 }
@@ -1451,9 +1704,14 @@ struct BrowserPane: View {
                 NavButton(system: "chevron.right", disabled: !tab.canGoForward) { tab.goForward() }
                 NavButton(system: "arrow.clockwise", disabled: false)           { tab.reload() }
 
-                TextField("Search or enter address", text: $addressText, onCommit: submitAddress)
+                // onCommit 付きの旧イニシャライザは、macOS では Return だけでなく
+                // フォーカスが外れた瞬間（編集終了時）にも発火してしまう。
+                // アドレスを変えずにページをクリックしただけで再読み込みが走るのはこれが原因。
+                // .onSubmit は Return キーのときだけ呼ばれる
+                TextField("Search or enter address", text: $addressText)
                     .textFieldStyle(.plain)
                     .focused($addressFocused)
+                    .onSubmit(submitAddress)
                     .font(.system(size: 12, design: .serif))
                     .foregroundColor(Deco.gold)
                     .padding(.horizontal, 14)
@@ -1519,6 +1777,14 @@ struct BrowserPane: View {
             addressText = tab.urlText
             addressFocused = true
         }
+        // Safari と同じ挙動：打ちかけのままフォーカスが外れたら、
+        // 現在のページの URL に戻す（Return で確定した場合は
+        // submitAddress が先に urlText を更新しているので影響なし）
+        .onChange(of: addressFocused) { _, focused in
+            if !focused {
+                addressText = tab.urlText
+            }
+        }
     }
 
     private func submitAddress() {
@@ -1536,7 +1802,7 @@ struct ContentView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            VerticalTabStrip(manager: manager)
+            VerticalTabStrip(manager: manager, grouper: manager.grouper)
 
             if let tab = manager.selectedTab {
                 BrowserPane(tab: tab, manager: manager)
