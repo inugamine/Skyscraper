@@ -753,6 +753,15 @@ extension Tab: WKNavigationDelegate {
                              didBecome download: WKDownload) {
         Task { @MainActor in download.delegate = self }
     }
+
+    // WebContent プロセスが落ちたとき（WebKit 内部のクラッシュ）の立て直し。
+    // 放っておくとタブが白紙のままになるので、自動で読み直す
+    nonisolated func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        Task { @MainActor in
+            print("Tab: WebContent process crashed, reloading")
+            webView.reload()
+        }
+    }
 }
 
 // MARK: - ダウンロードの受け取り
