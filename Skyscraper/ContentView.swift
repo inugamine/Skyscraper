@@ -1696,17 +1696,150 @@ struct BookmarkManager: View {
     }
 }
 
+// MARK: - アドレスバー本体（AppKit 直書き）
+
+// SwiftUI の TextField は macOS 26 で AppKit の NSTextField として階層に
+// 現れず、first responder の動きも観測不能になったため、「クリックで全選択」を
+// SwiftUI 側から確実に実装する手段が無い（TapGesture・イベントモニタ・
+// hitTest ・リトライすべて検証済みで不成立）。
+// アドレスバーだけ NSTextField に置き換えて、クリックの一部始終を自前で握る。
+
+// フォーカスを得るクリックで全選択する NSTextField。
+// mouseDown がここに届く＝フィールドエディタがまだ無い＝未編集、なので
+// フォーカスを立てて全選択し、クリック自体は飲み込む
+// （super に流すとカーソル配置が選択を壊す）。
+// 編集中のクリックはフィールドエディタが直接受けるためここには来ない。
+// レースもリトライも無い、決定論的な実装。
+final class ClickSelectTextField: NSTextField {
+    // 編集の開始／終了を親（SwiftUI 側）へ知らせる
+    var onEditingChanged: ((Bool) -> Void)?
+
+    // ユーザーが実際にこの欄へ関わったか。
+    // AppKit は起動時に initialFirstResponder としてこの欄を「静かに」
+    // フォーカスさせることがあり、その状態を「編集中」と誤認すると
+    // 最初のクリックで全選択されなくなる。engaged で両者を区別する
+    private var engaged = false
+
+    override func mouseDown(with event: NSEvent) {
+        // 未編集、または「静かなフォーカス」中の最初のクリック：
+        // フォーカスを立てて全選択し、クリック自体は飲み込む
+        // （super に流すとカーソル配置が選択を壊す）
+        if currentEditor() == nil || !engaged {
+            focusAndSelectAll()
+            return
+        }
+        super.mouseDown(with: event)
+    }
+
+    // フォーカスを立てて全選択し、engaged にする（⌘L とクリックの共通処理）
+    func focusAndSelectAll() {
+        engaged = true
+        window?.makeFirstResponder(self)
+        // makeFirstResponder 直後にエディタが未設置なら selectText で強制設置
+        if currentEditor() == nil { selectText(nil) }
+        currentEditor()?.selectAll(nil)
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let ok = super.becomeFirstResponder()
+        if ok { onEditingChanged?(true) }
+        return ok
+    }
+
+    override func textDidEndEditing(_ notification: Notification) {
+        super.textDidEndEditing(notification)
+        engaged = false
+        onEditingChanged?(false)
+    }
+}
+
+struct AddressField: NSViewRepresentable {
+    @Binding var text: String
+    // ⌘L の合図。値が変わったらフォーカスして全選択する
+    let focusTrigger: Int
+    let onSubmit: () -> Void
+    let onEditingChanged: (Bool) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeNSView(context: Context) -> ClickSelectTextField {
+        let field = ClickSelectTextField()
+        field.isBordered = false
+        field.isBezeled = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.usesSingleLineMode = true
+        field.lineBreakMode = .byTruncatingTail
+        field.delegate = context.coordinator
+
+        // 見た目は SwiftUI 版と同じ：セリフ体 12pt・金文字
+        let size: CGFloat = 12
+        let serif = NSFont.systemFont(ofSize: size).fontDescriptor.withDesign(.serif)
+        let font = serif.flatMap { NSFont(descriptor: $0, size: size) }
+            ?? NSFont.systemFont(ofSize: size)
+        field.font = font
+        field.textColor = NSColor(Deco.gold)
+        field.placeholderAttributedString = NSAttributedString(
+            string: String(localized: "Search or enter address"),
+            attributes: [.foregroundColor: NSColor(Deco.dimGold), .font: font]
+        )
+        field.onEditingChanged = { editing in
+            DispatchQueue.main.async { context.coordinator.parent.onEditingChanged(editing) }
+        }
+        return field
+    }
+
+    func updateNSView(_ field: ClickSelectTextField, context: Context) {
+        context.coordinator.parent = self
+        // 編集中の打鍵を潰さないよう、編集していないときだけ外の値を反映する
+        if field.currentEditor() == nil, field.stringValue != text {
+            field.stringValue = text
+        }
+        // ⌘L：フォーカスして全選択（engaged も立つので直後のクリックはカーソル配置）
+        if context.coordinator.lastFocusTrigger != focusTrigger {
+            context.coordinator.lastFocusTrigger = focusTrigger
+            DispatchQueue.main.async {
+                field.focusAndSelectAll()
+            }
+        }
+    }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        var parent: AddressField
+        var lastFocusTrigger: Int
+
+        init(_ parent: AddressField) {
+            self.parent = parent
+            // 初回表示で勝手にフォーカスを奪わないよう、現在値で初期化
+            self.lastFocusTrigger = parent.focusTrigger
+        }
+
+        func controlTextDidChange(_ obj: Notification) {
+            guard let field = obj.object as? NSTextField else { return }
+            parent.text = field.stringValue
+        }
+
+        // Return で確定。それ以外のキー操作は既定に任せる
+        func control(_ control: NSControl, textView: NSTextView,
+                     doCommandBy commandSelector: Selector) -> Bool {
+            if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+                parent.onSubmit()
+                return true
+            }
+            return false
+        }
+    }
+}
+
 // MARK: - 選択中タブの中身
 
 struct BrowserPane: View {
     @ObservedObject var tab: Tab
     @ObservedObject var manager: TabManager
     @EnvironmentObject var store: BookmarkStore
-    @FocusState private var addressFocused: Bool
     @State private var addressText: String = ""
-    // 「クリックでフォーカスを得た直後」の印。
-    // mouseUp 後の全選択（TapGesture.onEnded）を一回だけ有効にする
-    @State private var selectAllOnClick = false
+    // アドレスバーを編集中か（AddressField からの通知で更新）
+    @State private var addressEditing = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1716,31 +1849,28 @@ struct BrowserPane: View {
                 NavButton(system: "chevron.right", disabled: !tab.canGoForward) { tab.goForward() }
                 NavButton(system: "arrow.clockwise", disabled: false)           { tab.reload() }
 
-                // onCommit 付きの旧イニシャライザは、macOS では Return だけでなく
-                // フォーカスが外れた瞬間（編集終了時）にも発火してしまう。
-                // アドレスを変えずにページをクリックしただけで再読み込みが走るのはこれが原因。
-                // .onSubmit は Return キーのときだけ呼ばれる
-                TextField("Search or enter address", text: $addressText)
-                    .textFieldStyle(.plain)
-                    .focused($addressFocused)
-                    .onSubmit(submitAddress)
-                    // クリックでの全選択は mouseUp 後でないと効かない。
-                    // （mouseUp 時のカーソル配置が選択を上書きするため、
-                    //  フォーカス直後に打つと「一瞬選択→即解除」になる）
-                    // TapGesture.onEnded は mouseUp 後に呼ばれるのでここで打つ。
-                    // 旗が立っている＝このクリックでフォーカスを得たときだけ。
-                    // フォーカス済みでの再クリックはカーソル配置に任せる（Safari と同じ）
-                    .simultaneousGesture(TapGesture().onEnded {
-                        guard selectAllOnClick else { return }
-                        selectAllOnClick = false
-                        DispatchQueue.main.async { selectAllInFieldEditor() }
-                    })
-                    .font(.system(size: 12, design: .serif))
-                    .foregroundColor(Deco.gold)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 7)
-                    .background(Hexagon(inset: 6).fill(Deco.field))
-                    .overlay(Hexagon(inset: 6).stroke(Deco.faintGold, lineWidth: 1))
+                // アドレスバーは AppKit 直書き（AddressField）。
+                // 確定は delegate の insertNewline でのみ行い、target/action は
+                // 使わない（action は編集終了でも発火し、ページをクリックした
+                // だけで再読み込みが走る事故の再演になるため）。
+                // クリックでの全選択（Safari と同じ挙動）は AddressField 内の
+                // AppKit 実装が決定論的に行う。編集終了時は打ちかけを捨てて
+                // 現在の URL に戻す（Return 確定時は submitAddress が先に
+                // urlText を更新しているので影響なし）
+                AddressField(
+                    text: $addressText,
+                    focusTrigger: tab.addressBarFocusTrigger,
+                    onSubmit: submitAddress,
+                    onEditingChanged: { editing in
+                        addressEditing = editing
+                        if !editing { addressText = tab.urlText }
+                    }
+                )
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+                .background(Hexagon(inset: 6).fill(Deco.field))
+                .overlay(Hexagon(inset: 6).stroke(Deco.faintGold, lineWidth: 1))
 
                 // 星ボタン：現在のページを登録／解除
                 Button {
@@ -1792,41 +1922,15 @@ struct BrowserPane: View {
             addressText = tab.urlText
         }
         .onChange(of: tab.urlText) { _, newValue in
-            if !addressFocused {
+            if !addressEditing {
                 addressText = newValue
             }
         }
         .onChange(of: tab.addressBarFocusTrigger) { _, _ in
+            // フォーカスと全選択は AddressField 側が focusTrigger の変化で行う。
+            // ここでは表示文字列を現在の URL に揃えるだけ
             addressText = tab.urlText
-            addressFocused = true
         }
-        // Safari と同じ挙動：
-        // フォーカスを得たら既存のアドレスを全選択する（打ち始めで即上書き）。
-        // ⌘L などキーボード経由はここの即時 selectAll で確定する。
-        // クリック経由はこの後の mouseUp に上書きされるので、旗を立てて
-        // TapGesture.onEnded 側（mouseUp 後）にもう一度打たせる。
-        // 旗は 0.6 秒で自動消灯（⌘L で立てた旗が後のクリックに悪さをしないように）。
-        // フォーカスが外れたときは、打ちかけを捨てて現在の URL に戻す
-        // （Return で確定した場合は submitAddress が先に urlText を更新しているので影響なし）
-        .onChange(of: addressFocused) { _, focused in
-            if focused {
-                selectAllOnClick = true
-                DispatchQueue.main.async { selectAllInFieldEditor() }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                    selectAllOnClick = false
-                }
-            } else {
-                addressText = tab.urlText
-            }
-        }
-    }
-
-    // アドレスバーの中身を全選択する。
-    // SwiftUI に選択操作の API は無いので、フォーカス中の first responder
-    // ＝フィールドエディタ（NSTextView）に直接打つ
-    private func selectAllInFieldEditor() {
-        guard let editor = NSApp.keyWindow?.firstResponder as? NSTextView else { return }
-        editor.selectAll(nil)
     }
 
     private func submitAddress() {
