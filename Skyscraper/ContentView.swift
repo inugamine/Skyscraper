@@ -1742,8 +1742,26 @@ final class ClickSelectTextField: NSTextField {
 
     override func becomeFirstResponder() -> Bool {
         let ok = super.becomeFirstResponder()
-        if ok { onEditingChanged?(true) }
+        if ok {
+            onEditingChanged?(true)
+            // 受け身でフォーカスが回ってきた場合（タブ切り替えで直前の
+            // first responder だった WebView が隠れた等）、NSTextField 既定の
+            // 全選択は解いてカーソルだけにする。
+            // ユーザー操作（クリック・⌘L）は engaged が先に立っている
+            if !engaged {
+                currentEditor()?.selectedRange = NSRange(location: stringValue.count, length: 0)
+            }
+        }
         return ok
+    }
+
+    // タブ切り替え時の仕切り直し：編集を破棄し、engaged も下ろす。
+    // abortEditing は textDidEndEditing を通らないので、編集終了の通知は手動で流す
+    func resetForTabSwitch() {
+        let wasEditing = currentEditor() != nil
+        abortEditing()
+        engaged = false
+        if wasEditing { onEditingChanged?(false) }
     }
 
     override func textDidEndEditing(_ notification: Notification) {
@@ -1755,6 +1773,8 @@ final class ClickSelectTextField: NSTextField {
 
 struct AddressField: NSViewRepresentable {
     @Binding var text: String
+    // タブの印。変わったら「別のタブに移った」ので編集を仕切り直す
+    let tabToken: UUID
     // ⌘L の合図。値が変わったらフォーカスして全選択する
     let focusTrigger: Int
     let onSubmit: () -> Void
@@ -1791,6 +1811,16 @@ struct AddressField: NSViewRepresentable {
 
     func updateNSView(_ field: ClickSelectTextField, context: Context) {
         context.coordinator.parent = self
+        // タブが切り替わった：編集を破棄して新しいタブの URL を強制反映する。
+        // （編集中ガードに阻まれて前のタブの URL が残る事故を防ぐ）
+        if context.coordinator.lastTabToken != tabToken {
+            let isFirstUpdate = context.coordinator.lastTabToken == nil
+            context.coordinator.lastTabToken = tabToken
+            if !isFirstUpdate {
+                field.resetForTabSwitch()
+                field.stringValue = text
+            }
+        }
         // 編集中の打鍵を潰さないよう、編集していないときだけ外の値を反映する
         if field.currentEditor() == nil, field.stringValue != text {
             field.stringValue = text
@@ -1807,6 +1837,7 @@ struct AddressField: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextFieldDelegate {
         var parent: AddressField
         var lastFocusTrigger: Int
+        var lastTabToken: UUID?
 
         init(_ parent: AddressField) {
             self.parent = parent
@@ -1859,6 +1890,7 @@ struct BrowserPane: View {
                 // urlText を更新しているので影響なし）
                 AddressField(
                     text: $addressText,
+                    tabToken: tab.id,
                     focusTrigger: tab.addressBarFocusTrigger,
                     onSubmit: submitAddress,
                     onEditingChanged: { editing in
