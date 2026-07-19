@@ -1704,6 +1704,9 @@ struct BrowserPane: View {
     @EnvironmentObject var store: BookmarkStore
     @FocusState private var addressFocused: Bool
     @State private var addressText: String = ""
+    // 「クリックでフォーカスを得た直後」の印。
+    // mouseUp 後の全選択（TapGesture.onEnded）を一回だけ有効にする
+    @State private var selectAllOnClick = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1721,6 +1724,17 @@ struct BrowserPane: View {
                     .textFieldStyle(.plain)
                     .focused($addressFocused)
                     .onSubmit(submitAddress)
+                    // クリックでの全選択は mouseUp 後でないと効かない。
+                    // （mouseUp 時のカーソル配置が選択を上書きするため、
+                    //  フォーカス直後に打つと「一瞬選択→即解除」になる）
+                    // TapGesture.onEnded は mouseUp 後に呼ばれるのでここで打つ。
+                    // 旗が立っている＝このクリックでフォーカスを得たときだけ。
+                    // フォーカス済みでの再クリックはカーソル配置に任せる（Safari と同じ）
+                    .simultaneousGesture(TapGesture().onEnded {
+                        guard selectAllOnClick else { return }
+                        selectAllOnClick = false
+                        DispatchQueue.main.async { selectAllInFieldEditor() }
+                    })
                     .font(.system(size: 12, design: .serif))
                     .foregroundColor(Deco.gold)
                     .padding(.horizontal, 14)
@@ -1786,14 +1800,33 @@ struct BrowserPane: View {
             addressText = tab.urlText
             addressFocused = true
         }
-        // Safari と同じ挙動：打ちかけのままフォーカスが外れたら、
-        // 現在のページの URL に戻す（Return で確定した場合は
-        // submitAddress が先に urlText を更新しているので影響なし）
+        // Safari と同じ挙動：
+        // フォーカスを得たら既存のアドレスを全選択する（打ち始めで即上書き）。
+        // ⌘L などキーボード経由はここの即時 selectAll で確定する。
+        // クリック経由はこの後の mouseUp に上書きされるので、旗を立てて
+        // TapGesture.onEnded 側（mouseUp 後）にもう一度打たせる。
+        // 旗は 0.6 秒で自動消灯（⌘L で立てた旗が後のクリックに悪さをしないように）。
+        // フォーカスが外れたときは、打ちかけを捨てて現在の URL に戻す
+        // （Return で確定した場合は submitAddress が先に urlText を更新しているので影響なし）
         .onChange(of: addressFocused) { _, focused in
-            if !focused {
+            if focused {
+                selectAllOnClick = true
+                DispatchQueue.main.async { selectAllInFieldEditor() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                    selectAllOnClick = false
+                }
+            } else {
                 addressText = tab.urlText
             }
         }
+    }
+
+    // アドレスバーの中身を全選択する。
+    // SwiftUI に選択操作の API は無いので、フォーカス中の first responder
+    // ＝フィールドエディタ（NSTextView）に直接打つ
+    private func selectAllInFieldEditor() {
+        guard let editor = NSApp.keyWindow?.firstResponder as? NSTextView else { return }
+        editor.selectAll(nil)
     }
 
     private func submitAddress() {
