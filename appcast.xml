@@ -7,6 +7,27 @@
     <language>en</language>
 
     <item>
+      <title>Version 1.7</title>
+      <pubDate>Wed, 22 Jul 2026 18:36:34 +0900</pubDate>
+      <sparkle:version>7</sparkle:version>
+      <sparkle:shortVersionString>1.7</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>Skyscraper 1.7</h2>
+        <ul>
+          <li>YouTube のライブ配信にコメントが打てるようになりました。</li>
+          <li>(その結果広告も差し込まれるようになりました；；)</li>
+          <li>アドレスバーの挙動を改善しました。</li>
+          <li>タブの自動グルーピング機能を実装しました。タブ4枚以上で発動します。</li>
+          <li>デザインの一部を変更しました。</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://github.com/inugamine/Skyscraper/releases/download/v1.7/Skyscraper-1.7.zip"
+        sparkle:edSignature="KXFOjWSU0ZWwQZ9/LGdi1YAAhEQtyN80MwDidzcOrgtxLuLo4/qI48vmbt5k+mxQj7WwZv0qhObwBJ8zLlXKAQ=="
+        length="1293429"
+        type="application/octet-stream" />
+    </item>    <item>
       <title>Version 1.6</title>
       <pubDate>Thu, 16 Jul 2026 19:51:04 +0900</pubDate>
       <sparkle:version>6</sparkle:version>
