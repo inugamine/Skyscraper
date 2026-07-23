@@ -8,5 +8,9 @@
 	<string>Ws0ahm+WarB3Ih6WwGgDHTxmPtsxn/R8blQY53MixXQ=</string>
 	<key>SUEnableInstallerLauncherService</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Skyscraper needs camera access so that websites you allow can use the camera.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Skyscraper needs microphone access so that websites you allow can use the microphone.</string>
 </dict>
 </plist>

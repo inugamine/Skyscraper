@@ -471,10 +471,58 @@ final class SkyscraperWebView: WKWebView {
 
 // MARK: - WKWebView ラッパー
 
+// SwiftUI と WKWebView の間に挟む器。
+// 全画面再生に入ると、WebKit は WKWebView を別ウィンドウへ引っこ抜き、
+// 終わったら元の親に戻す。親が SwiftUI の管理下だと、SwiftUI は
+// 「子が居ない」と見て即座に引き戻し、WebKit は梯子を外されて
+// 全画面を諦める（一瞬だけ大画面になって戻る症状）。
+// SwiftUI にはこの器だけを見せ、WKWebView の出入りは見せない。
+final class WebViewContainer: NSView {
+    // 裏タブの WebView がクリックを拾わないよう、AppKit の層でも遮断する
+    var isInteractive = true
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        isInteractive ? super.hitTest(point) : nil
+    }
+}
+
 struct WebView: NSViewRepresentable {
     let webView: WKWebView
-    func makeNSView(context: Context) -> WKWebView { webView }
-    func updateNSView(_ nsView: WKWebView, context: Context) {}
+    var isInteractive: Bool = true
+
+    func makeNSView(context: Context) -> WebViewContainer {
+        let container = WebViewContainer()
+        container.isInteractive = isInteractive
+        mount(webView, in: container)
+        return container
+    }
+
+    func updateNSView(_ container: WebViewContainer, context: Context) {
+        container.isInteractive = isInteractive
+
+        // ここでは WKWebView の親子関係に一切手を出さない。
+        //
+        // 全画面の出入りでは WebKit が自分で親を付け替え、終わったら
+        // 元の器に戻す。その途中でこちらが付け直しに行くと、全画面が
+        // 即座に中断される（一瞬だけ大画面になって戻る症状）。
+        //
+        // fullscreenState を見て避けようとしたが、引っこ抜きと
+        // 状態の切り替わりには隙間があり、そこを踏むと
+        // .notInFullscreen なのに superview が器でない状態を
+        // 「迷子」と誤判して引き戻してしまう。
+        // 再描画が頻繁なページ（X など）でだけ再現するのはこのせい。
+        //
+        // 後始末は WebKit の仕事だ。任せる
+    }
+
+    // 制約ではなく autoresizing で押さえる。
+    // 制約は親を離れた瞬間に外され、戻ってきても復活しない
+    private func mount(_ webView: WKWebView, in container: WebViewContainer) {
+        webView.removeFromSuperview()
+        webView.frame = container.bounds
+        webView.autoresizingMask = [.width, .height]
+        container.addSubview(webView)
+    }
 }
 
 // MARK: - タブ一枚ぶんの状態
@@ -495,7 +543,17 @@ private final class WeakScriptMessageHandler: NSObject, WKScriptMessageHandler {
 @MainActor
 final class Tab: NSObject, ObservableObject, Identifiable {
     let id = UUID()
-    let webView: WKWebView = SkyscraperWebView()
+    // WKWebView は生成後に configuration を読むとコピーが返るため、
+    // 設定は必ず生成前に済ませる
+    let webView: WKWebView = {
+        let configuration = WKWebViewConfiguration()
+        // 動画の全画面ボタン（Fullscreen API）を使えるようにする。
+        // macOS の WKWebView はこれが既定で無効で、ページが
+        // requestFullscreen() を呼んでも黙って拒否される（おかげで
+        // YouTube も X も大画面ボタンが無反応になる）
+        configuration.preferences.isElementFullscreenEnabled = true
+        return SkyscraperWebView(frame: .zero, configuration: configuration)
+    }()
 
     @Published var urlText: String = ""
     @Published var canGoBack: Bool = false
@@ -508,11 +566,14 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     @Published var isPlayingAudio: Bool = false
     // ミュート中か
     @Published var isMuted: Bool = false
+    // 疑似大画面（シアター）中か。サイドバーやバー類の隠しに使う
+    @Published var isVideoFullscreen: Bool = false
 
     // ⌘クリックされたリンクを新規タブで開くための連絡先（TabManager が入れる）
     var openInNewTab: ((String) -> Void)?
 
     private static let mediaStateMessageHandlerName = "skyscraperMediaState"
+    private static let fullscreenMessageHandlerName = "skyscraperFullscreen"
     private static let mediaPlaybackObserverScript = WKUserScript(
         source: """
         (() => {
@@ -527,9 +588,238 @@ final class Tab: NSObject, ObservableObject, Identifiable {
             let reportScheduled = false;
             let muted = false;
 
+            // ── 自動再生の音を黙らせる番人 ──
+            // X（Twitter）は「ミュート解除」の設定を覚えていて、スクロールで
+            // 次の動画が流れてくるたびに勝手に音を出す。
+            // 「利用者が自分の手で外した要素だけ音を許す」規則で押さえ込む。
+            // 対象を増やしたければこの配列に足す
+            const guardedHosts = ['x.com', 'twitter.com'];
+            const autoplayGuard = guardedHosts.some(host =>
+                location.hostname === host || location.hostname.endsWith('.' + host)
+            );
+
+            // 直近のユーザー操作の時刻。ミュート解除がユーザー由来かページ由来かは
+            // これで見分ける（isTrusted なので JS からは詐称できない）
+            let lastGestureAt = -Infinity;
+            const gestureWindow = 1000;
+            const userJustActed = () => Date.now() - lastGestureAt < gestureWindow;
+            if (autoplayGuard) {
+                ['pointerdown', 'mousedown', 'click', 'keydown'].forEach(eventName => {
+                    document.addEventListener(eventName, event => {
+                        if (event.isTrusted) { lastGestureAt = Date.now(); }
+                    }, true);
+                });
+
+                // ── 疑似大画面（シアター）──
+                // X は本物の全画面に入ると、イベント・getter・Promise・
+                // resize・焦点を全て偽装しても約150msでプレイヤーの DOM を
+                // 作り直し、全画面中の要素が消えて強制解除される
+                // （経路はページ側 JS から偽装できない場所にある）。
+                // なので本物の全画面は使わず、requestFullscreen を横取りして
+                // CSS で要素をウィンドウいっぱいに広げる。ページには何も
+                // 起きていないので、原理的に気付かれない。
+                // ウィンドウ自体の全画面化はアプリ側（skyscraperFullscreen）が担う
+                const theaterStyle = document.createElement('style');
+                theaterStyle.textContent =
+                    '.__skyscraper-theater { position: fixed !important; inset: 0 !important; ' +
+                    'width: 100vw !important; height: 100vh !important; ' +
+                    'max-width: none !important; max-height: none !important; ' +
+                    'margin: 0 !important; padding: 0 !important; transform: none !important; ' +
+                    'border-radius: 0 !important; background: #000 !important; ' +
+                    'z-index: 2147483647 !important; } ' +
+                    '.__skyscraper-theater video { width: 100% !important; height: 100% !important; ' +
+                    'object-fit: contain !important; } ' +
+                    '.__skyscraper-theater-ancestor { transform: none !important; ' +
+                    'filter: none !important; backdrop-filter: none !important; ' +
+                    'perspective: none !important; contain: none !important; ' +
+                    'will-change: auto !important; z-index: auto !important; ' +
+                    'overflow: visible !important; } ' +
+                    '.__skyscraper-theater-hidden { visibility: hidden !important; } ' +
+                    '.__skyscraper-theater-nocursor, .__skyscraper-theater-nocursor * { ' +
+                    'cursor: none !important; }';
+                (document.head || document.documentElement).appendChild(theaterStyle);
+
+                let theaterTarget = null;
+                let theaterAncestors = [];
+                let theaterHidden = [];
+                let theaterResumeCleanup = null;
+                let theaterScrollX = 0;
+                let theaterScrollY = 0;
+                // 動画への通り道（先祖の連なり）に居ない兄弟を隠す。
+                // 何度呼んでも良い作り（既に隠した奴は飛ばす）にしてあり、
+                // 在場中に React が作り直した・新しく生やした要素にも
+                // MutationObserver 経由で採用される
+                const theaterHide = () => {
+                    if (!theaterTarget) { return; }
+                    let onPath = theaterTarget;
+                    let parent = theaterTarget.parentElement;
+                    while (parent && onPath !== document.body) {
+                        for (const sibling of parent.children) {
+                            if (sibling !== onPath
+                                && !sibling.classList.contains('__skyscraper-theater-hidden')) {
+                                sibling.classList.add('__skyscraper-theater-hidden');
+                                theaterHidden.push(sibling);
+                            }
+                        }
+                        onPath = parent;
+                        parent = parent.parentElement;
+                    }
+                };
+
+                // ── カーソルの自動消灯 ──
+                // 映画館方式：止まって2.5秒で消え、動かせば即座に戻る。
+                // 一時停止中は消さない（コントロール操作の邪魔になる）
+                let theaterCursorTimer = null;
+                const theaterCursorHide = () => {
+                    if (!theaterTarget) { return; }
+                    const video = theaterTarget.querySelector('video');
+                    if (video && video.paused) { return; }
+                    theaterTarget.classList.add('__skyscraper-theater-nocursor');
+                };
+                const theaterCursorShow = () => {
+                    clearTimeout(theaterCursorTimer);
+                    theaterCursorTimer = null;
+                    if (!theaterTarget) { return; }
+                    theaterTarget.classList.remove('__skyscraper-theater-nocursor');
+                    theaterCursorTimer = setTimeout(theaterCursorHide, 2500);
+                };
+                window.addEventListener('mousemove', () => {
+                    if (theaterTarget) { theaterCursorShow(); }
+                }, true);
+
+                const theaterEnter = element => {
+                    theaterTarget = element;
+                    // 退場時に戻すため、今のスクロール位置を控える
+                    theaterScrollX = window.scrollX;
+                    theaterScrollY = window.scrollY;
+                    element.classList.add('__skyscraper-theater');
+                    // position: fixed は、先祖に transform 等を持つ要素が居ると
+                    // ビューポートではなくその先祖基準になる（X はセルの配置に
+                    // transform を使う）。在場中だけ先祖全員の transform ・
+                    // z-index などを無効化して、fixed を本来の意味に戻す
+                    theaterAncestors = [];
+                    let node = element.parentElement;
+                    while (node && node !== document.documentElement) {
+                        node.classList.add('__skyscraper-theater-ancestor');
+                        theaterAncestors.push(node);
+                        node = node.parentElement;
+                    }
+                    // X のナビや浮きボタンは別層の fixed で、z-index では
+                    // 確実に勝てない。勝負せず、道の外の兄弟を隠す。
+                    // レイアウトは動かないので、剥がせば完全に元通り
+                    theaterHidden = [];
+                    theaterHide();
+                    // X は全画面移行の前置きとして動画を一時停止することがある。
+                    // 本物の全画面は永遠に来ないので、再開の合図も永遠に来ない。
+                    // 入場時に起こし、直後（移行処理の残り）の一時停止も
+                    // 1.2 秒だけ見張って起こし直す。
+                    // （その後の一時停止は本人の操作と見なして触らない）
+                    const theaterVideo = element.querySelector('video');
+                    if (theaterVideo) {
+                        const resume = () => { theaterVideo.play().catch(() => {}); };
+                        const onPause = () => resume();
+                        theaterVideo.addEventListener('pause', onPause, true);
+                        const disarm = setTimeout(() => {
+                            theaterVideo.removeEventListener('pause', onPause, true);
+                        }, 1200);
+                        theaterResumeCleanup = () => {
+                            clearTimeout(disarm);
+                            theaterVideo.removeEventListener('pause', onPause, true);
+                        };
+                        if (theaterVideo.paused && !theaterVideo.ended) { resume(); }
+                    }
+                    // カーソルの消灯タイマーを回し始める
+                    theaterCursorShow();
+                    window.webkit?.messageHandlers?.skyscraperFullscreen?.postMessage(true);
+                };
+                const theaterExit = () => {
+                    if (!theaterTarget) { return; }
+                    theaterResumeCleanup?.();
+                    theaterResumeCleanup = null;
+                    clearTimeout(theaterCursorTimer);
+                    theaterCursorTimer = null;
+                    theaterTarget.classList.remove('__skyscraper-theater-nocursor');
+                    theaterTarget.classList.remove('__skyscraper-theater');
+                    theaterTarget = null;
+                    theaterAncestors.forEach(node =>
+                        node.classList.remove('__skyscraper-theater-ancestor'));
+                    theaterAncestors = [];
+                    theaterHidden.forEach(node =>
+                        node.classList.remove('__skyscraper-theater-hidden'));
+                    theaterHidden = [];
+                    // 先祖のスタイルを戻した後で、スクロール位置も元に戻す
+                    window.scrollTo(theaterScrollX, theaterScrollY);
+                    window.webkit?.messageHandlers?.skyscraperFullscreen?.postMessage(false);
+                };
+                window.__skyscraperExitTheater = theaterExit;
+
+                const origRequestFullscreen = Element.prototype.requestFullscreen;
+                Element.prototype.requestFullscreen = function () {
+                    // X のボタンは fullscreenElement（常に null）を見て毎回
+                    // 「入る」を呼ぶので、ここでトグルにする
+                    if (theaterTarget) { theaterExit(); } else { theaterEnter(this); }
+                    // 解決を渡すと X が全画面用の組み直しを始めて要素を消すので、
+                    // 永遠に確定しない Promise で黙らせる
+                    return new Promise(() => {});
+                };
+
+                // Esc で退場（X には渡さない）
+                document.addEventListener('keydown', event => {
+                    if (event.key === 'Escape' && theaterTarget) {
+                        event.stopImmediatePropagation();
+                        theaterExit();
+                    }
+                }, true);
+
+                // 在場中は背後のページをスクロールさせない。
+                // overflow: hidden はスクロール位置を 0 に壊すので使わず、
+                // wheel を飲み込むだけにする
+                window.addEventListener('wheel', event => {
+                    if (theaterTarget) { event.preventDefault(); }
+                }, { passive: false, capture: true });
+
+                // 在場中の DOM 変化の見張り。
+                // ・対象ノードが差し替えで消えたら、道連れにせず畳む
+                // ・新しく生えた・作り直された要素は即座に隠し直す
+                //   （クリックで X が右欄などを再生成しても浮いてこない）
+                new MutationObserver(() => {
+                    if (!theaterTarget) { return; }
+                    if (!theaterTarget.isConnected) { theaterExit(); return; }
+                    theaterHide();
+                }).observe(document.documentElement, { childList: true, subtree: true });
+            }
+
+            // 全画面再生の最中は、番人は完全に手を引く。
+            // ここで muted を触ると volumechange が飛び、X のプレイヤーが
+            // UI を組み直して全画面中の要素を DOM から差し替える。
+            // 要素が消えれば WebKit は仕様通り全画面を解除する
+            const inFullscreen = () =>
+                !!(document.fullscreenElement || document.webkitFullscreenElement);
+
+            // コンソールから番人を止められる非常停止（診断用）。
+            // window.__skyscraperDisableAutoplayGuard = true で即座に黙る
+            const guardActive = () =>
+                autoplayGuard
+                && !window.__skyscraperDisableAutoplayGuard
+                && !inFullscreen();
+
+            // ページと張り合って無限に往復しないための安全弁
+            const correctionLimit = 30;
+            const silence = element => {
+                if (!guardActive()) { return; }
+                element.__skyscraperCorrections = (element.__skyscraperCorrections || 0) + 1;
+                if (element.__skyscraperCorrections > correctionLimit) { return; }
+                if (!element.muted) { element.muted = true; }
+            };
+
             const applyMuted = () => {
                 document.querySelectorAll('audio, video').forEach(element => {
-                    element.muted = muted;
+                    if (muted) {
+                        element.muted = true;
+                    } else if (!autoplayGuard || element.__skyscraperUnmuteApproved) {
+                        // 番人が働く場では、本人が外した要素にだけ音を戻す
+                        element.muted = false;
+                    }
                 });
             };
 
@@ -561,6 +851,44 @@ final class Tab: NSObject, ObservableObject, Identifiable {
                 // ミュート中に現れた・再生を始めた要素にもミュートを適用する
                 if (muted) { element.muted = true; }
                 element.addEventListener('play', () => { if (muted) { element.muted = true; } }, true);
+
+                if (autoplayGuard) {
+                    // 現れたばかりの要素は、まず黙らせる
+                    if (!muted && !element.__skyscraperUnmuteApproved) { silence(element); }
+
+                    // 再生開始：許可の無い要素には音を出させない
+                    const enforce = () => {
+                        if (muted || element.__skyscraperUnmuteApproved) { return; }
+                        silence(element);
+                    };
+                    ['play', 'playing', 'loadeddata'].forEach(eventName => {
+                        element.addEventListener(eventName, enforce, true);
+                    });
+                    // 中身が入れ替わったら安全弁を戻す（要素は使い回される）
+                    element.addEventListener('emptied', () => {
+                        element.__skyscraperCorrections = 0;
+                    }, true);
+
+                    // ミュート状態が変わった瞬間の見張り
+                    element.addEventListener('volumechange', () => {
+                        if (muted) { return; }
+                        if (element.muted) {
+                            // 本人が黙らせたなら許可を取り下げる。
+                            // タブミュートなどページ外の都合では取り下げない
+                            if (userJustActed()) { element.__skyscraperUnmuteApproved = false; }
+                            return;
+                        }
+                        if (userJustActed()) {
+                            // 押した直後の解除＝本人の意思。以後この要素は音を許す
+                            element.__skyscraperUnmuteApproved = true;
+                            element.__skyscraperCorrections = 0;
+                            return;
+                        }
+                        // 誰も触っていないのに音が開いた＝ページの仕業
+                        if (!element.__skyscraperUnmuteApproved) { silence(element); }
+                    }, true);
+                }
+
                 ['play', 'playing', 'pause', 'ended', 'volumechange', 'emptied', 'abort'].forEach(eventName => {
                     element.addEventListener(eventName, scheduleReport, true);
                 });
@@ -585,6 +913,18 @@ final class Tab: NSObject, ObservableObject, Identifiable {
                 applyMuted();
                 report(true);
             };
+            if (autoplayGuard) {
+                // 全画面から戻ってきたら、改めて見張りを立て直す
+                ['fullscreenchange', 'webkitfullscreenchange'].forEach(eventName => {
+                    document.addEventListener(eventName, () => {
+                        if (inFullscreen()) { return; }
+                        document.querySelectorAll('audio, video').forEach(element => {
+                            if (!muted && !element.__skyscraperUnmuteApproved) { silence(element); }
+                        });
+                        scheduleReport();
+                    }, true);
+                });
+            }
             new MutationObserver(scheduleScan).observe(document.documentElement, { childList: true, subtree: true });
             document.addEventListener('visibilitychange', scheduleReport, true);
             scan();
@@ -601,6 +941,9 @@ final class Tab: NSObject, ObservableObject, Identifiable {
 
         // トラックパッドの2本指スワイプで戻る／進む
         webView.allowsBackForwardNavigationGestures = true
+        // Safari の「開発」メニューから Web インスペクタを繋げるようにする。
+        // WebKit はこれを明示的に許可しない限り外部からの接続を拒む
+        webView.isInspectable = true
         // WKWebView 素の UA だと YouTube などに「古いブラウザ」と誤判定される。
         // 実機 Safari（macOS 27 / Version 27.0）の UA を名乗って回避する。
         // OS 部分の 10_15_7 は Safari 自身が凍結している値なので、これで正しい
@@ -613,6 +956,10 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         webView.configuration.userContentController.add(
             WeakScriptMessageHandler(delegate: self),
             name: Self.mediaStateMessageHandlerName
+        )
+        webView.configuration.userContentController.add(
+            WeakScriptMessageHandler(delegate: self),
+            name: Self.fullscreenMessageHandlerName
         )
         observers.append(webView.observe(\.url, options: [.new]) { [weak self] wv, _ in
             Task { @MainActor in
@@ -631,6 +978,10 @@ final class Tab: NSObject, ObservableObject, Identifiable {
             Task { @MainActor in
                 guard let self else { return }
                 self.isLoading = wv.isLoading
+                // ページ遷移で疑似大画面の CSS ごと消えるので、アプリ側も畳む
+                if wv.isLoading, self.isVideoFullscreen {
+                    self.setVideoFullscreen(false)
+                }
                 // ページ遷移後もミュートを貼り直す（スクリプトはページごとに入れ直るため）
                 if !wv.isLoading, self.isMuted {
                     wv.evaluateJavaScript("window.__skyscraperSetMuted?.(true);")
@@ -689,6 +1040,18 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         webView.evaluateJavaScript("window.__skyscraperSetMuted?.(\(isMuted));")
     }
 
+    // 疑似大画面の出入り。ページ側（skyscraperFullscreen）から合図が来て、
+    // ウィンドウの全画面化も連動させる
+    func setVideoFullscreen(_ active: Bool) {
+        guard active != isVideoFullscreen else { return }
+        isVideoFullscreen = active
+        guard let window = webView.window else { return }
+        let windowIsFullscreen = window.styleMask.contains(.fullScreen)
+        if active != windowIsFullscreen {
+            window.toggleFullScreen(nil)
+        }
+    }
+
     // ズーム（ページの拡大率を 50%〜300% の範囲で変える）
     func zoomIn()    { setZoom(webView.pageZoom + 0.1) }
     func zoomOut()   { setZoom(webView.pageZoom - 0.1) }
@@ -703,14 +1066,19 @@ final class Tab: NSObject, ObservableObject, Identifiable {
 extension Tab: WKScriptMessageHandler {
     func userContentController(_ userContentController: WKUserContentController,
                                didReceive message: WKScriptMessage) {
-        guard message.name == "skyscraperMediaState" else { return }
-
-        let isPlayingAudio = (message.body as? Bool)
+        let boolBody = (message.body as? Bool)
             ?? (message.body as? NSNumber)?.boolValue
             ?? false
 
-        guard isPlayingAudio != self.isPlayingAudio else { return }
-        self.isPlayingAudio = isPlayingAudio
+        switch message.name {
+        case Self.mediaStateMessageHandlerName:
+            guard boolBody != self.isPlayingAudio else { return }
+            self.isPlayingAudio = boolBody
+        case Self.fullscreenMessageHandlerName:
+            setVideoFullscreen(boolBody)
+        default:
+            break
+        }
     }
 }
 
@@ -836,6 +1204,28 @@ extension Tab: WKUIDelegate {
             completionHandler(result == .OK ? panel.urls : nil)
         }
     }
+
+    // カメラ・マイクの使用要求。これを実装しないと WebKit は getUserMedia() を
+    // 無条件で拒否する（ページ側には NotAllowedError しか届かず、原因が見えない）。
+    // 判断とサイトごとの記憶は MediaPermissionStore に任せる
+    nonisolated func webView(_ webView: WKWebView,
+                             requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+                             initiatedByFrame frame: WKFrameInfo,
+                             type: WKMediaCaptureType,
+                             decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+        // WKSecurityOrigin は持ち回さず、ここで必要な文字列だけ抜いておく
+        let originKey = MediaPermissionStore.storageOrigin(origin)
+        let host = origin.host
+        Task { @MainActor in
+            let decision = await MediaPermissionStore.shared.decide(
+                origin: originKey,
+                host: host,
+                type: type,
+                in: webView.window
+            )
+            decisionHandler(decision)
+        }
+    }
 }
 
 // MARK: - タブ全体を束ねる管理役
@@ -850,6 +1240,8 @@ final class TabManager: ObservableObject {
     let grouper = TabGrouper()
     // 各タブのタイトル確定を見張る購読（タブIDごと）
     private var titleWatchers: [UUID: AnyCancellable] = [:]
+    // 疑似大画面の出入りで ContentView（サイドバーの表示）を更新させる購読
+    private var fullscreenWatchers: [UUID: AnyCancellable] = [:]
 
     // 閉じたタブの復元用スタック（URL。空文字はロビー）
     private var recentlyClosed: [String] = []
@@ -886,6 +1278,11 @@ final class TabManager: ObservableObject {
                 guard let self else { return }
                 self.grouper.scheduleRegroup(for: self.tabs)
             }
+        // Tab の @Published は Tab を監視する View しか起こさないので、
+        // サイドバー（manager を監視）のためにここで中継する
+        fullscreenWatchers[tab.id] = tab.$isVideoFullscreen
+            .removeDuplicates()
+            .sink { [weak self] _ in self?.objectWillChange.send() }
         return tab
     }
 
@@ -902,6 +1299,7 @@ final class TabManager: ObservableObject {
         tabs.remove(at: idx)
         // 監視とグループ割り当てを片付け、残りのタブで組み直す
         titleWatchers[tab.id] = nil
+        fullscreenWatchers[tab.id] = nil
         grouper.forget(tab.id)
         grouper.scheduleRegroup(for: tabs)
         if selectedID == tab.id {
@@ -1874,6 +2272,9 @@ struct BrowserPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // アドレスバーとブックマークバーは、疑似大画面（動画が
+            // ウィンドウを占有）中は隠して、全面を Web の中身に明け渡す
+            if !tab.isVideoFullscreen {
             // ── アドレスバー ──
             HStack(spacing: 10) {
                 NavButton(system: "chevron.left",  disabled: !tab.canGoBack)    { tab.goBack() }
@@ -1928,6 +2329,7 @@ struct BrowserPane: View {
 
             // ── ブックマークバー ──
             BookmarkBar(tab: tab, manager: manager)
+            }
 
             // ── 中身：ロビー or Web ──
             // 全タブの WebView を常に画面に置き、選択中の一枚だけを見せる。
@@ -1936,7 +2338,8 @@ struct BrowserPane: View {
             // また、常時マウントにより裏タブの読み込み・タイトル更新も進む
             ZStack {
                 ForEach(manager.tabs) { t in
-                    WebView(webView: t.webView)
+                    WebView(webView: t.webView,
+                            isInteractive: t.id == tab.id && !t.isHome)
                         .opacity(t.id == tab.id && !t.isHome ? 1 : 0)
                         .allowsHitTesting(t.id == tab.id && !t.isHome)
                 }
@@ -1980,7 +2383,10 @@ struct ContentView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            VerticalTabStrip(manager: manager, grouper: manager.grouper)
+            // 疑似大画面中はサイドバーも隠す（復帰は Esc。⌘1〜⌘9 は効く）
+            if manager.selectedTab?.isVideoFullscreen != true {
+                VerticalTabStrip(manager: manager, grouper: manager.grouper)
+            }
 
             if let tab = manager.selectedTab {
                 BrowserPane(tab: tab, manager: manager)

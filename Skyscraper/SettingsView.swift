@@ -58,6 +58,28 @@ struct SettingsView: View {
                             note: "Removes cookies. You will be signed out of most sites.")
                 clearButton(.all,
                             note: "Removes cache, cookies and local storage.")
+
+                // カメラ・マイクのサイト別許可を忘れる
+                HStack(spacing: 12) {
+                    Button {
+                        privacy.resetMediaPermissions()
+                    } label: {
+                        Text("Reset Camera & Microphone Permissions")
+                            .font(.system(size: 11, design: .serif))
+                            .tracking(1)
+                            .foregroundColor(Deco.gold)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .overlay(Hexagon(inset: 6).stroke(Deco.faintGold, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+
+                    Text("Sites will be asked about again.")
+                        .font(.system(size: 10, design: .serif))
+                        .foregroundColor(Deco.dimGold)
+
+                    Spacer()
+                }
             }
 
             // 完了の一言
@@ -76,7 +98,7 @@ struct SettingsView: View {
             Spacer()
         }
         .padding(24)
-        .frame(width: 460, height: 470)
+        .frame(width: 500, height: 520)
         .background(Deco.ink)
         .preferredColorScheme(.dark)
         .animation(.easeInOut(duration: 0.2), value: privacy.lastClearedMessage)

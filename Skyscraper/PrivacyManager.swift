@@ -72,8 +72,19 @@ final class PrivacyManager: ObservableObject {
         let store = WKWebsiteDataStore.default()
         let types = scope.dataTypes
         await store.removeData(ofTypes: types, modifiedSince: .distantPast)
-        lastClearedMessage = String(localized: "Done. Data has been cleared.")
-        // 一言表示は数秒で消す
+        flash(String(localized: "Done. Data has been cleared."))
+    }
+
+    // カメラ・マイクの「このサイトを覚えておく」を全部忘れる。
+    // 次回からはまた一件ずつ訊きに行く
+    func resetMediaPermissions() {
+        MediaPermissionStore.shared.reset()
+        flash(String(localized: "Done. Camera and microphone permissions have been reset."))
+    }
+
+    // 一言表示を出して、数秒で消す
+    private func flash(_ message: String) {
+        lastClearedMessage = message
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             self?.lastClearedMessage = nil
