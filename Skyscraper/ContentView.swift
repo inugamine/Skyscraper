@@ -1292,10 +1292,20 @@ final class TabManager: ObservableObject {
         let restoreURL = tab.isHome ? "" : (tab.webView.url?.absoluteString ?? tab.urlText)
         recentlyClosed.append(restoreURL)
         if recentlyClosed.count > 20 { recentlyClosed.removeFirst() }
-        // 動画・音声の再生を確実に止めてから退去させる
-        // （配列から外すだけだと WebView がしばらく生き残り、音だけ鳴り続ける）
+        // 動画・音声の再生を確実に止めてから退去させる。
+        // about:blank の読み込みだけでは非同期で、WebView がどこかに
+        // 保持されて生き残った場合に音が鳴り続ける（長時間再生した
+        // YouTube で顕著）。pauseAllMediaPlayback は WebContent プロセスへ
+        // 直接「全メディア停止」を送るので、解放のタイミングに依存しない
         tab.webView.stopLoading()
+        tab.webView.pauseAllMediaPlayback(completionHandler: nil)
+        // PiP・全画面で外に出ている再生面も畳む
+        tab.webView.closeAllMediaPresentations {}
         tab.webView.load(URLRequest(url: URL(string: "about:blank")!))
+        // スクリプトメッセージハンドラとユーザースクリプトを外す。
+        // configuration はタブごとに独立なので、他のタブには影響しない
+        tab.webView.configuration.userContentController.removeAllScriptMessageHandlers()
+        tab.webView.configuration.userContentController.removeAllUserScripts()
         tabs.remove(at: idx)
         // 監視とグループ割り当てを片付け、残りのタブで組み直す
         titleWatchers[tab.id] = nil
