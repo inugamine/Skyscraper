@@ -568,6 +568,10 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     @Published var isMuted: Bool = false
     // 疑似大画面（シアター）中か。サイドバーやバー類の隠しに使う
     @Published var isVideoFullscreen: Bool = false
+    // リーダーモードが使えるページか（Readability の判定器による）
+    @Published var isReaderAvailable: Bool = false
+    // リーダーモード表示中か
+    @Published var isReaderActive: Bool = false
 
     // ⌘クリックされたリンクを新規タブで開くための連絡先（TabManager が入れる）
     var openInNewTab: ((String) -> Void)?
@@ -936,6 +940,40 @@ final class Tab: NSObject, ObservableObject, Identifiable {
 
     private var observers: [NSKeyValueObservation] = []
 
+    // YouTube の動画広告を読み飛ばすスクリプト。
+    // 広告は本編と同じ googlevideo.com から来るので通信では遮断できない。
+    // 代わりにプレイヤーを監視し、広告中（.ad-showing）は広告動画を
+    // 末尾まで早送りしてスキップボタンを押す。
+    // クラス名は YouTube の改修で変わりうる（壊れたらここを直す）
+    private static let youtubeAdSkipScript = WKUserScript(
+        source: """
+        (() => {
+            const onYouTube = location.hostname === 'youtube.com'
+                || location.hostname.endsWith('.youtube.com');
+            if (!onYouTube || window.__skyscraperYtAdSkipInstalled) { return; }
+            window.__skyscraperYtAdSkipInstalled = true;
+
+            const skip = () => {
+                const player = document.querySelector('.html5-video-player');
+                if (!player || !player.classList.contains('ad-showing')) { return; }
+                // 広告動画を末尾まで飛ばす（連続広告でも1本ずつ処理される）
+                const video = player.querySelector('video');
+                if (video && isFinite(video.duration) && video.duration > 0) {
+                    video.currentTime = video.duration;
+                }
+                // スキップボタンが出ていれば押す（名前は世代でよく変わる）
+                const btn = player.querySelector(
+                    '.ytp-skip-ad-button, .ytp-ad-skip-button, .ytp-ad-skip-button-modern'
+                );
+                if (btn) { btn.click(); }
+            };
+            setInterval(skip, 300);
+        })();
+        """,
+        injectionTime: .atDocumentEnd,
+        forMainFrameOnly: true
+    )
+
     init(url: String? = nil) {
         super.init()
 
@@ -953,6 +991,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.configuration.userContentController.addUserScript(Self.mediaPlaybackObserverScript)
+        webView.configuration.userContentController.addUserScript(Self.youtubeAdSkipScript)
         webView.configuration.userContentController.add(
             WeakScriptMessageHandler(delegate: self),
             name: Self.mediaStateMessageHandlerName
@@ -981,6 +1020,14 @@ final class Tab: NSObject, ObservableObject, Identifiable {
                 // ページ遷移で疑似大画面の CSS ごと消えるので、アプリ側も畳む
                 if wv.isLoading, self.isVideoFullscreen {
                     self.setVideoFullscreen(false)
+                }
+                // ページ遷移でリーダー表示も消える。状態と判定を仕切り直し、
+                // 読み込み完了時に改めて判定する
+                if wv.isLoading {
+                    if self.isReaderActive { self.isReaderActive = false }
+                    if self.isReaderAvailable { self.isReaderAvailable = false }
+                } else {
+                    self.detectReaderAvailability()
                 }
                 // ページ遷移後もミュートを貼り直す（スクリプトはページごとに入れ直るため）
                 if !wv.isLoading, self.isMuted {
@@ -1038,6 +1085,41 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     func toggleMute() {
         isMuted.toggle()
         webView.evaluateJavaScript("window.__skyscraperSetMuted?.(\(isMuted));")
+    }
+
+    // リーダーモードが使えるページかを判定する（読み込み完了時に呼ぶ）。
+    // 判定器がバンドルに無い場合は detectJS が "false;" になり、
+    // ボタンは永遠に出ない（静かに無効化）
+    private func detectReaderAvailability() {
+        webView.evaluateJavaScript(Reader.detectJS) { [weak self] result, error in
+            if let error {
+                print("Reader detect error: \(error.localizedDescription)")
+            }
+            let available = (result as? Bool)
+                ?? (result as? NSNumber)?.boolValue
+                ?? false
+            Task { @MainActor in
+                guard let self, self.isReaderAvailable != available else { return }
+                self.isReaderAvailable = available
+            }
+        }
+    }
+
+    // リーダーモードの出入り。入場は本文抽出に成功したときだけ状態を立てる
+    func toggleReader() {
+        if isReaderActive {
+            webView.evaluateJavaScript(Reader.exitJS, completionHandler: nil)
+            isReaderActive = false
+        } else {
+            webView.evaluateJavaScript(Reader.enterJS) { [weak self] result, _ in
+                let ok = (result as? Bool)
+                    ?? (result as? NSNumber)?.boolValue
+                    ?? false
+                Task { @MainActor in
+                    if ok { self?.isReaderActive = true }
+                }
+            }
+        }
     }
 
     // 疑似大画面の出入り。ページ側（skyscraperFullscreen）から合図が来て、
@@ -2314,6 +2396,20 @@ struct BrowserPane: View {
                 .padding(.vertical, 7)
                 .background(Hexagon(inset: 6).fill(Deco.field))
                 .overlay(Hexagon(inset: 6).stroke(Deco.faintGold, lineWidth: 1))
+
+                // リーダーモードボタン。本文のあるページでだけ現れる
+                if tab.isReaderAvailable {
+                    Button {
+                        tab.toggleReader()
+                    } label: {
+                        Image(systemName: tab.isReaderActive ? "book.fill" : "book")
+                            .font(.system(size: 13))
+                            .foregroundColor(tab.isReaderActive ? Deco.cream : Deco.gold)
+                            .frame(width: 24, height: 24)
+                    }
+                    .buttonStyle(.plain)
+                    .help(tab.isReaderActive ? "Hide Reader" : "Show Reader")
+                }
 
                 // 星ボタン：現在のページを登録／解除
                 Button {
