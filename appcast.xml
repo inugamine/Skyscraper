@@ -7,6 +7,24 @@
     <language>en</language>
 
     <item>
+      <title>Version 1.10</title>
+      <pubDate>Sat, 25 Jul 2026 08:54:46 +0900</pubDate>
+      <sparkle:version>10</sparkle:version>
+      <sparkle:shortVersionString>1.10</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>Skyscraper 1.10</h2>
+        <ul>
+          <li>リーダーモードを搭載しました</li>
+          <li>広告ブロックの仕組みを試験的に導入しました</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://github.com/inugamine/Skyscraper/releases/download/v1.10/Skyscraper-1.10.zip"
+        sparkle:edSignature="m6TJWHfqHTpfr/vJe9MVQFRLrOiW88DHiUSyydbwpxQN8VsEOlthZU0GxRLSH9F3vcGG3oE12hMyAtqDQcpbAQ=="
+        length="1347463"
+        type="application/octet-stream" />
+    </item>    <item>
       <title>Version 1.9</title>
       <pubDate>Fri, 24 Jul 2026 20:21:45 +0900</pubDate>
       <sparkle:version>9</sparkle:version>
