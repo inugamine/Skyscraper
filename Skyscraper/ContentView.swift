@@ -576,6 +576,9 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // ⌘クリックされたリンクを新規タブで開くための連絡先（TabManager が入れる）
     var openInNewTab: ((String) -> Void)?
 
+    // パスキー（WebAuthn）の橋渡し役。実体は PasskeyManager.swift
+    private let passkeyBridge = PasskeyBridge()
+
     private static let mediaStateMessageHandlerName = "skyscraperMediaState"
     private static let fullscreenMessageHandlerName = "skyscraperFullscreen"
     private static let mediaPlaybackObserverScript = WKUserScript(
@@ -999,6 +1002,15 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         webView.configuration.userContentController.add(
             WeakScriptMessageHandler(delegate: self),
             name: Self.fullscreenMessageHandlerName
+        )
+        // パスキー：polyfill の注入と、返信付きハンドラの登録。
+        // 横取り対象（navigator.credentials）はページ本来の世界に居るので .page
+        passkeyBridge.webView = webView
+        webView.configuration.userContentController.addUserScript(PasskeyBridge.userScript)
+        webView.configuration.userContentController.addScriptMessageHandler(
+            passkeyBridge,
+            contentWorld: .page,
+            name: PasskeyBridge.messageHandlerName
         )
         observers.append(webView.observe(\.url, options: [.new]) { [weak self] wv, _ in
             Task { @MainActor in
