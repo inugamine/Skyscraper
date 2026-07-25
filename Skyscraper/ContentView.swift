@@ -1188,7 +1188,36 @@ extension Tab: WKNavigationDelegate {
     nonisolated func webView(_ webView: WKWebView,
                              decidePolicyFor response: WKNavigationResponse,
                              decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
-        decisionHandler(response.canShowMIMEType ? .allow : .download)
+        if response.canShowMIMEType {
+            decisionHandler(.allow)
+            return
+        }
+
+        // 何がダウンロード判定されたのかを必ず残す（誤判の追跡用）
+        let mime = response.response.mimeType ?? "(nil)"
+        let disposition = (response.response as? HTTPURLResponse)?
+            .value(forHTTPHeaderField: "Content-Disposition") ?? "(none)"
+        print("NavigationResponse not showable: url=\(response.response.url?.absoluteString ?? "?") "
+              + "mime=\(mime) mainFrame=\(response.isForMainFrame) disposition=\(disposition)")
+
+        // サブフレーム（広告・計測の iframe など）の変な応答で
+        // 保存パネルを出さない。黙って握り潰す
+        guard response.isForMainFrame else {
+            decisionHandler(.cancel)
+            return
+        }
+
+        // HTML 文書なのに「表示不可」判定の場合（Content-Disposition:
+        // attachment 付きの応答などで起きる）。文書はダウンロードではなく
+        // 表示に倒す（youtube.com で www.youtube.com.html の保存パネルが
+        // 出る不具合の対処）
+        let lowered = (response.response.mimeType ?? "").lowercased()
+        if lowered == "text/html" || lowered == "application/xhtml+xml" {
+            decisionHandler(.allow)
+            return
+        }
+
+        decisionHandler(.download)
     }
 
     // ナビゲーションがダウンロードに化けた場合
