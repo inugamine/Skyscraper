@@ -95,8 +95,9 @@ final class MediaPermissionStore {
     // MARK: - 小物
 
     // WKSecurityOrigin から保存用のキーを組む。
-    // WKSecurityOrigin はメインスレッドで受け取った直後に文字列化して使う
-    nonisolated static func storageOrigin(_ origin: WKSecurityOrigin) -> String {
+    // WKSecurityOrigin の各プロパティは macOS 26 でメインアクター隔離になったので、
+    // ここも nonisolated にせずメインで受ける（呼び元のデリゲートもメインだ）
+    static func storageOrigin(_ origin: WKSecurityOrigin) -> String {
         let scheme = origin.`protocol`
         var text = scheme.isEmpty ? origin.host : "\(scheme)://\(origin.host)"
         if origin.port != 0 { text += ":\(origin.port)" }

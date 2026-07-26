@@ -43,10 +43,11 @@ final class PrivacyManager: ObservableObject {
         var dataTypes: Set<String> {
             switch self {
             case .cache:
+                // OfflineWebApplicationCache（AppCache）は macOS 26.2 で廃止。
+                // 仕様自体がなくなっているので、外しても消し残しは出ない
                 return [
                     WKWebsiteDataTypeDiskCache,
                     WKWebsiteDataTypeMemoryCache,
-                    WKWebsiteDataTypeOfflineWebApplicationCache,
                     WKWebsiteDataTypeFetchCache,
                 ]
             case .cookies:
@@ -80,6 +81,13 @@ final class PrivacyManager: ObservableObject {
     func resetMediaPermissions() {
         MediaPermissionStore.shared.reset()
         flash(String(localized: "Done. Camera and microphone permissions have been reset."))
+    }
+
+    // 外部アプリで開く／開かないの「今後訊かない」を全部忘れる。
+    // 一度「開かない」で覚えさせると、これが無い限り二度と開けなくなる
+    func resetExternalSchemes() {
+        ExternalSchemeStore.shared.reset()
+        flash(String(localized: "Done. External app permissions have been reset."))
     }
 
     // 一言表示を出して、数秒で消す

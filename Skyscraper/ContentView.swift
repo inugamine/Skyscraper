@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import AppKit
 import WebKit
 import Combine
 import UniformTypeIdentifiers
@@ -135,7 +136,6 @@ struct FanFrieze: Shape {
             // 円の中心は要の真上
             let c = CGPoint(x: base.x, y: base.y - radius * pinchDrop)
             let left  = arcPoint(c, startDeg)
-            let right = arcPoint(c, endDeg)
             // 両脇は )( のように内に凹む曲線。制御点を軸の近く・低めに置くと、
             // 要からはほぼ垂直に立ち上がり、上で外へ翻る
             let waistL = CGPoint(x: base.x - radius * 0.06, y: base.y - radius * 0.50)
@@ -572,9 +572,23 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     @Published var isReaderAvailable: Bool = false
     // リーダーモード表示中か
     @Published var isReaderActive: Bool = false
+    // ページ内検索バーを出しているか
+    @Published var isFindBarVisible: Bool = false
+    // 検索語
+    @Published var findQuery: String = ""
+    // 直近の検索が空振りしたか（入力欄の色を落とす合図）
+    @Published var findNotFound: Bool = false
+    // 検索欄に焦点を移す合図（⌘F のたびに増える）
+    @Published var findFocusTrigger: Int = 0
 
     // ⌘クリックされたリンクを新規タブで開くための連絡先（TabManager が入れる）
     var openInNewTab: ((String) -> Void)?
+
+    // セッション復元で作られたが、まだ中身を読みに行っていない URL。
+    // 起動時に全タブを一斉に読み込むと回線も CPU も持っていかれるので、
+    // 復元直後は URL と題名だけを持たせておき、実際の読み込みは
+    // そのタブが選ばれた時まで先送りにする（Safari と同じ方式）
+    private var pendingURL: String?
 
     // パスキー（WebAuthn）の橋渡し役。実体は PasskeyManager.swift
     private let passkeyBridge = PasskeyBridge()
@@ -977,7 +991,9 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         forMainFrameOnly: true
     )
 
-    init(url: String? = nil) {
+    // deferLoad が真なら、URL は控えるだけで読み込まない（セッション復元用）。
+    // title は復元直後のサイドバー表示に使う仮の題名
+    init(url: String? = nil, title: String = "", deferLoad: Bool = false) {
         super.init()
 
         // トラックパッドの2本指スワイプで戻る／進む
@@ -1012,22 +1028,29 @@ final class Tab: NSObject, ObservableObject, Identifiable {
             contentWorld: .page,
             name: PasskeyBridge.messageHandlerName
         )
+        // KVO の通知は nonisolated な場（KVO が発火したスレッド）で届く。
+        // [weak self] は仕組み上 `weak var self` なので、そのまま Task の中で
+        // self? を触ると「並行実行のコードが var を跨いで参照している」扱いになり、
+        // Swift 6 ではエラーになる。Task に入る前に let へ落としておく
         observers.append(webView.observe(\.url, options: [.new]) { [weak self] wv, _ in
+            guard let self else { return }
             Task { @MainActor in
                 guard let urlText = wv.url?.absoluteString,
-                      self?.urlText != urlText else { return }
-                self?.urlText = urlText
+                      self.urlText != urlText else { return }
+                self.urlText = urlText
             }
         })
         observers.append(webView.observe(\.canGoBack, options: [.new]) { [weak self] wv, _ in
-            Task { @MainActor in self?.canGoBack = wv.canGoBack }
+            guard let self else { return }
+            Task { @MainActor in self.canGoBack = wv.canGoBack }
         })
         observers.append(webView.observe(\.canGoForward, options: [.new]) { [weak self] wv, _ in
-            Task { @MainActor in self?.canGoForward = wv.canGoForward }
+            guard let self else { return }
+            Task { @MainActor in self.canGoForward = wv.canGoForward }
         })
         observers.append(webView.observe(\.isLoading, options: [.new]) { [weak self] wv, _ in
+            guard let self else { return }
             Task { @MainActor in
-                guard let self else { return }
                 self.isLoading = wv.isLoading
                 // ページ遷移で疑似大画面の CSS ごと消えるので、アプリ側も畳む
                 if wv.isLoading, self.isVideoFullscreen {
@@ -1043,22 +1066,47 @@ final class Tab: NSObject, ObservableObject, Identifiable {
                 }
                 // ページ遷移後もミュートを貼り直す（スクリプトはページごとに入れ直るため）
                 if !wv.isLoading, self.isMuted {
-                    wv.evaluateJavaScript("window.__skyscraperSetMuted?.(true);")
+                    _ = try? await wv.evaluateJavaScript("window.__skyscraperSetMuted?.(true);")
                 }
             }
         })
         observers.append(webView.observe(\.title, options: [.new]) { [weak self] wv, _ in
-            Task { @MainActor in self?.pageTitle = wv.title ?? "" }
+            guard let self else { return }
+            Task { @MainActor in self.pageTitle = wv.title ?? "" }
         })
         if let url {
             urlText = url
-            load()
+            if deferLoad {
+                // 読み込みはまだ。ロビーではないので isHome は下ろし、
+                // 題名は保存しておいたものを仮に出しておく
+                isHome = false
+                pageTitle = title
+                pendingURL = url
+            } else {
+                load()
+            }
         }
+    }
+
+    // 先送りにしていた読み込みを始める（そのタブが初めて選ばれた時に呼ぶ）。
+    // 読み込み済みなら何もしない
+    func activateIfDeferred() {
+        guard let pending = pendingURL else { return }
+        pendingURL = nil
+        urlText = pending
+        load()
     }
 
     func load() {
         guard let url = Tab.resolveURL(from: urlText) else { return }
         isHome = false
+        // file:// は load(URLRequest:) だと、同じ階層の CSS や画像すら読めない
+        //（WebKit がそのファイル一枚ぶんしかサンドボックス拡張を下ろさないため）。
+        // 読み取り許可を親ディレクトリまで広げて渡す loadFileURL を使う
+        if url.isFileURL {
+            webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+            return
+        }
         webView.load(URLRequest(url: url))
     }
 
@@ -1067,9 +1115,32 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         let text = input.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return nil }
 
-        // すでに http/https が付いていれば URL として扱う
-        if text.hasPrefix("http://") || text.hasPrefix("https://") {
-            return URL(string: text)
+        // 絶対パス（/ か ~/ で始まる）が実在するなら file:// として開く。
+        // Finder で ⌥⌘C したパスをそのまま貼れる。
+        // URL(fileURLWithPath:) は空白入りのパスも正しく扱う。
+        // 実在しない場合は検索語に落とすので、
+        // "/r/programming" のような入力を取り違えることはない
+        if text.hasPrefix("/") || text.hasPrefix("~/") {
+            let path = (text as NSString).expandingTildeInPath
+            if FileManager.default.fileExists(atPath: path) {
+                return URL(fileURLWithPath: path)
+            }
+        }
+
+        // スキーム付きの入力。
+        // ただし "localhost:8080" のようにコロンの後ろが数字だけの場合は
+        // ポート番号なので、スキームとは見なさず下のホスト判定へ回す
+        if let scheme = Self.schemePrefix(of: text), !Self.hasPortAfterColon(text) {
+            // WKWebView が開けるスキームだけ通す。
+            // mailto: や javascript: はここで検索に落とす。
+            // 下のホスト判定に流すと
+            // "https://mailto:test@example.com" に化け、
+            // mailto:test が利用者情報、example.com がホストとして
+            // 全く別のサイトを開いてしまう
+            if Self.loadableSchemes.contains(scheme), let url = URL(string: text) {
+                return url
+            }
+            return Self.searchURL(for: text)
         }
 
         // 空白が無く、ドットを含む（または localhost）ならホスト名とみなす
@@ -1080,6 +1151,43 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         }
 
         // それ以外は Google 検索に流す
+        return Self.searchURL(for: text)
+    }
+
+    // WKWebView が自分で開けるスキーム。
+    // mailto: や javascript: を load() に渡しても何も起きず、
+    // 「Return を押したのに無反応」になるだけなので、URL 扱いしない
+    private static let loadableSchemes: Set<String> = [
+        "http", "https", "file", "about", "data", "blob"
+    ]
+
+    // 先頭がスキームの綴り（RFC 3986：英字で始まり、英数字と + - . のみ）に
+    // 合っていれば、それを小文字で返す。
+    // 綴りを見るだけなので、"192.168.1.5:8080"（数字始まり）はスキームと見なされない
+    private static func schemePrefix(of text: String) -> String? {
+        guard let colon = text.firstIndex(of: ":"), colon != text.startIndex else { return nil }
+        let scheme = text[text.startIndex..<colon]
+        guard let first = scheme.first, first.isASCII, first.isLetter else { return nil }
+        let wellFormed = scheme.allSatisfy { ch in
+            ch.isASCII && (ch.isLetter || ch.isNumber || ch == "+" || ch == "-" || ch == ".")
+        }
+        return wellFormed ? scheme.lowercased() : nil
+    }
+
+    // コロンの直後が数字だけで、その後が末尾か / ? # なら、
+    // それはスキームではなくポート番号。
+    // "localhost:8080"（ホスト）と "mailto:…"（スキーム）をこれで分ける。
+    // schemePrefix と同じ「最初のコロン」を見るので、両者の判断は必ず一致する
+    private static func hasPortAfterColon(_ text: String) -> Bool {
+        guard let colon = text.firstIndex(of: ":") else { return false }
+        let rest = text[text.index(after: colon)...]
+        let digits = rest.prefix { $0.isASCII && $0.isNumber }
+        guard !digits.isEmpty else { return false }
+        let after = rest.dropFirst(digits.count)
+        return after.isEmpty || after.first == "/" || after.first == "?" || after.first == "#"
+    }
+
+    private static func searchURL(for text: String) -> URL? {
         var comps = URLComponents(string: "https://www.google.com/search")!
         comps.queryItems = [URLQueryItem(name: "q", value: text)]
         return comps.url
@@ -1088,6 +1196,10 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     func goBack()    { webView.goBack() }
     func goForward() { webView.goForward() }
     func reload()    { webView.reload() }
+    // ⇧⌘R：キャッシュを一切当てにせず取り直す（画像・CSS・JS まで全部）。
+    // reload() は検証（If-None-Match 等）で済ませることがあるが、
+    // こちらは WebKit のキャッシュを無視してオリジンに取りに行く
+    func reloadFromOrigin() { webView.reloadFromOrigin() }
 
     // アドレスバーにフォーカスを移す合図を送る
     func focusAddressBar() { addressBarFocusTrigger += 1 }
@@ -1153,6 +1265,60 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     private func setZoom(_ value: CGFloat) {
         webView.pageZoom = min(max(value, 0.5), 3.0)
     }
+
+    // ── ページ内検索（⌘F）──
+
+    // 検索バーを出して入力欄に焦点を移す。
+    // 既に出ている場合も全選択し直す（Safari と同じ）
+    func showFindBar() {
+        isFindBarVisible = true
+        findFocusTrigger += 1
+    }
+
+    func hideFindBar() {
+        isFindBarVisible = false
+        findNotFound = false
+        // WebKit が付けた強調（＝選択）を解いておく
+        webView.evaluateJavaScript("window.getSelection()?.removeAllRanges();",
+                                   completionHandler: nil)
+    }
+
+    // ⌘G / ⇧⌘G。検索語が無ければ、まず入力欄を出す
+    func findAgain(backwards: Bool) {
+        guard !findQuery.isEmpty else {
+            showFindBar()
+            return
+        }
+        isFindBarVisible = true
+        find(findQuery, backwards: backwards)
+    }
+
+    // WKWebView の検索は一致の有無しか返さない
+    //（何件中の何件目かは取れない）ので、
+    // 見つからなかった時だけ入力欄の色を落として知らせる
+    func find(_ text: String, backwards: Bool = false) {
+        guard !text.isEmpty else {
+            findNotFound = false
+            return
+        }
+        // WKFindConfiguration は Sendable ではないので、
+        // Task の中で組む（外で作って渡すとキャプチャで引っ掛かる）
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let configuration = WKFindConfiguration()
+            configuration.backwards = backwards
+            configuration.wraps = true
+            do {
+                let result = try await self.webView.find(text, configuration: configuration)
+                self.findNotFound = !result.matchFound
+            } catch {
+                // 検索そのものが失敗した（ページが無い・破棄された等）。
+                // 利用者から見れば「見つからない」と同じなので、そう見せる
+                print("Find failed: \(error.localizedDescription)")
+                self.findNotFound = true
+            }
+        }
+    }
 }
 
 // MARK: - ページ内メディア状態の受け取り
@@ -1179,13 +1345,30 @@ extension Tab: WKScriptMessageHandler {
 // MARK: - ナビゲーションの判断役（⌘クリックを新規タブへ回す）
 
 extension Tab: WKNavigationDelegate {
-    nonisolated func webView(_ webView: WKWebView,
-                             decidePolicyFor action: WKNavigationAction,
-                             decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+    func webView(_ webView: WKWebView,
+                 decidePolicyFor action: WKNavigationAction,
+                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         // リンクを踏んだ操作で、⌘が押されているか
         let isLinkClick = action.navigationType == .linkActivated
         let commandHeld = action.modifierFlags.contains(.command)
         let url = action.request.url?.absoluteString
+
+        // WKWebView が自分では開けないスキーム
+        //（mailto: / tel: / zoommtg: / itms-apps: など）。
+        // load しても何も起きないので、macOS の振り分けに渡す。
+        //
+        // リンクを踏んだ時限定なのが肝だ。これを外すと、
+        // ページを開いただけで任意のローカルアプリを起動できる踏み台になる
+        if isLinkClick,
+           let target = action.request.url,
+           let scheme = target.scheme?.lowercased(),
+           !Self.loadableSchemes.contains(scheme) {
+            decisionHandler(.cancel)
+            Task { @MainActor in
+                await ExternalSchemeStore.shared.open(target, in: webView.window)
+            }
+            return
+        }
 
         if isLinkClick, commandHeld, let url {
             // このタブでは開かず、新規タブへ回す
@@ -1197,9 +1380,9 @@ extension Tab: WKNavigationDelegate {
     }
 
     // ブラウザが表示できない応答（PDF以外のファイルなど）はダウンロードに回す
-    nonisolated func webView(_ webView: WKWebView,
-                             decidePolicyFor response: WKNavigationResponse,
-                             decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+    func webView(_ webView: WKWebView,
+                 decidePolicyFor response: WKNavigationResponse,
+                 decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
         if response.canShowMIMEType {
             decisionHandler(.allow)
             return
@@ -1233,21 +1416,21 @@ extension Tab: WKNavigationDelegate {
     }
 
     // ナビゲーションがダウンロードに化けた場合
-    nonisolated func webView(_ webView: WKWebView,
-                             navigationAction: WKNavigationAction,
-                             didBecome download: WKDownload) {
-        Task { @MainActor in download.delegate = self }
+    func webView(_ webView: WKWebView,
+                 navigationAction: WKNavigationAction,
+                 didBecome download: WKDownload) {
+        download.delegate = self
     }
 
-    nonisolated func webView(_ webView: WKWebView,
-                             navigationResponse: WKNavigationResponse,
-                             didBecome download: WKDownload) {
-        Task { @MainActor in download.delegate = self }
+    func webView(_ webView: WKWebView,
+                 navigationResponse: WKNavigationResponse,
+                 didBecome download: WKDownload) {
+        download.delegate = self
     }
 
     // WebContent プロセスが落ちたとき（WebKit 内部のクラッシュ）の立て直し。
     // 放っておくとタブが白紙のままになるので、自動で読み直す
-    nonisolated func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         Task { @MainActor in
             print("Tab: WebContent process crashed, reloading")
             webView.reload()
@@ -1258,10 +1441,10 @@ extension Tab: WKNavigationDelegate {
 // MARK: - ダウンロードの受け取り
 
 extension Tab: WKDownloadDelegate {
-    nonisolated func download(_ download: WKDownload,
-                             decideDestinationUsing response: URLResponse,
-                             suggestedFilename: String,
-                             completionHandler: @escaping (URL?) -> Void) {
+    func download(_ download: WKDownload,
+                  decideDestinationUsing response: URLResponse,
+                  suggestedFilename: String,
+                  completionHandler: @escaping (URL?) -> Void) {
         Task { @MainActor in
             // 保存パネルを出して、保存先はユーザーに決めてもらう
             let panel = NSSavePanel()
@@ -1289,22 +1472,20 @@ extension Tab: WKDownloadDelegate {
         }
     }
 
-    nonisolated func download(_ download: WKDownload,
-                             didFailWithError error: Error,
-                             resumeData: Data?) {
-        Task { @MainActor in
-            print("Download failed: \(error.localizedDescription)")
-        }
+    func download(_ download: WKDownload,
+                  didFailWithError error: Error,
+                  resumeData: Data?) {
+        print("Download failed: \(error.localizedDescription)")
     }
 }
 
 // MARK: - UI の窓口役（target="_blank" などの新規ウィンドウ要求をタブで受ける）
 
 extension Tab: WKUIDelegate {
-    nonisolated func webView(_ webView: WKWebView,
-                             createWebViewWith configuration: WKWebViewConfiguration,
-                             for navigationAction: WKNavigationAction,
-                             windowFeatures: WKWindowFeatures) -> WKWebView? {
+    func webView(_ webView: WKWebView,
+                 createWebViewWith configuration: WKWebViewConfiguration,
+                 for navigationAction: WKNavigationAction,
+                 windowFeatures: WKWindowFeatures) -> WKWebView? {
         if let url = navigationAction.request.url?.absoluteString {
             Task { @MainActor in self.openInNewTab?(url) }
         }
@@ -1313,10 +1494,10 @@ extension Tab: WKUIDelegate {
 
     // macOS ではこれを自分で実装しないと、ファイル選択パネルが出ない
     // （iOS は自動だが、Mac はアプリ側の責任）
-    nonisolated func webView(_ webView: WKWebView,
-                             runOpenPanelWith parameters: WKOpenPanelParameters,
-                             initiatedByFrame frame: WKFrameInfo,
-                             completionHandler: @escaping ([URL]?) -> Void) {
+    func webView(_ webView: WKWebView,
+                 runOpenPanelWith parameters: WKOpenPanelParameters,
+                 initiatedByFrame frame: WKFrameInfo,
+                 completionHandler: @escaping ([URL]?) -> Void) {
         Task { @MainActor in
             let panel = NSOpenPanel()
             panel.canChooseFiles = true
@@ -1331,11 +1512,11 @@ extension Tab: WKUIDelegate {
     // カメラ・マイクの使用要求。これを実装しないと WebKit は getUserMedia() を
     // 無条件で拒否する（ページ側には NotAllowedError しか届かず、原因が見えない）。
     // 判断とサイトごとの記憶は MediaPermissionStore に任せる
-    nonisolated func webView(_ webView: WKWebView,
-                             requestMediaCapturePermissionFor origin: WKSecurityOrigin,
-                             initiatedByFrame frame: WKFrameInfo,
-                             type: WKMediaCaptureType,
-                             decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+    func webView(_ webView: WKWebView,
+                 requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+                 initiatedByFrame frame: WKFrameInfo,
+                 type: WKMediaCaptureType,
+                 decisionHandler: @escaping (WKPermissionDecision) -> Void) {
         // WKSecurityOrigin は持ち回さず、ここで必要な文字列だけ抜いておく
         let originKey = MediaPermissionStore.storageOrigin(origin)
         let host = origin.host
@@ -1353,23 +1534,118 @@ extension Tab: WKUIDelegate {
 
 // MARK: - タブ全体を束ねる管理役
 
+// セッション（前回終了時のタブ構成）の保存形式
+private struct SessionTab: Codable {
+    var url: String     // 空文字はロビー
+    var title: String   // 復元直後にサイドバーへ出す仮の題名
+}
+
+private struct SessionState: Codable {
+    var tabs: [SessionTab]
+    var selectedIndex: Int
+}
+
 @MainActor
 final class TabManager: ObservableObject {
-    @Published var tabs: [Tab] = []
-    @Published var selectedID: UUID?
+    @Published var tabs: [Tab] = [] {
+        didSet { scheduleSave() }
+    }
+    @Published var selectedID: UUID? {
+        didSet {
+            guard selectedID != oldValue else { return }
+            // 復元されたまま眠っているタブなら、ここで初めて読みに行く
+            selectedTab?.activateIfDeferred()
+            scheduleSave()
+        }
+    }
 
     // タブの自動グループ化（Apple Intelligence）。
     // 使えない環境では何もせず、従来のフラット表示のまま動く
     let grouper = TabGrouper()
     // 各タブのタイトル確定を見張る購読（タブIDごと）
     private var titleWatchers: [UUID: AnyCancellable] = [:]
+    // 各タブの URL 変化を見張る購読（セッション保存の合図）
+    private var urlWatchers: [UUID: AnyCancellable] = [:]
     // 疑似大画面の出入りで ContentView（サイドバーの表示）を更新させる購読
     private var fullscreenWatchers: [UUID: AnyCancellable] = [:]
 
     // 閉じたタブの復元用スタック（URL。空文字はロビー）
     private var recentlyClosed: [String] = []
 
-    init() { addTab() }
+    // ── セッションの保存 ──
+    private static let sessionKey = "skyscraper.session.v1"
+    // 一度に復元する上限。壊れた保存で限りなくタブが開くのを防ぐ
+    private static let restoreLimit = 50
+    // 復元が済むまでは保存しない（途中の中途半端な状態で書き潰さないため）
+    private var didRestore = false
+    private var saveTask: Task<Void, Never>?
+    private var terminationObserver: NSObjectProtocol?
+
+    init() {
+        restoreSession()
+        didRestore = true
+        // 選択中の一枚だけは、待たずに読み込みを始める
+        selectedTab?.activateIfDeferred()
+
+        // 終了時の取りこぼしを防ぐ。デバウンス待ちの変更をここで確実に書く。
+        // queue に .main を渡すと addOperation 経由の非同期配送になり、
+        // 終了途中ではランループが回らずに捨てられる。
+        // nil なら通知を出したスレッドで同期に走るし、
+        // willTerminate は AppKit がメインスレッドから出すので assumeIsolated が成立する
+        terminationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.saveSession() }
+        }
+    }
+
+    // ── セッションの読み書き ──
+
+    // 前回のタブ構成を読み直す。保存が無ければ真っ新なロビーを一枚だけ
+    private func restoreSession() {
+        guard let data = UserDefaults.standard.data(forKey: Self.sessionKey),
+              let state = try? JSONDecoder().decode(SessionState.self, from: data),
+              !state.tabs.isEmpty
+        else {
+            addTab()
+            return
+        }
+        for entry in state.tabs.prefix(Self.restoreLimit) {
+            // 空文字はロビー。それ以外は読み込まずに控えだけしておく
+            let tab = makeTab(url: entry.url.isEmpty ? nil : entry.url,
+                              title: entry.title,
+                              deferLoad: true)
+            tabs.append(tab)
+        }
+        selectedID = tabs[safe: state.selectedIndex]?.id ?? tabs.first?.id
+    }
+
+    // 保存は少し待ってからまとめて行う。SPA（X・YouTube など）は
+    // スクロールのたびに URL を書き換えるので、都度書くと無駄が多い
+    private func scheduleSave() {
+        guard didRestore else { return }
+        saveTask?.cancel()
+        saveTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled else { return }
+            self?.saveSession()
+        }
+    }
+
+    private func saveSession() {
+        let entries = tabs.map { tab -> SessionTab in
+            var url = tab.isHome ? "" : (tab.webView.url?.absoluteString ?? tab.urlText)
+            // 閉じ際に流し込む about:blank は復元しない（ロビー扱いに倒す）
+            if url == "about:blank" { url = "" }
+            return SessionTab(url: url, title: tab.pageTitle)
+        }
+        let index = tabs.firstIndex { $0.id == selectedID } ?? 0
+        let state = SessionState(tabs: entries, selectedIndex: index)
+        guard let data = try? JSONEncoder().encode(state) else { return }
+        UserDefaults.standard.set(data, forKey: Self.sessionKey)
+    }
 
     var selectedTab: Tab? {
         tabs.first { $0.id == selectedID }
@@ -1387,8 +1663,8 @@ final class TabManager: ObservableObject {
         tabs.append(tab)
     }
 
-    private func makeTab(url: String?) -> Tab {
-        let tab = Tab(url: url)
+    private func makeTab(url: String?, title: String = "", deferLoad: Bool = false) -> Tab {
+        let tab = Tab(url: url, title: title, deferLoad: deferLoad)
         // ⌘クリックされたら、この管理人に連絡が来るようにする
         tab.openInNewTab = { [weak self] link in
             self?.addTabInBackground(url: link)
@@ -1400,7 +1676,12 @@ final class TabManager: ObservableObject {
             .sink { [weak self] _ in
                 guard let self else { return }
                 self.grouper.scheduleRegroup(for: self.tabs)
+                self.scheduleSave()
             }
+        // ページ遷移でもセッションを書き直す
+        urlWatchers[tab.id] = tab.$urlText
+            .removeDuplicates()
+            .sink { [weak self] _ in self?.scheduleSave() }
         // Tab の @Published は Tab を監視する View しか起こさないので、
         // サイドバー（manager を監視）のためにここで中継する
         fullscreenWatchers[tab.id] = tab.$isVideoFullscreen
@@ -1432,6 +1713,7 @@ final class TabManager: ObservableObject {
         tabs.remove(at: idx)
         // 監視とグループ割り当てを片付け、残りのタブで組み直す
         titleWatchers[tab.id] = nil
+        urlWatchers[tab.id] = nil
         fullscreenWatchers[tab.id] = nil
         grouper.forget(tab.id)
         grouper.scheduleRegroup(for: tabs)
@@ -2393,6 +2675,151 @@ struct AddressField: NSViewRepresentable {
     }
 }
 
+// MARK: - ページ内検索バー
+
+// 検索語の入力欄。アドレスバーと同じ ClickSelectTextField を土台にする
+//（macOS 26 の SwiftUI TextField は AppKit 階層に現れず、焦点も観測できない）。
+// Return で次、⇧Return で前、Esc で閉じる
+struct FindField: NSViewRepresentable {
+    @Binding var text: String
+    // 値が変わったら焦点を移して全選択する（⌘F の合図）
+    let focusTrigger: Int
+    let onSubmit: (Bool) -> Void   // 真なら後方検索（⇧Return）
+    let onCancel: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeNSView(context: Context) -> ClickSelectTextField {
+        let field = ClickSelectTextField()
+        field.isBordered = false
+        field.isBezeled = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.usesSingleLineMode = true
+        field.lineBreakMode = .byTruncatingTail
+        field.delegate = context.coordinator
+
+        let size: CGFloat = 12
+        let serif = NSFont.systemFont(ofSize: size).fontDescriptor.withDesign(.serif)
+        let font = serif.flatMap { NSFont(descriptor: $0, size: size) }
+            ?? NSFont.systemFont(ofSize: size)
+        field.font = font
+        field.textColor = NSColor(Deco.cream)
+        field.placeholderAttributedString = NSAttributedString(
+            string: String(localized: "Find in page"),
+            attributes: [.foregroundColor: NSColor(Deco.dimGold), .font: font]
+        )
+        return field
+    }
+
+    func updateNSView(_ field: ClickSelectTextField, context: Context) {
+        context.coordinator.parent = self
+        // 編集中の打鍵を潰さないよう、編集していないときだけ外の値を反映する
+        if field.currentEditor() == nil, field.stringValue != text {
+            field.stringValue = text
+        }
+        if context.coordinator.lastFocusTrigger != focusTrigger {
+            context.coordinator.lastFocusTrigger = focusTrigger
+            DispatchQueue.main.async { field.focusAndSelectAll() }
+        }
+    }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        var parent: FindField
+        var lastFocusTrigger: Int
+
+        init(_ parent: FindField) {
+            self.parent = parent
+            // アドレスバーと違い、出た瞬間に焦点が欲しい。
+            // 現在値と違う値で始めて、最初の updateNSView で必ず焦点合わせを走らせる
+            self.lastFocusTrigger = parent.focusTrigger - 1
+        }
+
+        func controlTextDidChange(_ obj: Notification) {
+            guard let field = obj.object as? NSTextField else { return }
+            parent.text = field.stringValue
+        }
+
+        func control(_ control: NSControl, textView: NSTextView,
+                     doCommandBy commandSelector: Selector) -> Bool {
+            switch commandSelector {
+            case #selector(NSResponder.insertNewline(_:)):
+                // 単行の欄では ⇧Return も insertNewline に来るので、
+                // 修飾キーは NSEvent から直に見る
+                parent.onSubmit(NSEvent.modifierFlags.contains(.shift))
+                return true
+            case #selector(NSResponder.cancelOperation(_:)):
+                parent.onCancel()
+                return true
+            default:
+                return false
+            }
+        }
+    }
+}
+
+struct FindBar: View {
+    @ObservedObject var tab: Tab
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 11))
+                .foregroundColor(Deco.gold)
+
+            FindField(
+                text: $tab.findQuery,
+                focusTrigger: tab.findFocusTrigger,
+                onSubmit: { backwards in tab.find(tab.findQuery, backwards: backwards) },
+                onCancel: { tab.hideFindBar() }
+            )
+            .frame(width: 240)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(Hexagon(inset: 5).fill(Deco.field))
+            .overlay(Hexagon(inset: 5)
+                .stroke(tab.findNotFound ? Deco.dimGold : Deco.faintGold, lineWidth: 1))
+
+            // WKWebView は「何件中の何件目」を教えてくれないので、
+            // 出せるのは見つからなかったという事実だけ
+            if tab.findNotFound {
+                Text("Not found")
+                    .font(.system(size: 10, design: .serif))
+                    .tracking(1)
+                    .foregroundColor(Deco.dimGold)
+            }
+
+            NavButton(system: "chevron.up", disabled: tab.findQuery.isEmpty) {
+                tab.find(tab.findQuery, backwards: true)
+            }
+            NavButton(system: "chevron.down", disabled: tab.findQuery.isEmpty) {
+                tab.find(tab.findQuery)
+            }
+
+            Spacer()
+
+            Button { tab.hideFindBar() } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10))
+                    .foregroundColor(Deco.dimGold)
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .background(Deco.panel2)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Deco.faintGold).frame(height: 1)
+        }
+        // 打つそばから探す。空にしたら知らせも消える
+        .onChange(of: tab.findQuery) { _, query in
+            tab.find(query)
+        }
+    }
+}
+
 // MARK: - 選択中タブの中身
 
 struct BrowserPane: View {
@@ -2476,6 +2903,13 @@ struct BrowserPane: View {
 
             // ── ブックマークバー ──
             BookmarkBar(tab: tab, manager: manager)
+
+            // ── ページ内検索バー（⌘F）──
+            // タブごとに作り直す。使い回すと、前のタブで編集中だった
+            // フィールドエディタが残って打ちかけの語が混ざる
+            if tab.isFindBarVisible {
+                FindBar(tab: tab).id(tab.id)
+            }
             }
 
             // ── 中身：ロビー or Web ──

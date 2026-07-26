@@ -80,6 +80,28 @@ struct SettingsView: View {
 
                     Spacer()
                 }
+
+                // 外部アプリで開く／開かないの記憶を忘れる
+                HStack(spacing: 12) {
+                    Button {
+                        privacy.resetExternalSchemes()
+                    } label: {
+                        Text("Reset External App Permissions")
+                            .font(.system(size: 11, design: .serif))
+                            .tracking(1)
+                            .foregroundColor(Deco.gold)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .overlay(Hexagon(inset: 6).stroke(Deco.faintGold, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+
+                    Text("Links will be confirmed again.")
+                        .font(.system(size: 10, design: .serif))
+                        .foregroundColor(Deco.dimGold)
+
+                    Spacer()
+                }
             }
 
             // 完了の一言
@@ -98,7 +120,7 @@ struct SettingsView: View {
             Spacer()
         }
         .padding(24)
-        .frame(width: 500, height: 520)
+        .frame(width: 500, height: 570)
         .background(Deco.ink)
         .preferredColorScheme(.dark)
         .animation(.easeInOut(duration: 0.2), value: privacy.lastClearedMessage)

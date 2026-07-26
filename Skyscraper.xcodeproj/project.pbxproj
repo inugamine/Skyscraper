@@ -14,9 +14,22 @@
 		F15697DB3001792F00C19AB2 /* Skyscraper.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Skyscraper.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		F1F00BEA30152409007F5E10 /* Exceptions for "Skyscraper" folder in "Skyscraper" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = F15697DA3001792F00C19AB2 /* Skyscraper */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		F15697DD3001792F00C19AB2 /* Skyscraper */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				F1F00BEA30152409007F5E10 /* Exceptions for "Skyscraper" folder in "Skyscraper" target */,
+			);
 			path = Skyscraper;
 			sourceTree = "<group>";
 		};

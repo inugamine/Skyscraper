@@ -35,6 +35,15 @@ struct SkyscraperApp: App {
                 Button("Open Location") { manager.selectedTab?.focusAddressBar() }
                     .keyboardShortcut("l", modifiers: .command)
             }
+            // Edit メニュー：ページ内検索
+            CommandGroup(after: .textEditing) {
+                Button("Find…") { manager.selectedTab?.showFindBar() }
+                    .keyboardShortcut("f", modifiers: .command)
+                Button("Find Next") { manager.selectedTab?.findAgain(backwards: false) }
+                    .keyboardShortcut("g", modifiers: .command)
+                Button("Find Previous") { manager.selectedTab?.findAgain(backwards: true) }
+                    .keyboardShortcut("g", modifiers: [.command, .shift])
+            }
             // View メニュー：ズーム
             CommandMenu("View") {
                 Button("Zoom In") { manager.selectedTab?.zoomIn() }
@@ -53,6 +62,8 @@ struct SkyscraperApp: App {
                 Divider()
                 Button("Reload") { manager.selectedTab?.reload() }
                     .keyboardShortcut("r", modifiers: .command)
+                Button("Reload Without Cache") { manager.selectedTab?.reloadFromOrigin() }
+                    .keyboardShortcut("r", modifiers: [.command, .shift])
             }
             // Tabs メニュー：⌘1〜⌘9 でタブ1〜9
             CommandMenu("Tabs") {
