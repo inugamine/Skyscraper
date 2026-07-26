@@ -569,6 +569,15 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         // requestFullscreen() を呼んでも黙って拒否される（おかげで
         // YouTube も X も大画面ボタンが無反応になる）
         configuration.preferences.isElementFullscreenEnabled = true
+        // ピクチャ・イン・ピクチャはここでは開けない。
+        // iOS には allowsPictureInPictureMediaPlayback があるが、
+        // macOS の WKWebViewConfiguration / WKPreferences には相当する
+        // 公開項目が無い（macOS 26 SDK で確認済み）。
+        // 標準の requestPictureInPicture() は呼べるが NotSupportedError を返し、
+        // 素の <video controls> でさえ WebKit 純正の操作盤に PiP ボタンが出ない。
+        // つまり WKWebView 自体で無効化されている。
+        // 非公開の _allowsPictureInPictureMediaPlayback を KVC で突く手はあるが、
+        // キー名が変われば実行時に例外で落ちるので採用しない
         return SkyscraperWebView(frame: .zero, configuration: configuration)
     }
 
