@@ -90,6 +90,12 @@ final class PrivacyManager: ObservableObject {
         flash(String(localized: "Done. External app permissions have been reset."))
     }
 
+    // 「このサイトでは常に許可」したポップアップの許可を全部忘れる
+    func resetPopupAllowList() {
+        PopupAllowList.shared.reset()
+        flash(String(localized: "Done. Pop-up permissions have been reset."))
+    }
+
     // 一言表示を出して、数秒で消す
     private func flash(_ message: String) {
         lastClearedMessage = message

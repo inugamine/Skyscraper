@@ -545,15 +545,32 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     let id = UUID()
     // WKWebView は生成後に configuration を読むとコピーが返るため、
     // 設定は必ず生成前に済ませる
-    let webView: WKWebView = {
-        let configuration = WKWebViewConfiguration()
+    let webView: WKWebView
+
+    // WKWebView の器を作る。
+    // popup が渡された場合は、WebKit が用意した設定をそのまま使う。
+    // 自前の設定で作り直すと window.opener の関係が結ばれず、
+    // 「開いた窓が親に結果を返す」流れ（OAuth など）が成立しない
+    private static func makeWebView(_ popup: WKWebViewConfiguration?) -> WKWebView {
+        let configuration = popup ?? WKWebViewConfiguration()
+        // window.open() から渡される configuration は開いた側の複製だが、
+        // userContentController だけは参照ごと共有されている（同じ実体）。
+        // そのまま同じ名前のハンドラを足すと
+        // "Attempt to add script message handler ... when one already exists" で落ちる。
+        // かといって removeAll すると、開いた側のタブのハンドラまで巻き添えで消える。
+        // 新しい実体に差し替えて、このタブ専用の注入場所を用意する。
+        // processPool と websiteDataStore には触らない——
+        // そこを替えるとクッキーの共有も window.opener の関係も壊れる
+        if popup != nil {
+            configuration.userContentController = WKUserContentController()
+        }
         // 動画の全画面ボタン（Fullscreen API）を使えるようにする。
         // macOS の WKWebView はこれが既定で無効で、ページが
         // requestFullscreen() を呼んでも黙って拒否される（おかげで
         // YouTube も X も大画面ボタンが無反応になる）
         configuration.preferences.isElementFullscreenEnabled = true
         return SkyscraperWebView(frame: .zero, configuration: configuration)
-    }()
+    }
 
     @Published var urlText: String = ""
     @Published var canGoBack: Bool = false
@@ -580,9 +597,18 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     @Published var findNotFound: Bool = false
     // 検索欄に焦点を移す合図（⌘F のたびに増える）
     @Published var findFocusTrigger: Int = 0
+    // ブロックしたポップアップ（知らせバーに出す）
+    @Published var blockedPopups: [BlockedPopup] = []
 
     // ⌘クリックされたリンクを新規タブで開くための連絡先（TabManager が入れる）
     var openInNewTab: ((String) -> Void)?
+
+    // window.open() で新しい器を求められた時の連絡先（TabManager が入れる）。
+    // 返された WKWebView をそのまま WebKit に渡す
+    var openPopup: ((WKWebViewConfiguration) -> WKWebView?)?
+
+    // window.close() で自分を畳むための連絡先（TabManager が入れる）
+    var requestClose: (() -> Void)?
 
     // セッション復元で作られたが、まだ中身を読みに行っていない URL。
     // 起動時に全タブを一斉に読み込むと回線も CPU も持っていかれるので、
@@ -993,7 +1019,11 @@ final class Tab: NSObject, ObservableObject, Identifiable {
 
     // deferLoad が真なら、URL は控えるだけで読み込まない（セッション復元用）。
     // title は復元直後のサイドバー表示に使う仮の題名
-    init(url: String? = nil, title: String = "", deferLoad: Bool = false) {
+    init(url: String? = nil,
+         title: String = "",
+         deferLoad: Bool = false,
+         popupConfiguration: WKWebViewConfiguration? = nil) {
+        webView = Tab.makeWebView(popupConfiguration)
         super.init()
 
         // トラックパッドの2本指スワイプで戻る／進む
@@ -1059,6 +1089,8 @@ final class Tab: NSObject, ObservableObject, Identifiable {
                 // ページ遷移でリーダー表示も消える。状態と判定を仕切り直し、
                 // 読み込み完了時に改めて判定する
                 if wv.isLoading {
+                    // ページを離れたらポップアップの知らせも納める
+                    if !self.blockedPopups.isEmpty { self.blockedPopups.removeAll() }
                     if self.isReaderActive { self.isReaderActive = false }
                     if self.isReaderAvailable { self.isReaderAvailable = false }
                 } else {
@@ -1074,7 +1106,12 @@ final class Tab: NSObject, ObservableObject, Identifiable {
             guard let self else { return }
             Task { @MainActor in self.pageTitle = wv.title ?? "" }
         })
-        if let url {
+        if popupConfiguration != nil {
+            // window.open() から生まれたタブ。
+            // 中身を入れるのは WebKit の仕事なので、こちらからは load しない。
+            // ロビーではないので isHome は下ろしておく
+            isHome = false
+        } else if let url {
             urlText = url
             if deferLoad {
                 // 読み込みはまだ。ロビーではないので isHome は下ろし、
@@ -1319,6 +1356,22 @@ final class Tab: NSObject, ObservableObject, Identifiable {
             }
         }
     }
+
+    // ── ポップアップの知らせバー ──
+
+    // 溜めていたものを全部タブで開く
+    func openBlockedPopups() {
+        let urls = blockedPopups.map(\.url)
+        blockedPopups.removeAll()
+        for url in urls { openInNewTab?(url) }
+    }
+
+    // 今見ているページを許可一覧に加えてから開く。
+    // 記録するのは「開かれる先」ではなく「開く側」のページだ
+    func allowPopupsForThisSite() {
+        PopupAllowList.shared.allow(PopupAllowList.originKey(for: webView.url))
+        openBlockedPopups()
+    }
 }
 
 // MARK: - ページ内メディア状態の受け取り
@@ -1486,10 +1539,41 @@ extension Tab: WKUIDelegate {
                  createWebViewWith configuration: WKWebViewConfiguration,
                  for navigationAction: WKNavigationAction,
                  windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if let url = navigationAction.request.url?.absoluteString {
-            Task { @MainActor in self.openInNewTab?(url) }
+        // リンクを踏んだ結果（target="_blank"）とフォーム送信は利用者の意思。
+        // 従来通り裏タブで開く
+        let byLink = navigationAction.navigationType == .linkActivated
+            || navigationAction.navigationType == .formSubmitted
+        if byLink {
+            if let url = navigationAction.request.url?.absoluteString {
+                Task { @MainActor in self.openInNewTab?(url) }
+            }
+            return nil
         }
-        return nil   // 新しいウィンドウは作らず、タブで開く
+
+        // ここからは window.open()。
+        // WebKit はユーザー操作を伴わない window.open を既定で弾いているので、
+        // ここへ届くのは「クリックに便乗して開かれたもの」だ
+        let opener = PopupAllowList.originKey(for: webView.url)
+        guard PopupAllowList.shared.isAllowed(opener) else {
+            if let url = navigationAction.request.url?.absoluteString {
+                print("Popup blocked from \(opener.isEmpty ? "(unknown origin)" : opener): \(url)")
+                blockedPopups.append(BlockedPopup(url: url))
+            }
+            return nil
+        }
+
+        // 許可済み。WebKit が用意した configuration で器を作って返す。
+        // ここで nil を返して自前でタブを開くと window.opener が繋がらず、
+        // 開いた窓が親に結果を返せない（OAuth のログインが完了しない）
+        return openPopup?(configuration)
+    }
+
+    // window.close() の受け皿。
+    // これを実装しない限り、WKWebView は window.close() を黙って捨てる。
+    // OAuth の窓は親に結果を返したあと自分で閉じにいくので、
+    // 受け手が居ないと用済みの白紙タブが残り続ける
+    func webViewDidClose(_ webView: WKWebView) {
+        requestClose?()
     }
 
     // macOS ではこれを自分で実装しないと、ファイル選択パネルが出ない
@@ -1574,6 +1658,8 @@ final class TabManager: ObservableObject {
 
     // ── セッションの保存 ──
     private static let sessionKey = "skyscraper.session.v1"
+    // 設定の「次回起動時にタブを開き直す」。既定は有効
+    static let restoreSessionKey = "skyscraper.restoreSession"
     // 一度に復元する上限。壊れた保存で限りなくタブが開くのを防ぐ
     private static let restoreLimit = 50
     // 復元が済むまでは保存しない（途中の中途半端な状態で書き潰さないため）
@@ -1603,8 +1689,30 @@ final class TabManager: ObservableObject {
 
     // ── セッションの読み書き ──
 
+    // キーが無い（初回起動）場合も復元する。切りたい人が明示的に切る
+    static var restoresSession: Bool {
+        UserDefaults.standard.object(forKey: restoreSessionKey) as? Bool ?? true
+    }
+
+    // 保存済みのタブ一覧をディスクから消す。
+    // 設定で切られた瞬間に設定画面からも呼ぶ
+    static func forgetSavedSession() {
+        UserDefaults.standard.removeObject(forKey: sessionKey)
+        // removeObject だけだと cfprefsd のメモリ上から消えるだけで、
+        // plist への書き出しは遅延する。消したつもりのものが
+        // しばらくファイルに残るのはこの設定の趣旨に反するので、
+        // 削除の時だけは書き出しを待つ
+        UserDefaults.standard.synchronize()
+    }
+
     // 前回のタブ構成を読み直す。保存が無ければ真っ新なロビーを一枚だけ
     private func restoreSession() {
+        // 設定で切られていれば、保存済みのものも読まずに捨てる
+        guard Self.restoresSession else {
+            Self.forgetSavedSession()
+            addTab()
+            return
+        }
         guard let data = UserDefaults.standard.data(forKey: Self.sessionKey),
               let state = try? JSONDecoder().decode(SessionState.self, from: data),
               !state.tabs.isEmpty
@@ -1635,6 +1743,12 @@ final class TabManager: ObservableObject {
     }
 
     private func saveSession() {
+        // 設定で切られている間は書かない。
+        // 古い保存が残っていたらここでも消しておく
+        guard Self.restoresSession else {
+            Self.forgetSavedSession()
+            return
+        }
         let entries = tabs.map { tab -> SessionTab in
             var url = tab.isHome ? "" : (tab.webView.url?.absoluteString ?? tab.urlText)
             // 閉じ際に流し込む about:blank は復元しない（ロビー扱いに倒す）
@@ -1663,11 +1777,36 @@ final class TabManager: ObservableObject {
         tabs.append(tab)
     }
 
-    private func makeTab(url: String?, title: String = "", deferLoad: Bool = false) -> Tab {
-        let tab = Tab(url: url, title: title, deferLoad: deferLoad)
+    // window.open() 用：WebKit が用意した設定で器を起こし、その WKWebView を返す。
+    // 中身を入れるのは WebKit の仕事なので、ここでは load しない。
+    // 本物のポップアップ窓に対応するので、開いたらそちらを見せる
+    func addPopupTab(configuration: WKWebViewConfiguration) -> WKWebView {
+        let tab = makeTab(url: nil, popupConfiguration: configuration)
+        tabs.append(tab)
+        selectedID = tab.id
+        return tab.webView
+    }
+
+    private func makeTab(url: String?,
+                         title: String = "",
+                         deferLoad: Bool = false,
+                         popupConfiguration: WKWebViewConfiguration? = nil) -> Tab {
+        let tab = Tab(url: url,
+                      title: title,
+                      deferLoad: deferLoad,
+                      popupConfiguration: popupConfiguration)
         // ⌘クリックされたら、この管理人に連絡が来るようにする
         tab.openInNewTab = { [weak self] link in
             self?.addTabInBackground(url: link)
+        }
+        // window.open() で器を求められたら、ここで起こして返す
+        tab.openPopup = { [weak self] configuration in
+            self?.addPopupTab(configuration: configuration)
+        }
+        // window.close() を受けたら、そのタブを畳む
+        tab.requestClose = { [weak self, weak tab] in
+            guard let self, let tab else { return }
+            self.closeTab(tab)
         }
         // タイトルが確定・変化したらグループを組み直す。
         // デバウンスは grouper 側が持つので、ここは遠慮なく呼ぶ
@@ -2820,6 +2959,60 @@ struct FindBar: View {
     }
 }
 
+// MARK: - ポップアップの知らせバー
+
+// 黙って捨てると OAuth のログイン窓や決済窓が壊れた時に手がない。
+// 必ず知らせて、その場で開き直せる道を残す
+struct PopupNoticeBar: View {
+    @ObservedObject var tab: Tab
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "rectangle.on.rectangle.slash")
+                .font(.system(size: 11))
+                .foregroundColor(Deco.gold)
+
+            Text("Pop-ups blocked: \(tab.blockedPopups.count)")
+                .font(.system(size: 11, design: .serif))
+                .foregroundColor(Deco.cream)
+
+            Spacer()
+
+            noticeButton("Open") { tab.openBlockedPopups() }
+            noticeButton("Always allow on this site") { tab.allowPopupsForThisSite() }
+
+            Button { tab.blockedPopups.removeAll() } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10))
+                    .foregroundColor(Deco.dimGold)
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .background(Deco.panel2)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Deco.faintGold).frame(height: 1)
+        }
+    }
+
+    private func noticeButton(_ title: LocalizedStringKey,
+                              action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 10, design: .serif))
+                .tracking(1)
+                .foregroundColor(Deco.gold)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .overlay(Hexagon(inset: 4).stroke(Deco.faintGold, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 // MARK: - 選択中タブの中身
 
 struct BrowserPane: View {
@@ -2909,6 +3102,11 @@ struct BrowserPane: View {
             // フィールドエディタが残って打ちかけの語が混ざる
             if tab.isFindBarVisible {
                 FindBar(tab: tab).id(tab.id)
+            }
+
+            // ── ポップアップを止めた知らせ ──
+            if !tab.blockedPopups.isEmpty {
+                PopupNoticeBar(tab: tab)
             }
             }
 

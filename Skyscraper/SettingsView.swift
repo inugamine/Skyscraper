@@ -10,6 +10,7 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var updater: Updater
     @StateObject private var privacy = PrivacyManager()
+    @AppStorage(TabManager.restoreSessionKey) private var restoresSession = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -50,6 +51,29 @@ struct SettingsView: View {
 
             // ══ プライバシー ══
             sectionHeader("Privacy")
+
+            // ── セッション復元 ──
+            // 既存のトグルと向きを揃え、「オンにすると何が起きるか」で書く。
+            // 「保存しない」にするとオン＝しないの二重否定になる
+            Toggle(isOn: $restoresSession) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Reopen tabs on next launch")
+                        .font(.system(size: 12, design: .serif))
+                        .foregroundColor(Deco.cream)
+                    Text("Tab addresses are saved on quit. Turning this off also disables recovery after a crash.")
+                        .font(.system(size: 10, design: .serif))
+                        .foregroundColor(Deco.dimGold)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .toggleStyle(.switch)
+            .tint(Deco.gold)
+            .padding(.bottom, 16)
+            .onChange(of: restoresSession) { _, enabled in
+                // 切られた瞬間に保存済みのタブ一覧を消す。
+                // 次の保存まで待つと、その間ディスクに残り続けてしまう
+                if !enabled { TabManager.forgetSavedSession() }
+            }
 
             VStack(alignment: .leading, spacing: 10) {
                 clearButton(.cache,
@@ -102,6 +126,28 @@ struct SettingsView: View {
 
                     Spacer()
                 }
+
+                // 「このサイトでは常に許可」したポップアップの記憶を忘れる
+                HStack(spacing: 12) {
+                    Button {
+                        privacy.resetPopupAllowList()
+                    } label: {
+                        Text("Reset Pop-up Permissions")
+                            .font(.system(size: 11, design: .serif))
+                            .tracking(1)
+                            .foregroundColor(Deco.gold)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .overlay(Hexagon(inset: 6).stroke(Deco.faintGold, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+
+                    Text("Pop-ups will be blocked again.")
+                        .font(.system(size: 10, design: .serif))
+                        .foregroundColor(Deco.dimGold)
+
+                    Spacer()
+                }
             }
 
             // 完了の一言
@@ -120,7 +166,7 @@ struct SettingsView: View {
             Spacer()
         }
         .padding(24)
-        .frame(width: 500, height: 570)
+        .frame(width: 500, height: 690)
         .background(Deco.ink)
         .preferredColorScheme(.dark)
         .animation(.easeInOut(duration: 0.2), value: privacy.lastClearedMessage)
