@@ -1755,6 +1755,57 @@ final class TabManager: ObservableObject {
         return tab.webView
     }
 
+    // ⌃Tab / ⌃⇧Tab。画面に並んでいる順で送る。端まで行ったら反対側へ回る
+    func selectAdjacentTab(offset: Int) {
+        let order = displayOrder
+        guard order.count > 1,
+              let idx = order.firstIndex(where: { $0.id == selectedID }) else { return }
+        let next = ((idx + offset) % order.count + order.count) % order.count
+        selectedID = order[next].id
+    }
+
+    // ── 並び順 ──
+
+    // グループ見出し付きのセクション一覧。
+    // tabs 配列の並び順は変えず、グループは初出順、
+    // どこにも属さないタブは末尾に見出し無しでまとめる。
+    // 割り当てが空（Apple Intelligence 無効・タブが少ない）なら
+    // セクションは一つだけになり、従来と全く同じ見た目になる。
+    //
+    // ここに置いてあるのが肝だ。以前は VerticalTabStrip の中で組んでいたため、
+    // 送り（⌃Tab）が tabs を直に歩いてしまい、グループ表示中は
+    // 画面上で飛び飛びに見えていた。並び順は一箇所に集める。
+    //
+    // TabSection がこのファイル内の private 型なので fileprivate にする。
+    // 見るのは同じファイルの VerticalTabStrip と displayOrder だけだ
+    fileprivate var sections: [TabSection] {
+        var grouped: [(name: String, tabs: [Tab])] = []
+        var ungrouped: [Tab] = []
+        for tab in tabs {
+            if let name = grouper.assignments[tab.id] {
+                if let idx = grouped.firstIndex(where: { $0.name == name }) {
+                    grouped[idx].tabs.append(tab)
+                } else {
+                    grouped.append((name, [tab]))
+                }
+            } else {
+                ungrouped.append(tab)
+            }
+        }
+        var result = grouped.map {
+            TabSection(id: "group:" + $0.name, name: $0.name, tabs: $0.tabs)
+        }
+        if !ungrouped.isEmpty {
+            result.append(TabSection(id: "__ungrouped__", name: nil, tabs: ungrouped))
+        }
+        return result
+    }
+
+    // 画面に並んでいる順のタブ一覧（見出しを取り除いたもの）
+    var displayOrder: [Tab] {
+        sections.flatMap(\.tabs)
+    }
+
     private func makeTab(url: String?,
                          title: String = "",
                          deferLoad: Bool = false,
@@ -2003,31 +2054,9 @@ struct VerticalTabStrip: View {
     // タブの挿入位置を示す金の横バー（ブックマークと同じ人感センサー方式）
     @StateObject private var dropModel = DropIndicatorModel()
 
-    // グループ見出し付きのセクション一覧を組み立てる。
-    // tabs 配列の並び順は変えず、グループは初出順、
-    // どこにも属さないタブは末尾に見出し無しでまとめる。
-    // 割り当てが空（Apple Intelligence 無効・タブが少ない）なら
-    // セクションは一つだけになり、従来と全く同じ見た目になる
-    private var sections: [TabSection] {
-        var grouped: [(name: String, tabs: [Tab])] = []
-        var ungrouped: [Tab] = []
-        for tab in manager.tabs {
-            if let name = grouper.assignments[tab.id] {
-                if let idx = grouped.firstIndex(where: { $0.name == name }) {
-                    grouped[idx].tabs.append(tab)
-                } else {
-                    grouped.append((name, [tab]))
-                }
-            } else {
-                ungrouped.append(tab)
-            }
-        }
-        var result = grouped.map { TabSection(id: "group:" + $0.name, name: $0.name, tabs: $0.tabs) }
-        if !ungrouped.isEmpty {
-            result.append(TabSection(id: "__ungrouped__", name: nil, tabs: ungrouped))
-        }
-        return result
-    }
+    // 並び順の組み立ては TabManager に集約した。
+    // 表示（ここ）と送り（⌃Tab）が同じ配列を見るので、構造的にずれない
+    private var sections: [TabSection] { manager.sections }
 
     // コンテキストメニュー用：現在あるグループ名の一覧（初出順）
     private var groupNames: [String] {

@@ -65,8 +65,13 @@ struct SkyscraperApp: App {
                 Button("Reload Without Cache") { manager.selectedTab?.reloadFromOrigin() }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
             }
-            // Tabs メニュー：⌘1〜⌘9 でタブ1〜9
+            // Tabs メニュー：タブ送りと ⌘1〜⌘9
             CommandMenu("Tabs") {
+                Button("Show Next Tab") { manager.selectAdjacentTab(offset: 1) }
+                    .keyboardShortcut(.tab, modifiers: .control)
+                Button("Show Previous Tab") { manager.selectAdjacentTab(offset: -1) }
+                    .keyboardShortcut(.tab, modifiers: [.control, .shift])
+                Divider()
                 ForEach(1...9, id: \.self) { n in
                     Button("Tab \(n)") { manager.selectTab(at: n - 1) }
                         .keyboardShortcut(KeyEquivalent(Character("\(n)")), modifiers: .command)
