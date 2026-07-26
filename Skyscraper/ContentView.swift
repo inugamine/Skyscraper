@@ -462,8 +462,8 @@ final class SkyscraperWebView: WKWebView {
                   let urlString = result as? String,
                   let url = URL(string: urlString) else { return }
             self.startDownload(using: URLRequest(url: url)) { download in
-                // 保存先の決定は Tab（navigationDelegate）の既存処理に任せる
-                download.delegate = self.navigationDelegate as? WKDownloadDelegate
+                // 保存先の決定と進捗の把握は DownloadManager に任せる
+                download.delegate = DownloadManager.shared
             }
         }
     }
@@ -1481,13 +1481,13 @@ extension Tab: WKNavigationDelegate {
     func webView(_ webView: WKWebView,
                  navigationAction: WKNavigationAction,
                  didBecome download: WKDownload) {
-        download.delegate = self
+        download.delegate = DownloadManager.shared
     }
 
     func webView(_ webView: WKWebView,
                  navigationResponse: WKNavigationResponse,
                  didBecome download: WKDownload) {
-        download.delegate = self
+        download.delegate = DownloadManager.shared
     }
 
     // WebContent プロセスが落ちたとき（WebKit 内部のクラッシュ）の立て直し。
@@ -1497,47 +1497,6 @@ extension Tab: WKNavigationDelegate {
             print("Tab: WebContent process crashed, reloading")
             webView.reload()
         }
-    }
-}
-
-// MARK: - ダウンロードの受け取り
-
-extension Tab: WKDownloadDelegate {
-    func download(_ download: WKDownload,
-                  decideDestinationUsing response: URLResponse,
-                  suggestedFilename: String,
-                  completionHandler: @escaping (URL?) -> Void) {
-        Task { @MainActor in
-            // 保存パネルを出して、保存先はユーザーに決めてもらう
-            let panel = NSSavePanel()
-            // Twitter の画像 URL（…?format=jpg&name=large）のように拡張子が落ちる場合は
-            // 応答の MIME タイプから補う
-            var filename = suggestedFilename
-            if (filename as NSString).pathExtension.isEmpty,
-               let mime = response.mimeType,
-               let ext = UTType(mimeType: mime)?.preferredFilenameExtension {
-                filename += "." + ext
-            }
-            panel.nameFieldStringValue = filename
-            panel.canCreateDirectories = true
-            panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory,
-                                                          in: .userDomainMask).first
-
-            let result = await panel.begin()
-            guard result == .OK, let url = panel.url else {
-                completionHandler(nil)   // キャンセル
-                return
-            }
-            // 同名ファイルがあれば退かす（WebKit は上書きしてくれない）
-            try? FileManager.default.removeItem(at: url)
-            completionHandler(url)
-        }
-    }
-
-    func download(_ download: WKDownload,
-                  didFailWithError error: Error,
-                  resumeData: Data?) {
-        print("Download failed: \(error.localizedDescription)")
     }
 }
 
@@ -3026,6 +2985,8 @@ struct PopupNoticeBar: View {
 
 struct BrowserPane: View {
     @ObservedObject var tab: Tab
+    // ダウンロードはタブに属さないので、アプリ共通の一つを見る
+    @ObservedObject private var downloads = DownloadManager.shared
     @ObservedObject var manager: TabManager
     @EnvironmentObject var store: BookmarkStore
     @State private var addressText: String = ""
@@ -3116,6 +3077,11 @@ struct BrowserPane: View {
             // ── ポップアップを止めた知らせ ──
             if !tab.blockedPopups.isEmpty {
                 PopupNoticeBar(tab: tab)
+            }
+
+            // ── ダウンロードの棚 ──
+            if downloads.isShelfVisible, !downloads.items.isEmpty {
+                DownloadShelf(downloads: downloads)
             }
             }
 
