@@ -1625,7 +1625,13 @@ final class TabManager: ObservableObject {
     private var recentlyClosed: [String] = []
 
     // ── セッションの保存 ──
-    private static let sessionKey = "skyscraper.session.v1"
+    //
+    // 窓ごとに一件、[SessionState] の配列で持つ。
+    // v1 は単一の SessionState だったので読めない（初回だけロビーから始まる）
+    private static let sessionKey = "skyscraper.session.v2"
+    private static let legacySessionKey = "skyscraper.session.v1"
+    // 一度に復元する窓の上限
+    private static let windowLimit = 10
     // 設定の「次回起動時にタブを開き直す」。既定は有効
     static let restoreSessionKey = "skyscraper.restoreSession"
     // 一度に復元する上限。壊れた保存で限りなくタブが開くのを防ぐ
@@ -1635,7 +1641,77 @@ final class TabManager: ObservableObject {
     private var saveTask: Task<Void, Never>?
     private var terminationObserver: NSObjectProtocol?
 
+    // 生きている管理人の名簿（弱参照）。
+    //
+    // 以前は「最初の窓が受け持つ」形にしていたが、それだと
+    // 二枚目でいくら作業しても一枚目のタブが変わらない限り保存が走らず、
+    // その間の作業が一切記録されなかった。
+    // 受け持ちをやめ、保存はこの名簿を回って全窓ぶんをまとめて書く
+    private struct WeakManager {
+        weak var manager: TabManager?
+    }
+
+    private static var registry: [WeakManager] = []
+
+    // この窓は閉じられたか。
+    //
+    // 窓を閉じても SwiftUI は @StateObject を温存するので、
+    // 弱参照だけでは「もう無い窓」を見分けられない。
+    // 解放を待たず、閉じたことを ContentView から明示的に伝えてもらう
+    private(set) var isClosed = false
+
+    // 終了処理中か。
+    // ⌘Q でも窓は畳まれるので、その onDisappear を「閉じた」と取ると
+    // 全窓が除外されて何も保存されなくなる
+    static var isTerminating = false
+
+    func markOpen() {
+        isClosed = false
+    }
+
+    func markClosed() {
+        guard !Self.isTerminating else { return }
+        isClosed = true
+        Self.saveAll()
+    }
+
+    // 起動時に一度だけ読む待ち行列。窓が生まれるたびに先頭を一つ取る
+    private static var pendingRestores: [SessionState] = []
+    private static var didLoadPending = false
+
+    private static func takePendingRestore() -> SessionState? {
+        if !didLoadPending {
+            didLoadPending = true
+            if let data = UserDefaults.standard.data(forKey: sessionKey),
+               let states = try? JSONDecoder().decode([SessionState].self, from: data) {
+                pendingRestores = Array(states.prefix(windowLimit))
+            }
+        }
+        return pendingRestores.isEmpty ? nil : pendingRestores.removeFirst()
+    }
+
+    // まだ開くべき窓が残っているか（ContentView が次の窓を開く合図）
+    static var hasPendingRestores: Bool { !pendingRestores.isEmpty }
+
+    // 全窓ぶんをまとめて書く。どの窓で作業してもここを通る
+    static func saveAll() {
+        guard restoresSession else {
+            forgetSavedSession()
+            return
+        }
+        registry.removeAll { $0.manager == nil }
+        let states = registry.compactMap { box -> SessionState? in
+            guard let manager = box.manager, !manager.isClosed else { return nil }
+            return manager.currentState()
+        }
+        guard !states.isEmpty,
+              let data = try? JSONEncoder().encode(states) else { return }
+        UserDefaults.standard.set(data, forKey: sessionKey)
+    }
+
     init() {
+        // 名簿に載る順＝窓が生まれた順。保存もこの順で並ぶ
+        Self.registry.append(WeakManager(manager: self))
         restoreSession()
         didRestore = true
         // 選択中の一枚だけは、待たずに読み込みを始める
@@ -1650,8 +1726,13 @@ final class TabManager: ObservableObject {
             forName: NSApplication.willTerminateNotification,
             object: nil,
             queue: nil
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.saveSession() }
+        ) { _ in
+            MainActor.assumeIsolated {
+                // 終了で窓が畳まれる際の onDisappear を
+                // 「閉じた」と誤解しないよう、先に旗を立ててから書く
+                TabManager.isTerminating = true
+                TabManager.saveAll()
+            }
         }
     }
 
@@ -1666,6 +1747,8 @@ final class TabManager: ObservableObject {
     // 設定で切られた瞬間に設定画面からも呼ぶ
     static func forgetSavedSession() {
         UserDefaults.standard.removeObject(forKey: sessionKey)
+        UserDefaults.standard.removeObject(forKey: legacySessionKey)
+        pendingRestores.removeAll()
         // removeObject だけだと cfprefsd のメモリ上から消えるだけで、
         // plist への書き出しは遅延する。消したつもりのものが
         // しばらくファイルに残るのはこの設定の趣旨に反するので、
@@ -1681,10 +1764,9 @@ final class TabManager: ObservableObject {
             addTab()
             return
         }
-        guard let data = UserDefaults.standard.data(forKey: Self.sessionKey),
-              let state = try? JSONDecoder().decode(SessionState.self, from: data),
-              !state.tabs.isEmpty
-        else {
+        // 待ち行列から自分の分を一つ取る。
+        // 空ならこの窓は新規（⌘N や、前回より多く開いた場合）
+        guard let state = Self.takePendingRestore(), !state.tabs.isEmpty else {
             addTab()
             return
         }
@@ -1711,12 +1793,11 @@ final class TabManager: ObservableObject {
     }
 
     private func saveSession() {
-        // 設定で切られている間は書かない。
-        // 古い保存が残っていたらここでも消しておく
-        guard Self.restoresSession else {
-            Self.forgetSavedSession()
-            return
-        }
+        Self.saveAll()
+    }
+
+    // この窓一枚ぶんの控え
+    private func currentState() -> SessionState {
         let entries = tabs.map { tab -> SessionTab in
             var url = tab.isHome ? "" : (tab.webView.url?.absoluteString ?? tab.urlText)
             // 閉じ際に流し込む about:blank は復元しない（ロビー扱いに倒す）
@@ -1724,9 +1805,7 @@ final class TabManager: ObservableObject {
             return SessionTab(url: url, title: tab.pageTitle)
         }
         let index = tabs.firstIndex { $0.id == selectedID } ?? 0
-        let state = SessionState(tabs: entries, selectedIndex: index)
-        guard let data = try? JSONEncoder().encode(state) else { return }
-        UserDefaults.standard.set(data, forKey: Self.sessionKey)
+        return SessionState(tabs: entries, selectedIndex: index)
     }
 
     var selectedTab: Tab? {
@@ -3177,8 +3256,12 @@ struct BrowserPane: View {
 // MARK: - 全体
 
 struct ContentView: View {
-    @ObservedObject var manager: TabManager
+    // 管理人は窓ごとに一人。ここを App 直下から移したことで、
+    // ⌘N で窓を増やせばタブも別々になる
+    @StateObject private var manager = TabManager()
+    // ブックマークは窓をまたいで共通なので、外から受け取る
     @ObservedObject var bookmarks: BookmarkStore
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         HStack(spacing: 0) {
@@ -3197,9 +3280,26 @@ struct ContentView: View {
         .background(Deco.ink)
         .environmentObject(bookmarks)
         .preferredColorScheme(.dark)
+        // この窓が手前に来たら、自分の管理人をメニューに差し出す
+        .focusedSceneValue(\.tabManager, manager)
+        .onAppear {
+            manager.markOpen()
+            // 復元待ちがまだ残っていれば、次の窓を開く。
+            // 開いた先も同じことをするので、必要な枚数まで数珠つなぎに続く。
+            // この窓の分は既に manager の初期化で取り出されている
+            if TabManager.hasPendingRestores {
+                openWindow(id: "browser")
+            }
+        }
+        .onDisappear {
+            // 窓を閉じたことを伝える。
+            // SwiftUI は閉じても @StateObject を温存するので、
+            // 解放されるのを待っても名簿から消えない
+            manager.markClosed()
+        }
     }
 }
 
 #Preview {
-    ContentView(manager: TabManager(), bookmarks: BookmarkStore())
+    ContentView(bookmarks: BookmarkStore())
 }
