@@ -3054,6 +3054,22 @@ struct BrowserPane: View {
                 .buttonStyle(.plain)
                 .disabled(tab.isHome)
 
+                // ダウンロードの棚を開け閉めする。
+                // 今回の起動で何か落としていれば現れる
+                if !downloads.items.isEmpty {
+                    Button {
+                        downloads.isShelfVisible.toggle()
+                    } label: {
+                        Image(systemName: downloads.hasActive
+                              ? "arrow.down.circle.fill" : "arrow.down.circle")
+                            .font(.system(size: 13))
+                            .foregroundColor(downloads.isShelfVisible ? Deco.cream : Deco.gold)
+                            .frame(width: 24, height: 24)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Downloads")
+                }
+
                 if tab.isLoading {
                     ProgressView()
                         .controlSize(.small)

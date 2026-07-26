@@ -85,6 +85,10 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
 
     @Published private(set) var items: [DownloadItem] = []
     @Published var isShelfVisible = false
+    // 実行中のものがあるか。
+    // 項目の中身の変化をそのまま親に流すと、進捗が動くたびに
+    // 画面全体が描き直しになる。状態が変わった時だけ更新する
+    @Published private(set) var hasActive = false
 
     private override init() { super.init() }
 
@@ -92,11 +96,16 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
         items.first { $0.download === download }
     }
 
+    private func refreshActive() {
+        hasActive = items.contains { $0.state == .running }
+    }
+
     // MARK: - 操作
 
     func stop(_ item: DownloadItem) {
         item.download?.cancel { _ in }
         item.state = .cancelled
+        refreshActive()
     }
 
     func revealInFinder(_ item: DownloadItem) {
@@ -107,10 +116,16 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
         NSWorkspace.shared.open(item.destination)
     }
 
-    // 終わったものを棚から下ろす。実行中のものは残す
+    // 棚を閉じるだけ。記録は残るので、ツールバーから開き直せる
+    func hideShelf() {
+        isShelfVisible = false
+    }
+
+    // 終わったものを記録から消す。実行中のものは残す
     func clearFinished() {
         items.removeAll { $0.state != .running }
-        isShelfVisible = !items.isEmpty
+        refreshActive()
+        if items.isEmpty { isShelfVisible = false }
     }
 
     // MARK: - WKDownloadDelegate
@@ -148,6 +163,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
             let item = DownloadItem(download: download, destination: url)
             self.items.append(item)
             self.isShelfVisible = true
+            self.refreshActive()
 
             completionHandler(url)
         }
@@ -155,12 +171,14 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
 
     func downloadDidFinish(_ download: WKDownload) {
         item(for: download)?.state = .finished
+        refreshActive()
     }
 
     func download(_ download: WKDownload,
                   didFailWithError error: Error,
                   resumeData: Data?) {
         print("Download failed: \(error.localizedDescription)")
+        defer { refreshActive() }
         guard let item = item(for: download) else { return }
         // 自分で止めた時も didFailWithError が来る。上書きしない
         if item.state == .running {
@@ -187,7 +205,18 @@ struct DownloadShelf: View {
 
                 Spacer()
 
+                // 記録から消すのはこちら。実行中のものは残る
                 Button { downloads.clearFinished() } label: {
+                    Text("Clear")
+                        .font(.system(size: 10, design: .serif))
+                        .tracking(1)
+                        .foregroundColor(Deco.dimGold)
+                }
+                .buttonStyle(.plain)
+
+                // × は棚を閉じるだけ。記録は残るので、
+                // ツールバーの矢印ボタンからいつでも開き直せる
+                Button { downloads.hideShelf() } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 10))
                         .foregroundColor(Deco.dimGold)
