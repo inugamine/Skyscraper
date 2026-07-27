@@ -127,6 +127,9 @@ struct BrowserCommands: Commands {
                 .keyboardShortcut(.tab, modifiers: [.control, .shift])
                 .disabled(manager == nil)
             Divider()
+            Button("Move Tab to New Window") { manager?.moveSelectedTabToNewWindow() }
+                .disabled(manager == nil)
+            Divider()
             ForEach(1...9, id: \.self) { n in
                 Button("Tab \(n)") { manager?.selectTab(at: n - 1) }
                     .keyboardShortcut(KeyEquivalent(Character("\(n)")), modifiers: .command)

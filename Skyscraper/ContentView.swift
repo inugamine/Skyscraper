@@ -1667,12 +1667,55 @@ final class TabManager: ObservableObject {
 
     func markOpen() {
         isClosed = false
+        // 万が一 onDisappear の誤発火で片付けられていた場合の保険
+        if tabs.isEmpty { addTab() }
     }
 
     func markClosed() {
         guard !Self.isTerminating else { return }
         isClosed = true
         Self.saveAll()
+
+        // まずは即座に鳴っているものを止める。
+        // pauseAllMediaPlayback は WebContent プロセスへ直接「全メディア停止」を
+        // 送るので、解放のタイミングに依存しない
+        for tab in tabs {
+            tab.webView.stopLoading()
+            tab.webView.pauseAllMediaPlayback(completionHandler: nil)
+            tab.webView.closeAllMediaPresentations {}
+        }
+
+        // その上で、一拍おいて本当に片付ける。
+        // ページが生きたままだと YouTube 側の都合で再生が戻る余地があるので、
+        // closeTab と同じ水準（about:blank まで）落とす。
+        // 間を置くのは、onDisappear が誤発火して直後に戻ってくる場合に
+        // 中身を失わないためだ
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard let self, self.isClosed else { return }
+            self.tearDownTabs()
+        }
+    }
+
+    // 閉じた窓のタブを完全に片付ける。
+    // 窓を閉じても SwiftUI は @StateObject を温存するので、
+    // ここで手を下さない限り WebView は永遠に生き残る
+    private func tearDownTabs() {
+        for tab in tabs {
+            tab.webView.stopLoading()
+            tab.webView.pauseAllMediaPlayback(completionHandler: nil)
+            tab.webView.closeAllMediaPresentations {}
+            tab.webView.load(URLRequest(url: URL(string: "about:blank")!))
+            tab.webView.configuration.userContentController.removeAllScriptMessageHandlers()
+            tab.webView.configuration.userContentController.removeAllUserScripts()
+            grouper.forget(tab.id)
+        }
+        // 監視を持ったままだと購読が Tab を掴んで離さない
+        titleWatchers.removeAll()
+        urlWatchers.removeAll()
+        fullscreenWatchers.removeAll()
+        tabs.removeAll()
+        selectedID = nil
     }
 
     // 起動時に一度だけ読む待ち行列。窓が生まれるたびに先頭を一つ取る
@@ -1758,6 +1801,13 @@ final class TabManager: ObservableObject {
 
     // 前回のタブ構成を読み直す。保存が無ければ真っ新なロビーを一枚だけ
     private func restoreSession() {
+        // 他の窓から渡されたタブがあれば、それだけを持って始める。
+        // 復元の待ち行列には手を付けない
+        if let handed = Self.pendingAdoption {
+            Self.pendingAdoption = nil
+            adopt(handed)
+            return
+        }
         // 設定で切られていれば、保存済みのものも読まずに捨てる
         guard Self.restoresSession else {
             Self.forgetSavedSession()
@@ -1893,6 +1943,16 @@ final class TabManager: ObservableObject {
                       title: title,
                       deferLoad: deferLoad,
                       popupConfiguration: popupConfiguration)
+        wire(tab)
+        return tab
+    }
+
+    // 連絡先と監視をこの管理人に繋ぐ。
+    //
+    // 新規に作った時も、他の窓から受け取った時も、必ずここを通す。
+    // 張り替え忘れがあると、移した先で ⌘クリックやポップアップが
+    // 黙って効かなくなる（古い窓に連絡が行ってしまう）
+    private func wire(_ tab: Tab) {
         // ⌘クリックされたら、この管理人に連絡が来るようにする
         tab.openInNewTab = { [weak self] link in
             self?.addTabInBackground(url: link)
@@ -1924,7 +1984,81 @@ final class TabManager: ObservableObject {
         fullscreenWatchers[tab.id] = tab.$isVideoFullscreen
             .removeDuplicates()
             .sink { [weak self] _ in self?.objectWillChange.send() }
+    }
+
+    // ── 窓をまたいだ受け渡し ──
+
+    // 他の窓へ渡すためにタブを外す。
+    //
+    // closeTab とは別物だ。あちらは再生を止め、about:blank を流し込み、
+    // スクリプトハンドラまで外すが、移動でそれをやると中身が死ぬ。
+    // WKWebView はそのまま持ち回すので、移した先で読み込み直しは起きない。
+    // 閉じたタブの控え（⇧⌘T）にも積まない
+    private func detach(_ tab: Tab) -> Tab? {
+        guard let idx = tabs.firstIndex(where: { $0.id == tab.id }) else { return nil }
+        tabs.remove(at: idx)
+        titleWatchers[tab.id] = nil
+        urlWatchers[tab.id] = nil
+        fullscreenWatchers[tab.id] = nil
+        grouper.forget(tab.id)
+        grouper.scheduleRegroup(for: tabs)
+        if selectedID == tab.id {
+            selectedID = tabs[safe: idx]?.id ?? tabs.last?.id
+        }
+        if tabs.isEmpty { addTab() }
         return tab
+    }
+
+    // 他の窓から渡されたタブを受け取る
+    func adopt(_ tab: Tab) {
+        wire(tab)
+        tabs.append(tab)
+        selectedID = tab.id
+        grouper.scheduleRegroup(for: tabs)
+    }
+
+    // このタブを別の窓へ渡す。
+    // 元の窓の最後の一枚だった場合は、detach の中でロビーが一枚補充される
+    func moveTab(_ tab: Tab, to other: TabManager) {
+        guard other !== self, let detached = detach(tab) else { return }
+        other.adopt(detached)
+    }
+
+    // 開いている窓の管理人一覧（名簿順＝窓が生まれた順）。
+    // 閉じた窓と、既に解放されたものは除く
+    static var openWindows: [TabManager] {
+        registry.compactMap { box in
+            guard let manager = box.manager, !manager.isClosed else { return nil }
+            return manager
+        }
+    }
+
+    // 移動先の一覧に出す見出し。
+    // 窓に名前が無いので、選択中のタブの題名で代用する（Safari も同じ）
+    var windowLabel: String {
+        let title = selectedTab?.pageTitle ?? ""
+        let name = title.isEmpty ? String(localized: "New Tab") : title
+        // 長い題名でメニューが横に伸び切らないようにする
+        return name.count > 40 ? String(name.prefix(40)) + "…" : name
+    }
+
+    // 新しい窓へ渡すための預かり所。次に生まれる管理人が引き取る
+    private static var pendingAdoption: Tab?
+
+    // 窓を開くのは View の仕事（openWindow が環境にある）なので、
+    // ここでは合図を送るだけにする
+    @Published private(set) var newWindowRequests = 0
+
+    func moveSelectedTabToNewWindow() {
+        guard let tab = selectedTab else { return }
+        moveTabToNewWindow(tab)
+    }
+
+    func moveTabToNewWindow(_ tab: Tab) {
+        // 最後の一枚を出しても、元の窓にロビーが一枚残るだけで意味がない
+        guard tabs.count > 1, let detached = detach(tab) else { return }
+        Self.pendingAdoption = detached
+        newWindowRequests += 1
     }
 
     func closeTab(_ tab: Tab) {
@@ -2267,6 +2401,17 @@ private struct DraggableTabRow: View {
 
     @State private var rowHeight: CGFloat = 1
 
+    // 自分以外の窓。名簿順（窓が生まれた順）で並ぶ
+    private var moveTargets: [TabMoveTarget] {
+        TabManager.openWindows
+            .filter { $0 !== manager }
+            .map { other in
+                TabMoveTarget(id: ObjectIdentifier(other), label: other.windowLabel) {
+                    manager.moveTab(tab, to: other)
+                }
+            }
+    }
+
     private var showBefore: Bool { indicatorModel.indicator == DropIndicator(id: tab.id, side: .before) }
     private var showAfter:  Bool { indicatorModel.indicator == DropIndicator(id: tab.id, side: .after) }
 
@@ -2275,9 +2420,11 @@ private struct DraggableTabRow: View {
             tab: tab,
             grouper: grouper,
             groupNames: groupNames,
+            moveTargets: moveTargets,
             isSelected: tab.id == manager.selectedID,
             onSelect: { manager.select(tab) },
-            onClose:  { manager.closeTab(tab) }
+            onClose:  { manager.closeTab(tab) },
+            onMoveToNewWindow: { manager.moveTabToNewWindow(tab) }
         )
         // 高さを測っておく（上下判定に使う）
         .background(
@@ -2338,13 +2485,24 @@ private struct TabDropDelegate: DropDelegate {
     }
 }
 
+// 右クリックの「ウィンドウへ移動」に並べる一件。
+// DecoTabRow は管理人も窓も知らずに済むよう、見出しと動作だけを受け取る
+//（onSelect / onClose と同じ流儀）
+struct TabMoveTarget: Identifiable {
+    let id: ObjectIdentifier
+    let label: String
+    let move: () -> Void
+}
+
 struct DecoTabRow: View {
     @ObservedObject var tab: Tab
     @ObservedObject var grouper: TabGrouper
     let groupNames: [String]
+    let moveTargets: [TabMoveTarget]
     let isSelected: Bool
     let onSelect: () -> Void
     let onClose: () -> Void
+    let onMoveToNewWindow: () -> Void
 
     @State private var hovering = false
     @State private var showingNewGroup = false
@@ -2416,6 +2574,13 @@ struct DecoTabRow: View {
                 if !groupNames.isEmpty { Divider() }
                 Button("New Group…") { showingNewGroup = true }
                 Button("No Group") { grouper.assignManually(tab.id, to: nil) }
+            }
+            Menu("Move to Window") {
+                Button("New Window") { onMoveToNewWindow() }
+                if !moveTargets.isEmpty { Divider() }
+                ForEach(moveTargets) { target in
+                    Button { target.move() } label: { Text(verbatim: target.label) }
+                }
             }
         }
         .alert("New Group", isPresented: $showingNewGroup) {
@@ -3296,6 +3461,11 @@ struct ContentView: View {
             // SwiftUI は閉じても @StateObject を温存するので、
             // 解放されるのを待っても名簿から消えない
             manager.markClosed()
+        }
+        // タブを新しい窓へ移す合図。
+        // openWindow は環境にしか無いので、窓を開くのはここの仕事だ
+        .onChange(of: manager.newWindowRequests) { _, _ in
+            openWindow(id: "browser")
         }
     }
 }
