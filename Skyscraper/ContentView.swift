@@ -2009,19 +2009,75 @@ final class TabManager: ObservableObject {
         return tab
     }
 
-    // 他の窓から渡されたタブを受け取る
-    func adopt(_ tab: Tab) {
+    // 他の窓から渡されたタブを受け取る。
+    // index を渡せばその位置に挿さる（ドラッグで落とされた位置）
+    func adopt(_ tab: Tab, at index: Int? = nil) {
         wire(tab)
-        tabs.append(tab)
+        if let index, index >= 0, index <= tabs.count {
+            tabs.insert(tab, at: index)
+        } else {
+            tabs.append(tab)
+        }
         selectedID = tab.id
         grouper.scheduleRegroup(for: tabs)
     }
 
     // このタブを別の窓へ渡す。
     // 元の窓の最後の一枚だった場合は、detach の中でロビーが一枚補充される
-    func moveTab(_ tab: Tab, to other: TabManager) {
+    func moveTab(_ tab: Tab, to other: TabManager, at index: Int? = nil) {
         guard other !== self, let detached = detach(tab) else { return }
-        other.adopt(detached)
+        other.adopt(detached, at: index)
+    }
+
+    // タブID から持ち主の窓を探す。
+    // 窓をまたいだドラッグでは、落とされた側は相手の管理人を知らない。
+    // 運ばれてくるのは UUID の文字列だけだから、ここで引き直す
+    static func owner(of tabID: UUID) -> (manager: TabManager, tab: Tab)? {
+        for manager in openWindows {
+            if let tab = manager.tabs.first(where: { $0.id == tabID }) {
+                return (manager, tab)
+            }
+        }
+        return nil
+    }
+
+    // ドロップされたタブを受け入れる。
+    //
+    // 自分の窓のタブなら並べ替え、他の窓のものなら引き取る。
+    // 運ばれてくるのは UUID の文字列だけなので、
+    // どちらなのかはここで見分ける
+    func acceptDrop(draggedID idString: String, target: Tab, after: Bool) {
+        guard let id = UUID(uuidString: idString) else { return }
+
+        // 自分の窓の中の話なら、従来通り並べ替える
+        if tabs.contains(where: { $0.id == id }) {
+            moveTab(draggedID: idString, target: target, after: after)
+            return
+        }
+
+        // 他の窓から来た。持ち主を引いて、落とされた位置に挿す
+        guard let (source, tab) = Self.owner(of: id), source !== self,
+              let targetIdx = tabs.firstIndex(where: { $0.id == target.id })
+        else { return }
+        source.moveTab(tab, to: self, at: after ? targetIdx + 1 : targetIdx)
+    }
+
+    // サイドバーの余白に落とされた時。末尾へ回す
+    func acceptDropAtEnd(draggedID idString: String) {
+        guard let id = UUID(uuidString: idString) else { return }
+
+        // 自分の窓のタブなら、末尾へ動かす
+        if let idx = tabs.firstIndex(where: { $0.id == id }) {
+            guard idx != tabs.count - 1 else { return }
+            let tab = tabs.remove(at: idx)
+            tabs.append(tab)
+            grouper.scheduleRegroup(for: tabs)
+            return
+        }
+
+        // 他の窓から来た。index を渡さなければ末尾に付く
+        guard let (source, tab) = Self.owner(of: id), source !== self else { return }
+        source.moveTab(tab, to: self)
     }
 
     // 開いている窓の管理人一覧（名簿順＝窓が生まれた順）。
@@ -2330,6 +2386,11 @@ struct VerticalTabStrip: View {
                 }
                 .padding(.horizontal, 10)
             }
+            // 余白へのドロップをここで受ける。
+            // 行の上なら行側が先に取るので、二重にはならない
+            .onDrop(of: [.text], delegate: TabStripDropDelegate(
+                manager: manager, indicatorModel: dropModel
+            ))
 
             Spacer(minLength: 0)
 
@@ -2478,7 +2539,35 @@ private struct TabDropDelegate: DropDelegate {
         provider.loadObject(ofClass: NSString.self) { obj, _ in
             guard let idString = obj as? String else { return }
             Task { @MainActor in
-                manager.moveTab(draggedID: idString, target: tab, after: after)
+                manager.acceptDrop(draggedID: idString, target: tab, after: after)
+            }
+        }
+        return true
+    }
+}
+
+// サイドバーの余白へのドロップ。
+// 行の上に落とした時は行側の drop が先に取るので、
+// ここへ来るのは「どの行の上でもない」時だけだ
+private struct TabStripDropDelegate: DropDelegate {
+    let manager: TabManager
+    let indicatorModel: DropIndicatorModel
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func dropExited(info: DropInfo) {
+        indicatorModel.clear()
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        indicatorModel.clear()
+        guard let provider = info.itemProviders(for: [.text]).first else { return false }
+        provider.loadObject(ofClass: NSString.self) { obj, _ in
+            guard let idString = obj as? String else { return }
+            Task { @MainActor in
+                manager.acceptDropAtEnd(draggedID: idString)
             }
         }
         return true
