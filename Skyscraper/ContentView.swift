@@ -2495,7 +2495,29 @@ private struct DraggableTabRow: View {
                     .onChange(of: geo.size.height) { _, h in rowHeight = h }
             }
         )
-        .onDrag { NSItemProvider(object: tab.id.uuidString as NSString) }
+        // タブを引っ張り出して新しい窓にする操作は入っていない。
+        //
+        // SwiftUI の .onDrag / .draggable には「どこにも落とされなかった」を
+        // 知る手段が無い。macOS 26 SDK には DragConfiguration と
+        // onDragSessionUpdated(_:) があり、DragSession.Phase.ended(DropOperation)
+        // で終了を受け取れる形になっているが、
+        //   .onDrag → .draggable への差し替え
+        //   .dragConfiguration(DragConfiguration(allowMove: true)) の併用
+        // のどちらを試しても、クロージャが一度も呼ばれなかった（2026-07 実測）。
+        // dragContainer など、まだ足りない土台があると思われる。
+        //
+        // AppKit の NSDraggingSource まで降りれば
+        // draggingSession(_:endedAt:operation:) で取れるが、
+        // 行のクリック・ホバー・×ボタン・右クリックと同居させる必要があり割に合わない。
+        //
+        // 代わりに、右クリック →「ウィンドウへ移動」→「新しいウィンドウ」で同じことができる。
+        .draggable(tab.id.uuidString)
+        .dragConfiguration(DragConfiguration(allowMove: true))
+        .onDragSessionUpdated { session in
+            if case .ended(let op) = session.phase {
+                print("DRAG ended: op=\(op) at=\(session.location)")
+            }
+        }
         .onDrop(of: [.text], delegate: TabDropDelegate(
             tab: tab, manager: manager, height: rowHeight, indicatorModel: indicatorModel
         ))
