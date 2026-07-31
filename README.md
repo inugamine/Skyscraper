@@ -25,16 +25,15 @@ macOS のための、アール・デコのウェブブラウザです。
 ## これは何か
 
 黒と金でまとめた、1920 年代の摩天楼のようなブラウザです。
-描画には WKWebView（Safari と同じエンジン）を使い、外側の UI はすべて SwiftUI で作っています。
+描画には WKWebView (Safari と同じエンジン) を使い、外側の UI はすべて SwiftUI で作っています。
 
-個人が自分のために作っているブラウザですので、
-広告も、行動の計測も、勝手に話しかけてくる AI も入っていません。
+個人が自分のために作っているブラウザなので、広告も、行動の計測も、勝手に話しかけてくる AI も入っていません。
 
 ## できること
 
 ### 見た目
 
-- 黒と金のアール・デコ。ジグザグの罫線と、扇（palmette）の意匠
+- 黒と金のアール・デコ。ジグザグの罫線と、扇 (palmette) の意匠
 - 六角形の**縦タブ**。数が増えてもタブ名が読めます
 - 新規タブページには、階段状に伸びる摩天楼のシルエット
 
@@ -59,27 +58,27 @@ Apple Foundation Models（オンデバイス）でタブの内容を判断し、
 
 ### 読む
 
-- リーダーモード（Mozilla Readability.js）。読み取れるページでのみボタンが表示されます
+- リーダーモード (Mozilla Readability.js)。読み取れるページでのみボタンが表示されます
 - 黒地に金の、目に優しい配色です
 
 ### そのほか
 
-- ダウンロード棚（進捗表示つき、常駐）
+- ダウンロード棚 (進捗表示つき、常駐)
 - カメラ・マイクのサイトごとの許可
-- `mailto:` `tel:` `itms-apps:` などは既定のアプリへ引き渡します（受け取り先をこちらから指定することはしません）
-- キャッシュ／Cookie／閲覧データの削除（`⌘,` の設定画面から）
-- 全画面動画、X（Twitter）向けのシアターモード
+- `mailto:` `tel:` `itms-apps:` などは既定のアプリへ引き渡します (受け取り先をこちらから指定することはしません)
+- キャッシュ／Cookie／閲覧データの削除 (`⌘,` の設定画面から)
+- 全画面動画、Twitter (自称: X) 向けのシアターモード
 - Sparkle による自動更新
 - 日本語／英語
 
 ### これから
 
-- パスキー（WebAuthn）— Apple のエンタイトルメント審査待ちです
+- パスキー(WebAuthn) — Apple のエンタイトルメント審査待ちです
 
 ## 動作環境
 
 - macOS 26.5 Tahoe 以降
-- Apple Silicon（arm64）
+- Apple Silicon (arm64)
 
 ## インストール
 
@@ -120,7 +119,7 @@ Skyscraper/
 ├── ReaderMode.swift        Readability.js の橋渡し
 ├── DownloadManager.swift   ダウンロード棚
 ├── MediaPermission.swift   カメラ・マイクのサイトごとの許可
-├── PasskeyManager.swift    WebAuthn（審査待ち）
+├── PasskeyManager.swift    WebAuthn (審査待ち)
 ├── PrivacyManager.swift    閲覧データの削除
 ├── Updater.swift           Sparkle
 └── SettingsView.swift      設定画面
@@ -128,8 +127,8 @@ Skyscraper/
 
 ## 使用しているもの
 
-- [Sparkle](https://sparkle-project.org/) — 自動更新（MIT）
-- [Readability.js](https://github.com/mozilla/readability) — Mozilla（Apache-2.0）
+- [Sparkle](https://sparkle-project.org/) — 自動更新 (MIT)
+- [Readability.js](https://github.com/mozilla/readability) — Mozilla (Apache-2.0)
 - Apple Foundation Models / NaturalLanguage / AuthenticationServices
 
 ## ライセンス
@@ -137,7 +136,7 @@ Skyscraper/
 [Apache License 2.0](LICENSE) です。Copyright 2026 inugamine
 
 改変も再配布も自由ですが、変更した箇所はその旨を明記してください。
-また、このライセンスは「Skyscraper」という名称や意匠の使用を許諾するものではありません（第 6 条）。
+また、このライセンスは「Skyscraper」という名称や意匠の使用を許諾するものではありません (第 6 条)。
 
 同梱している第三者のソフトウェアについては [NOTICE](NOTICE) を参照してください。
 
