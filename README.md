@@ -99,7 +99,6 @@ open Skyscraper.xcodeproj
 Xcode 26.6 以降が必要です。ご自身の環境でビルドする場合は、
 Target → Signing & Capabilities の Team をご自身のものに変更してください。
 
-リリース作業の手順は [RELEASING.md](RELEASING.md) にまとめています。
 
 > [!IMPORTANT]
 > フォークして配布する場合は、`Info.plist` の `SUFeedURL` と `SUPublicEDKey` を
