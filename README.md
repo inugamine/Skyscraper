@@ -17,7 +17,6 @@ macOS のための、アール・デコのウェブブラウザです。
 
 </div>
 
-<!-- TODO: スクリーンショットを置く -->
 ![Skyscraper](docs/Screenshot.png)
 
 ---

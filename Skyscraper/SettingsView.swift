@@ -6,11 +6,13 @@
 //
 
 import SwiftUI
+import Foundation
 
 struct SettingsView: View {
     @ObservedObject var updater: Updater
     @StateObject private var privacy = PrivacyManager()
     @AppStorage(TabManager.restoreSessionKey) private var restoresSession = true
+    @State private var showingAcknowledgements = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -164,12 +166,44 @@ struct SettingsView: View {
             }
 
             Spacer()
+
+            // ══ このアプリについて ══
+            sectionHeader("About")
+
+            HStack(spacing: 12) {
+                Button {
+                    showingAcknowledgements = true
+                } label: {
+                    Text("Acknowledgements")
+                        .font(.system(size: 11, design: .serif))
+                        .tracking(1)
+                        .foregroundColor(Deco.gold)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .overlay(Hexagon(inset: 6).stroke(Deco.faintGold, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(verbatim: Self.versionLine)
+                        .font(.system(size: 10, design: .serif))
+                        .foregroundColor(Deco.dimGold)
+                    Text(verbatim: "© 2026 inugamine — Apache License 2.0")
+                        .font(.system(size: 10, design: .serif))
+                        .foregroundColor(Deco.dimGold)
+                }
+
+                Spacer()
+            }
         }
         .padding(24)
         .frame(width: 500, height: 690)
         .background(Deco.ink)
         .preferredColorScheme(.dark)
         .animation(.easeInOut(duration: 0.2), value: privacy.lastClearedMessage)
+        .sheet(isPresented: $showingAcknowledgements) {
+            AcknowledgementsView()
+        }
         // 確認ダイアログ
         .confirmationDialog(
             privacy.pendingScope?.title ?? "",
@@ -193,6 +227,15 @@ struct SettingsView: View {
     }
 
     // ── 部品 ──
+
+    // 表示用のバージョン。MARKETING_VERSION と CURRENT_PROJECT_VERSION は
+    // ビルド時に Info.plist へ流し込まれるので、ここでは読むだけ
+    private static var versionLine: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info?["CFBundleVersion"] as? String ?? "?"
+        return "Skyscraper \(short) (\(build))"
+    }
 
     private func sectionHeader(_ title: LocalizedStringKey) -> some View {
         VStack(alignment: .leading, spacing: 0) {

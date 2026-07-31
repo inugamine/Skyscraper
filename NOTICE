@@ -7,11 +7,13 @@ See THIRD-PARTY-NOTICES.md for the full list and license texts.
 --------------------------------------------------------------------------------
 
 Readability.js
-Copyright (c) Mozilla Foundation and contributors
+Copyright (c) 2010 Arc90 Inc
+Maintained by the Mozilla Foundation and contributors.
 Licensed under the Apache License, Version 2.0.
 https://github.com/mozilla/readability
 
 Sparkle
-Copyright (c) Sparkle Project and contributors
+Copyright (c) 2006-2017 Andy Matuschak, Elgato Systems GmbH, Kornel Lesiński,
+Mayur Pawashe, C.W. Betts, Petroules Corporation, Big Nerd Ranch.
 Licensed under the MIT License.
 https://sparkle-project.org/
