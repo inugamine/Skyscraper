@@ -24,7 +24,7 @@ macOS のための、アール・デコのウェブブラウザです。
 
 ## これは何か
 
-黒と金でまとめた、1920 年代の摩天楼のようなブラウザです。
+黒と金でまとめた、1920 年代の摩天楼のようなブラウザです。  
 描画には WKWebView (Safari と同じエンジン) を使い、外側の UI はすべて SwiftUI で作っています。
 
 個人が自分のために作っているブラウザなので、広告も、行動の計測も、勝手に話しかけてくる AI も入っていません。
@@ -45,7 +45,7 @@ macOS のための、アール・デコのウェブブラウザです。
 
 ### AI によるタブの自動グループ分け
 
-Apple Foundation Models（オンデバイス）でタブの内容を判断し、自動的にまとめます。
+Apple Foundation Models（オンデバイス）でタブの内容を判断し、自動的にまとめます。  
 **通信は一切行いません。**タイトルも URL も端末の外には出ません。
 
 ### 邪魔なものを止める
@@ -85,7 +85,7 @@ Apple Foundation Models（オンデバイス）でタブの内容を判断し、
 [Releases](https://github.com/inugamine/Skyscraper/releases/latest) から `.dmg` をダウンロードし、
 Skyscraper を Applications へ移動してください。
 
-Developer ID 署名と Apple の公証を済ませていますので、Gatekeeper に止められることはありません。
+Developer ID 署名と Apple の公証を済ませていますので、Gatekeeper に止められることはありません。  
 以降の更新は Sparkle が自動的に見つけてきます。
 
 ## ソースからビルドする
@@ -135,7 +135,7 @@ Skyscraper/
 
 [Apache License 2.0](LICENSE) です。Copyright 2026 inugamine
 
-改変も再配布も自由ですが、変更した箇所はその旨を明記してください。
+改変も再配布も自由ですが、変更した箇所はその旨を明記してください。  
 また、このライセンスは「Skyscraper」という名称や意匠の使用を許諾するものではありません (第 6 条)。
 
 同梱している第三者のソフトウェアについては [NOTICE](NOTICE) を参照してください。
