@@ -569,6 +569,11 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         // requestFullscreen() を呼んでも黙って拒否される（おかげで
         // YouTube も X も大画面ボタンが無反応になる）
         configuration.preferences.isElementFullscreenEnabled = true
+        // かな漢字変換の確定 Enter がページに素通りするのを塞ぐ。
+        // 詳しい事情は IMEGuard.swift に書いた。
+        // popup の場合は上で userContentController を差し替えた後なので、
+        // どちらの経路で来ても自分の実体に仕込まれる
+        configuration.userContentController.addUserScript(IMEGuard.userScript)
         // ピクチャ・イン・ピクチャはここでは開けない。
         // iOS には allowsPictureInPictureMediaPlayback があるが、
         // macOS の WKWebViewConfiguration / WKPreferences には相当する
