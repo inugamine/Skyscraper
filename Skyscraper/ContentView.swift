@@ -1512,13 +1512,37 @@ extension Tab: WKUIDelegate {
                  createWebViewWith configuration: WKWebViewConfiguration,
                  for navigationAction: WKNavigationAction,
                  windowFeatures: WKWindowFeatures) -> WKWebView? {
+        let requestedURL = navigationAction.request.url?.absoluteString
+
+        // 利用者が「新しいタブで開け」と明示したか。
+        //
+        // 素直なページなら ⌘クリックは decidePolicyFor で拾えるが、
+        // Bluesky のような SPA は click を自分で横取りして
+        // preventDefault してから window.open() を呼ぶ。
+        // すると navigationType は .linkActivated ではなく .other になり、
+        // 下のポップアップ経路に落ちて前面のタブとして開いてしまう。
+        //
+        // navigationAction.modifierFlags も、JS 経由で呼ばれた場合は
+        // 空になりうる。この判断はクリック処理の真っ最中に同期で走るので、
+        // 今この瞬間の修飾キー（NSEvent）も併せて見る
+        let commandHeld = navigationAction.modifierFlags.contains(.command)
+            || NSEvent.modifierFlags.contains(.command)
+        // WebKit の buttonNumber は DOM の流儀（0=左 1=中 2=右）
+        let middleClick = navigationAction.buttonNumber == 1
+        // 行き先が実在する場合に限る。
+        // OAuth の窓は window.open('', 'name') で先に空の器を取り、
+        // 後から location を入れる。それをここで横取りすると壊れる
+        let hasTarget = !(requestedURL ?? "").isEmpty && requestedURL != "about:blank"
+        let byGesture = (commandHeld || middleClick) && hasTarget
+
         // リンクを踏んだ結果（target="_blank"）とフォーム送信は利用者の意思。
         // 従来通り裏タブで開く
         let byLink = navigationAction.navigationType == .linkActivated
             || navigationAction.navigationType == .formSubmitted
-        if byLink {
-            if let url = navigationAction.request.url?.absoluteString {
-                Task { @MainActor in self.openInNewTab?(url) }
+
+        if byLink || byGesture {
+            if let requestedURL {
+                Task { @MainActor in self.openInNewTab?(requestedURL) }
             }
             return nil
         }
@@ -1528,9 +1552,9 @@ extension Tab: WKUIDelegate {
         // ここへ届くのは「クリックに便乗して開かれたもの」だ
         let opener = PopupAllowList.originKey(for: webView.url)
         guard PopupAllowList.shared.isAllowed(opener) else {
-            if let url = navigationAction.request.url?.absoluteString {
-                print("Popup blocked from \(opener.isEmpty ? "(unknown origin)" : opener): \(url)")
-                blockedPopups.append(BlockedPopup(url: url))
+            if let requestedURL {
+                print("Popup blocked from \(opener.isEmpty ? "(unknown origin)" : opener): \(requestedURL)")
+                blockedPopups.append(BlockedPopup(url: requestedURL))
             }
             return nil
         }
