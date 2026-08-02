@@ -7,6 +7,36 @@
     <language>en</language>
 
     <item>
+      <title>Version 1.11</title>
+      <pubDate>Sun, 02 Aug 2026 11:22:58 +0900</pubDate>
+      <sparkle:version>11</sparkle:version>
+      <sparkle:shortVersionString>1.11</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>Skyscraper 1.11</h2>
+        <ul>
+          <li>新規ウィンドウを開けるようにしました。</li>
+          <li>タブを別のウィンドウに移動する機能を追加しました。</li>
+          <li>ダウンロードの進捗を表示できるようにしました。</li>
+          <li>ページ内検索を実装しました。</li>
+          <li>ポップアップブロックを実装しました。</li>
+          <li>その他色々な細かい修正を入れました。</li>
+          <li>パスキーは Apple の承認待ちのため現在動作しません。</li>
+          <li>Added support for opening new windows.</li>
+          <li>Added the ability to move a tab to another window.</li>
+          <li>Download progress is now displayed.</li>
+          <li>Implemented in-page search.</li>
+          <li>Implemented pop-up blocking.</li>
+          <li>Various other small fixes.</li>
+          <li>Passkeys are currently non-functional, pending approval from Apple.</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://github.com/inugamine/Skyscraper/releases/download/v1.11/Skyscraper-1.11.zip"
+        sparkle:edSignature="eX2/M6BHulRVCoeukwXMbtu1HCnkC3W3xw4dF69/TFIz40TJzLVTIUO1O+0xT8H75IUHRuZAyEf/HIUFCBdZCw=="
+        length="1479478"
+        type="application/octet-stream" />
+    </item>    <item>
       <title>Version 1.10</title>
       <pubDate>Sat, 25 Jul 2026 08:54:46 +0900</pubDate>
       <sparkle:version>10</sparkle:version>
