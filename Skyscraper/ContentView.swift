@@ -2546,14 +2546,17 @@ private struct DraggableTabRow: View {
             onClose:  { manager.closeTab(tab) },
             onMoveToNewWindow: { manager.moveTabToNewWindow(tab) }
         )
-        // 高さを測っておく（上下判定に使う）
-        .background(
-            GeometryReader { geo in
-                Color.clear
-                    .onAppear { rowHeight = geo.size.height }
-                    .onChange(of: geo.size.height) { _, h in rowHeight = h }
-            }
-        )
+        // 高さを測っておく（上下判定に使う）。
+        //
+        // GeometryReader を背景に敷いて @State へ書き戻すと、
+        // レイアウト計算の真っ最中に状態が変わり、SwiftUI の
+        // 依存グラフが輪になる（AttributeGraph: cycle detected の山）。
+        // onGeometryChange は測定結果を安全な時点で渡すための口だ
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            proxy.size.height
+        } action: { height in
+            rowHeight = height
+        }
         // タブを引っ張り出して新しい窓にする操作は入っていない。
         //
         // SwiftUI の .onDrag / .draggable には「どこにも落とされなかった」を
@@ -2572,9 +2575,12 @@ private struct DraggableTabRow: View {
         // 代わりに、右クリック →「ウィンドウへ移動」→「新しいウィンドウ」で同じことができる。
         .draggable(tab.id.uuidString)
         .dragConfiguration(DragConfiguration(allowMove: true))
+        // 終了の受け口だけは残してある。
+        // 今は一度も呼ばれないが、SDK 側が揃えばここに
+        // .ended が届くようになる——その日の足場だ
         .onDragSessionUpdated { session in
-            if case .ended(let op) = session.phase {
-                print("DRAG ended: op=\(op) at=\(session.location)")
+            if case .ended = session.phase {
+                // 窓の外へ落とした場合の処理（未実装）
             }
         }
         .onDrop(of: [.text], delegate: TabDropDelegate(
@@ -3083,6 +3089,11 @@ final class ClickSelectTextField: NSTextField {
     // 最初のクリックで全選択されなくなる。engaged で両者を区別する
     private var engaged = false
 
+    // 利用者が自分の意思でこの欄に関わっているか。
+    // 受け身でフォーカスが回ってきただけの状態は「編集中」ではないので、
+    // 外（タブ）からの URL 反映を止めてはいけない
+    var isEngaged: Bool { engaged }
+
     override func mouseDown(with event: NSEvent) {
         // 未編集、または「静かなフォーカス」中の最初のクリック：
         // フォーカスを立てて全選択し、クリック自体は飲み込む
@@ -3106,16 +3117,29 @@ final class ClickSelectTextField: NSTextField {
     override func becomeFirstResponder() -> Bool {
         let ok = super.becomeFirstResponder()
         if ok {
-            onEditingChanged?(true)
-            // 受け身でフォーカスが回ってきた場合（タブ切り替えで直前の
-            // first responder だった WebView が隠れた等）、NSTextField 既定の
-            // 全選択は解いてカーソルだけにする。
-            // ユーザー操作（クリック・⌘L）は engaged が先に立っている
-            if !engaged {
+            if engaged {
+                // ユーザー操作（クリック・⌘L）は engaged が先に立っている
+                onEditingChanged?(true)
+            } else {
+                // 受け身でフォーカスが回ってきた場合（タブ切り替えで直前の
+                // first responder だった WebView が隠れた等）。
+                // NSTextField 既定の全選択は解いてカーソルだけにする。
+                // ここで編集開始を名乗ると、新しいタブのアドレスバーに
+                // 前のタブの URL が残りっぱなしになるので黙っている
                 currentEditor()?.selectedRange = NSRange(location: stringValue.count, length: 0)
             }
         }
         return ok
+    }
+
+    // 受け身のフォーカスのまま打ち始めた場合も、そこからは本人の編集だ。
+    // 以後は外からの上書きを拒む
+    override func textDidChange(_ notification: Notification) {
+        super.textDidChange(notification)
+        if !engaged {
+            engaged = true
+            onEditingChanged?(true)
+        }
     }
 
     // タブ切り替え時の仕切り直し：編集を破棄し、engaged も下ろす。
@@ -3138,6 +3162,10 @@ struct AddressField: NSViewRepresentable {
     @Binding var text: String
     // タブの印。変わったら「別のタブに移った」ので編集を仕切り直す
     let tabToken: UUID
+    // タブ本人が持つ URL。切り替え直後はこちらを正とする
+    //（上の text は親の @State なので、切り替わった一回目は
+    // まだ前のタブの URL が入っている）
+    let tabURL: String
     // ⌘L の合図。値が変わったらフォーカスして全選択する
     let focusTrigger: Int
     let onSubmit: () -> Void
@@ -3173,24 +3201,51 @@ struct AddressField: NSViewRepresentable {
     }
 
     func updateNSView(_ field: ClickSelectTextField, context: Context) {
-        context.coordinator.parent = self
-        // タブが切り替わった：編集を破棄して新しいタブの URL を強制反映する。
-        // （編集中ガードに阻まれて前のタブの URL が残る事故を防ぐ）
-        if context.coordinator.lastTabToken != tabToken {
-            let isFirstUpdate = context.coordinator.lastTabToken == nil
-            context.coordinator.lastTabToken = tabToken
+        let coordinator = context.coordinator
+        coordinator.parent = self
+        // タブが切り替わった：編集を破棄して、新しいタブの URL を強制反映する。
+        //
+        // ここで text（親の @State）を映してはいけない。
+        // 切り替わった一回目の body 評価の時点では、親の @State は
+        // まだ前のタブの URL を持っている（更新は onChange 経由で後から届く）。
+        // それを書き込むと、直後に受け身のフォーカスが回ってきた場合に
+        // 「編集中は上書きしない」の規則に守られて、前のタブの URL が
+        // 新しいタブに居座る。タブ本人が持つ tabURL を正とする
+        if coordinator.lastTabToken != tabToken {
+            let isFirstUpdate = coordinator.lastTabToken == nil
+            // 去るタブの「どこまで ⌘L を消化したか」を控え、
+            // 次のタブの控えを取り出す。
+            // 合図の数えはタブごとなので、切り替えでは必ず値が飛ぶ。
+            // そのまま比べると、切り替えそのものを ⌘L と誤解して
+            // 焦点を奪い、前のタブの URL を抱えたまま編集中にしてしまう。
+            // 逆に、新規タブが生まれながらに求めた焦点（⌘T など）は
+            // この控えとの差として残るので、下の ⌘L 処理で叶う
+            if let previous = coordinator.lastTabToken {
+                coordinator.seenFocusTriggers[previous] = coordinator.lastFocusTrigger
+            }
+            coordinator.lastTabToken = tabToken
+            coordinator.lastFocusTrigger = isFirstUpdate
+                ? focusTrigger                                   // 初回表示では奪わない
+                : (coordinator.seenFocusTriggers[tabToken] ?? 0)
             if !isFirstUpdate {
                 field.resetForTabSwitch()
-                field.stringValue = text
             }
-        }
-        // 編集中の打鍵を潰さないよう、編集していないときだけ外の値を反映する
-        if field.currentEditor() == nil, field.stringValue != text {
+            field.stringValue = tabURL
+            // 親の控えも揃えておく（描画中の更新になるので次の回に回す）
+            if text != tabURL {
+                let newText = tabURL
+                DispatchQueue.main.async { coordinator.parent.text = newText }
+            }
+        } else if !field.isEngaged, field.stringValue != text {
+            // 本人が編集している間だけ外の値を弾く。
+            // 受け身のフォーカス（currentEditor は居るが engaged ではない）で
+            // 弾くと、ページ遷移やタブ切り替えの結果が映らなくなる
             field.stringValue = text
         }
         // ⌘L：フォーカスして全選択（engaged も立つので直後のクリックはカーソル配置）
-        if context.coordinator.lastFocusTrigger != focusTrigger {
-            context.coordinator.lastFocusTrigger = focusTrigger
+        if coordinator.lastFocusTrigger != focusTrigger {
+            coordinator.lastFocusTrigger = focusTrigger
+            coordinator.seenFocusTriggers[tabToken] = focusTrigger
             DispatchQueue.main.async {
                 field.focusAndSelectAll()
             }
@@ -3201,6 +3256,11 @@ struct AddressField: NSViewRepresentable {
         var parent: AddressField
         var lastFocusTrigger: Int
         var lastTabToken: UUID?
+        // タブごとの「消化済みの ⌘L の数え」。
+        // 欄は窓に一つしか無いので、ここでタブ別に覚えておかないと
+        // 切り替えと ⌘L を見分けられない（中身は Int 一つなので、
+        // 閉じたタブの分が残っても実害は無い）
+        var seenFocusTriggers: [UUID: Int] = [:]
 
         init(_ parent: AddressField) {
             self.parent = parent
@@ -3458,6 +3518,7 @@ struct BrowserPane: View {
                 AddressField(
                     text: $addressText,
                     tabToken: tab.id,
+                    tabURL: tab.urlText,
                     focusTrigger: tab.addressBarFocusTrigger,
                     onSubmit: submitAddress,
                     onEditingChanged: { editing in
