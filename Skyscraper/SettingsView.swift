@@ -12,6 +12,7 @@ struct SettingsView: View {
     @ObservedObject var updater: Updater
     @StateObject private var privacy = PrivacyManager()
     @AppStorage(TabManager.restoreSessionKey) private var restoresSession = true
+    @AppStorage(SleepBlocker.enabledKey) private var preventsSleepDuringVideo = true
     @State private var showingAcknowledgements = false
 
     var body: some View {
@@ -49,6 +50,25 @@ struct SettingsView: View {
             .toggleStyle(.switch)
             .tint(Deco.gold)
             .disabled(!updater.automaticallyChecksForUpdates)
+            .padding(.bottom, 22)
+
+            // ══ 再生 ══
+            sectionHeader("Playback")
+
+            // ── 動画中のスリープ抑制 ──
+            Toggle(isOn: $preventsSleepDuringVideo) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Keep the display awake during video")
+                        .font(.system(size: 12, design: .serif))
+                        .foregroundColor(Deco.cream)
+                    Text("The screen saver and display sleep are held off while a video is playing.")
+                        .font(.system(size: 10, design: .serif))
+                        .foregroundColor(Deco.dimGold)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .toggleStyle(.switch)
+            .tint(Deco.gold)
             .padding(.bottom, 22)
 
             // ══ プライバシー ══
@@ -197,7 +217,7 @@ struct SettingsView: View {
             }
         }
         .padding(24)
-        .frame(width: 500, height: 690)
+        .frame(width: 500, height: 790)
         .background(Deco.ink)
         .preferredColorScheme(.dark)
         .animation(.easeInOut(duration: 0.2), value: privacy.lastClearedMessage)

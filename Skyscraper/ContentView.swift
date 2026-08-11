@@ -493,12 +493,30 @@ struct WebView: NSViewRepresentable {
     func makeNSView(context: Context) -> WebViewContainer {
         let container = WebViewContainer()
         container.isInteractive = isInteractive
+        container.isHidden = !isInteractive
         mount(webView, in: container)
         return container
     }
 
     func updateNSView(_ container: WebViewContainer, context: Context) {
         container.isInteractive = isInteractive
+        // 裏タブは AppKit の層でも「隠れている」状態にする。
+        //
+        // opacity(0) だけだと、ビュー階層上は「窓に載ってて hidden でない」
+        // ままなので、WebKit は全タブを表示中だと見なす。すると裏タブで
+        // 動画が鳴っている間、WebCore が自前で
+        // PreventUserIdleDisplaySleep（"HTMLMediaElement playback"）を握り続け、
+        // こちらが SleepBlocker で手を放しても画面が寝ない。
+        // 描画も全タブ分回り続けるので、そもそも無駄が多い。
+        //
+        // 隠すのは WKWebView 本体ではなくこの器の方だ。
+        // 全画面再生に入ると WebKit は WKWebView を別の窓へ引っこ抜くので、
+        // 本体に isHidden を立てると大画面が真っ黒になる。
+        // 器なら、引っこ抜かれている間は中身と縁が切れているので影響しない。
+        //
+        // マウントは外さないので、戻ってきた時の再読み込みは起きない。
+        // 裏タブの読み込みと題名の取得もこれまで通り進む
+        container.isHidden = !isInteractive
 
         // ここでは WKWebView の親子関係に一切手を出さない。
         //
@@ -1062,6 +1080,14 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         webView.configuration.userContentController.add(
             WeakScriptMessageHandler(delegate: self),
             name: Self.fullscreenMessageHandlerName
+        )
+        // 動画の再生中はスクリーンセーバーと画面のスリープを止める。
+        // 受け口はアプリ共通の一人（SleepBlocker.shared）なので、
+        // タブが消えても困らない＝弱参照の包みは要らない。詳しくは SleepBlocker.swift
+        webView.configuration.userContentController.addUserScript(SleepBlocker.userScript)
+        webView.configuration.userContentController.add(
+            SleepBlocker.shared,
+            name: SleepBlocker.messageHandlerName
         )
         // パスキー：polyfill の注入と、返信付きハンドラの登録。
         // 横取り対象（navigator.credentials）はページ本来の世界に居るので .page
@@ -1636,6 +1662,10 @@ final class TabManager: ObservableObject {
             guard selectedID != oldValue else { return }
             // 復元されたまま眠っているタブなら、ここで初めて読みに行く
             selectedTab?.activateIfDeferred()
+            // スリープ抑制は「今見ているタブ」にだけ効かせる。
+            // 見張り側からは誰が選ばれているか分からないので、ここから告げる。
+            // 窓を閉じた時（tearDownTabs で nil になる）もここを通る
+            SleepBlocker.shared.noteSelection(selectedTab?.webView, in: self)
             scheduleSave()
         }
     }
