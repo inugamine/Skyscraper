@@ -648,6 +648,11 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // そのタブが選ばれた時まで先送りにする（Safari と同じ方式）
     private var pendingURL: String?
 
+    // 先送りにしている履歴の復元（interactionState）。
+    // これを WKWebView に入れた瞬間 WebKit が自分で読み込みを始めるので、
+    // 遅延読み込みと併せる場合はここに控えておく
+    private var pendingInteractionState: Data?
+
     // パスキー（WebAuthn）の橋渡し役。実体は PasskeyManager.swift
     private let passkeyBridge = PasskeyBridge()
 
@@ -1051,9 +1056,11 @@ final class Tab: NSObject, ObservableObject, Identifiable {
 
     // deferLoad が真なら、URL は控えるだけで読み込まない（セッション復元用）。
     // title は復元直後のサイドバー表示に使う仮の題名
+    // interactionState を渡せば、戻る／進むの履歴ごと引き継ぐ（閉じたタブの復元用）
     init(url: String? = nil,
          title: String = "",
          deferLoad: Bool = false,
+         interactionState: Data? = nil,
          popupConfiguration: WKWebViewConfiguration? = nil) {
         webView = Tab.makeWebView(popupConfiguration)
         super.init()
@@ -1151,6 +1158,16 @@ final class Tab: NSObject, ObservableObject, Identifiable {
             // 中身を入れるのは WebKit の仕事なので、こちらからは load しない。
             // ロビーではないので isHome は下ろしておく
             isHome = false
+        } else if let interactionState {
+            // 履歴ごとの復元。読み込みは WebKit が始めるので load() は呼ばない
+            isHome = false
+            pageTitle = title
+            urlText = url ?? ""
+            if deferLoad {
+                pendingInteractionState = interactionState
+            } else {
+                restore(interactionState)
+            }
         } else if let url {
             urlText = url
             if deferLoad {
@@ -1168,10 +1185,33 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // 先送りにしていた読み込みを始める（そのタブが初めて選ばれた時に呼ぶ）。
     // 読み込み済みなら何もしない
     func activateIfDeferred() {
+        if let state = pendingInteractionState {
+            pendingInteractionState = nil
+            pendingURL = nil
+            restore(state)
+            return
+        }
         guard let pending = pendingURL else { return }
         pendingURL = nil
         urlText = pending
         load()
+    }
+
+    // 控えておいた履歴（戻る／進むの連なりとスクロール位置）を流し込む。
+    // interactionState は代入した時点で WebKit が読み込みを始めるので、
+    // こちらから load() を重ねると同じページを履歴に積み直すことになる
+    private func restore(_ state: Data) {
+        webView.interactionState = state
+        // 保存形式が合わない等で黙って捨てられた場合の保険。
+        // 受け入れられていれば現在項目が入っている
+        if webView.backForwardList.currentItem == nil, webView.url == nil {
+            load()
+            return
+        }
+        // 矢印の明滅をその場で合わせる。
+        // KVO でも届くが、復元は一瞬で終わるので変化を拾い損ねる道理がある
+        canGoBack = webView.canGoBack
+        canGoForward = webView.canGoForward
     }
 
     func load() {
@@ -1680,8 +1720,17 @@ final class TabManager: ObservableObject {
     // 疑似大画面の出入りで ContentView（サイドバーの表示）を更新させる購読
     private var fullscreenWatchers: [UUID: AnyCancellable] = [:]
 
-    // 閉じたタブの復元用スタック（URL。空文字はロビー）
-    private var recentlyClosed: [String] = []
+    // 閉じたタブの控え一件ぶん。
+    // interactionState には戻る／進むの履歴が丸ごと入っているので、
+    // 開き直したタブでそのまま戻れる
+    private struct ClosedTab {
+        var url: String        // 空文字はロビー
+        var title: String
+        var interactionState: Data?
+    }
+
+    // 閉じたタブの復元用スタック（⇧⌘T）
+    private var recentlyClosed: [ClosedTab] = []
 
     // ── セッションの保存 ──
     //
@@ -1997,10 +2046,12 @@ final class TabManager: ObservableObject {
     private func makeTab(url: String?,
                          title: String = "",
                          deferLoad: Bool = false,
+                         interactionState: Data? = nil,
                          popupConfiguration: WKWebViewConfiguration? = nil) -> Tab {
         let tab = Tab(url: url,
                       title: title,
                       deferLoad: deferLoad,
+                      interactionState: interactionState,
                       popupConfiguration: popupConfiguration)
         wire(tab)
         return tab
@@ -2178,9 +2229,15 @@ final class TabManager: ObservableObject {
 
     func closeTab(_ tab: Tab) {
         guard let idx = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
-        // 復元用に、閉じるタブの URL を控える（ロビーなら空文字）。控えは最大20件
+        // 復元用に、閉じるタブを控える（ロビーなら URL は空文字）。控えは最大20件。
+        //
+        // 履歴（interactionState）を抜くのは、下で about:blank を流し込む前でなければ
+        // ならない。後だと白紙ページまで含んだ履歴を掴むことになる
         let restoreURL = tab.isHome ? "" : (tab.webView.url?.absoluteString ?? tab.urlText)
-        recentlyClosed.append(restoreURL)
+        let restoreState = tab.isHome ? nil : tab.webView.interactionState as? Data
+        recentlyClosed.append(ClosedTab(url: restoreURL,
+                                        title: tab.pageTitle,
+                                        interactionState: restoreState))
         if recentlyClosed.count > 20 { recentlyClosed.removeFirst() }
         // 動画・音声の再生を確実に止めてから退去させる。
         // about:blank の読み込みだけでは非同期で、WebView がどこかに
@@ -2215,10 +2272,19 @@ final class TabManager: ObservableObject {
         if let tab = selectedTab { closeTab(tab) }
     }
 
-    // 直近に閉じたタブを開き直す
+    // 直近に閉じたタブを開き直す。
+    // 履歴の控えがあればそれを使うので、開いた直後から戻るが使える
     func reopenClosed() {
-        guard let url = recentlyClosed.popLast() else { return }
-        addTab(url: url.isEmpty ? nil : url)
+        guard let closed = recentlyClosed.popLast() else { return }
+        guard !closed.url.isEmpty || closed.interactionState != nil else {
+            addTab()
+            return
+        }
+        let tab = makeTab(url: closed.url.isEmpty ? nil : closed.url,
+                          title: closed.title,
+                          interactionState: closed.interactionState)
+        tabs.append(tab)
+        selectedID = tab.id
     }
 
     // 番号でタブを選ぶ（0始まり）
