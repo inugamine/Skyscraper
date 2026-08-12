@@ -1068,6 +1068,38 @@
         }
       }
     },
+    "Open Address" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Address"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このアドレスを開く"
+          }
+        }
+      }
+    },
+    "Open File" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open File"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このファイルを開く"
+          }
+        }
+      }
+    },
     "Open Location" : {
       "localizations" : {
         "en" : {
@@ -1378,6 +1410,22 @@
         }
       }
     },
+    "Search with Google" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search with Google"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Google で検索"
+          }
+        }
+      }
+    },
     "Show in Finder" : {
       "localizations" : {
         "en" : {
@@ -1529,6 +1577,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "中止"
+          }
+        }
+      }
+    },
+    "Switch to Tab" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Switch to Tab"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このタブへ移る"
           }
         }
       }

@@ -1227,8 +1227,30 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         webView.load(URLRequest(url: url))
     }
 
+    // 入力をどう受け取ったか。
+    // アドレスバーの候補一覧が「Return を押したら何が起きるか」を
+    // 一行目に出すために、判断の結果そのものを見せる必要がある
+    enum Interpretation {
+        case file(URL)      // ローカルの実在するファイル
+        case web(URL)       // そのまま開ける URL
+        case search(String) // 検索語（均した後の文字列）
+    }
+
     // 入力が URL か検索語かを見分ける。URL ならそのまま、そうでなければ Google 検索にする
     static func resolveURL(from input: String) -> URL? {
+        switch interpret(input) {
+        case .file(let url), .web(let url):
+            return url
+        case .search(let text):
+            return Self.searchURL(for: text)
+        case .none:
+            return nil
+        }
+    }
+
+    // 見分けの本体。resolveURL と候補一覧の両方がここだけを見るので、
+    // 「一覧に出た行き先」と「実際に開く場所」は必ず一致する
+    static func interpret(_ input: String) -> Interpretation? {
         let text = input.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return nil }
 
@@ -1240,7 +1262,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         if text.hasPrefix("/") || text.hasPrefix("~/") {
             let path = (text as NSString).expandingTildeInPath
             if FileManager.default.fileExists(atPath: path) {
-                return URL(fileURLWithPath: path)
+                return .file(URL(fileURLWithPath: path))
             }
         }
 
@@ -1255,20 +1277,20 @@ final class Tab: NSObject, ObservableObject, Identifiable {
             // mailto:test が利用者情報、example.com がホストとして
             // 全く別のサイトを開いてしまう
             if Self.loadableSchemes.contains(scheme), let url = URL(string: text) {
-                return url
+                return .web(url)
             }
-            return Self.searchURL(for: text)
+            return .search(text)
         }
 
         // 空白が無く、ドットを含む（または localhost）ならホスト名とみなす
         let looksLikeHost = !text.contains(" ")
             && (text.contains(".") || text.hasPrefix("localhost"))
         if looksLikeHost, let url = URL(string: "https://" + text) {
-            return url
+            return .web(url)
         }
 
         // それ以外は Google 検索に流す
-        return Self.searchURL(for: text)
+        return .search(text)
     }
 
     // WKWebView が自分で開けるスキーム。
@@ -3234,8 +3256,18 @@ struct AddressField: NSViewRepresentable {
     let tabURL: String
     // ⌘L の合図。値が変わったらフォーカスして全選択する
     let focusTrigger: Int
+    // 「編集を切り上げろ」の合図。候補を選んで移動した後に使う。
+    // 焦点を握ったままだと、打ちかけの語が欄に残って
+    // 行き先と表示が食い違う
+    let endEditingTrigger: Int
     let onSubmit: () -> Void
     let onEditingChanged: (Bool) -> Void
+    // ↑↓ で候補を選ぶ。候補が出ていない時は false を返してもらい、
+    // AppKit 既定の動き（単行の欄では何も起きない）に任せる
+    let onMove: (Int) -> Bool
+    // Esc。候補が出ていればそれを閉じるだけに留め、
+    // 二度目で既定の「打ちかけを捨てて URL に戻す」へ落とす
+    let onCancel: () -> Bool
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -3316,11 +3348,23 @@ struct AddressField: NSViewRepresentable {
                 field.focusAndSelectAll()
             }
         }
+        // 候補を選び終えた：編集を畳む。
+        // タブ切り替えと同じ仕切り直しで足りる（打ちかけを捨て、
+        // engaged を下ろし、編集終了を親へ知らせる）。
+        // ⌘L の合図と違ってタブごとに数える必要はない——
+        // 候補一覧も欄も、窓に一つしか無いため
+        if coordinator.lastEndEditingTrigger != endEditingTrigger {
+            coordinator.lastEndEditingTrigger = endEditingTrigger
+            DispatchQueue.main.async {
+                field.resetForTabSwitch()
+            }
+        }
     }
 
     final class Coordinator: NSObject, NSTextFieldDelegate {
         var parent: AddressField
         var lastFocusTrigger: Int
+        var lastEndEditingTrigger: Int
         var lastTabToken: UUID?
         // タブごとの「消化済みの ⌘L の数え」。
         // 欄は窓に一つしか無いので、ここでタブ別に覚えておかないと
@@ -3332,6 +3376,8 @@ struct AddressField: NSViewRepresentable {
             self.parent = parent
             // 初回表示で勝手にフォーカスを奪わないよう、現在値で初期化
             self.lastFocusTrigger = parent.focusTrigger
+            // 同じ理由で、初回に編集を畳みに行かないよう現在値から始める
+            self.lastEndEditingTrigger = parent.endEditingTrigger
         }
 
         func controlTextDidChange(_ obj: Notification) {
@@ -3339,14 +3385,92 @@ struct AddressField: NSViewRepresentable {
             parent.text = field.stringValue
         }
 
-        // Return で確定。それ以外のキー操作は既定に任せる
+        // Return で確定、↑↓ で候補選び、Esc で候補を閉じる。
+        // それ以外のキー操作は既定に任せる。
+        //
+        // かな漢字変換の最中は、この窓口自体が呼ばれない
+        //（変換候補の選択と確定はフィールドエディタが先に食う）。
+        // 変換中の ↑↓ で候補一覧が動く心配は要らない
         func control(_ control: NSControl, textView: NSTextView,
                      doCommandBy commandSelector: Selector) -> Bool {
-            if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+            switch commandSelector {
+            case #selector(NSResponder.insertNewline(_:)):
                 parent.onSubmit()
                 return true
+            case #selector(NSResponder.moveDown(_:)):
+                return parent.onMove(1)
+            case #selector(NSResponder.moveUp(_:)):
+                return parent.onMove(-1)
+            case #selector(NSResponder.cancelOperation(_:)):
+                return parent.onCancel()
+            default:
+                return false
             }
-            return false
+        }
+    }
+}
+
+// MARK: - アドレスバーの候補一覧
+
+// アドレスバーの真下に垂らす候補の一覧。
+//
+// 行の当たり判定に Button を使わないのは、押した拍子に
+// first responder が欄から奪われるため。そうなると欄が編集終了を名乗り、
+// 候補が消えてから押した先の処理が走る（＝何も起きない）。
+// onTapGesture は焦点を動かさないので、順番の心配が要らない
+struct SuggestionList: View {
+    let suggestions: [AddressSuggestion]
+    let selected: Int
+    let onHover: (Int) -> Void
+    let onChoose: (AddressSuggestion) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, suggestion in
+                if index > 0 {
+                    Rectangle()
+                        .fill(Deco.faintGold.opacity(0.4))
+                        .frame(height: 1)
+                }
+                row(index, suggestion)
+            }
+        }
+        .background(Deco.panel2)
+        .overlay(Rectangle().stroke(Deco.faintGold, lineWidth: 1))
+        .shadow(color: .black.opacity(0.5), radius: 8, y: 4)
+        .padding(.horizontal, 16)
+    }
+
+    private func row(_ index: Int, _ suggestion: AddressSuggestion) -> some View {
+        let isSelected = index == selected
+        return HStack(spacing: 10) {
+            Image(systemName: suggestion.symbol)
+                .font(.system(size: 11))
+                .foregroundColor(isSelected ? Deco.cream : Deco.dimGold)
+                .frame(width: 16)
+
+            Text(verbatim: suggestion.title)
+                .font(.system(size: 12, design: .serif))
+                .foregroundColor(isSelected ? Deco.cream : Deco.gold)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            Text(verbatim: suggestion.detail)
+                .font(.system(size: 10, design: .serif))
+                .tracking(1)
+                .foregroundColor(Deco.dimGold)
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+        .background(isSelected ? Deco.gold.opacity(0.18) : Color.clear)
+        .contentShape(Rectangle())
+        .onTapGesture { onChoose(suggestion) }
+        .onHover { inside in
+            if inside { onHover(index) }
         }
     }
 }
@@ -3561,6 +3685,18 @@ struct BrowserPane: View {
     @State private var addressText: String = ""
     // アドレスバーを編集中か（AddressField からの通知で更新）
     @State private var addressEditing = false
+    // 打った文字から組み立てた候補と、今どれを選んでいるか。
+    // 先頭（0 番）は必ず「Return を押したら何が起きるか」なので、
+    // 候補を見ずに打ち続ける限り、これまでと同じ動きになる
+    @State private var suggestions: [AddressSuggestion] = []
+    @State private var suggestionIndex = 0
+    // 候補を選び終えたら編集を畳む合図（AddressField が受ける）
+    @State private var addressEndEditingTrigger = 0
+
+    // 編集中で、かつ出すものがある時だけ垂らす
+    private var showsSuggestions: Bool {
+        addressEditing && !suggestions.isEmpty
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -3586,11 +3722,17 @@ struct BrowserPane: View {
                     tabToken: tab.id,
                     tabURL: tab.urlText,
                     focusTrigger: tab.addressBarFocusTrigger,
+                    endEditingTrigger: addressEndEditingTrigger,
                     onSubmit: submitAddress,
                     onEditingChanged: { editing in
                         addressEditing = editing
-                        if !editing { addressText = tab.urlText }
-                    }
+                        if !editing {
+                            addressText = tab.urlText
+                            clearSuggestions()
+                        }
+                    },
+                    onMove: moveSelection,
+                    onCancel: dismissSuggestions
                 )
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, 14)
@@ -3649,6 +3791,23 @@ struct BrowserPane: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
             .background(Deco.panel)
+            // ── 候補一覧 ──
+            // 下へはみ出させる。alignmentGuide で「自分の上端」を
+            // 「アドレスバーの下端」に括りつけるので、一覧の高さが
+            // 何行になっても位置がずれない。
+            // zIndex はブックマークバーや Web の中身より前に出すため
+            .overlay(alignment: .bottom) {
+                if showsSuggestions {
+                    SuggestionList(
+                        suggestions: suggestions,
+                        selected: suggestionIndex,
+                        onHover: { suggestionIndex = $0 },
+                        onChoose: choose
+                    )
+                    .alignmentGuide(.bottom) { $0[.top] }
+                }
+            }
+            .zIndex(1)
 
             // ── ブックマークバー ──
             BookmarkBar(tab: tab, manager: manager)
@@ -3695,11 +3854,19 @@ struct BrowserPane: View {
         }
         .onChange(of: tab.id) { _, _ in
             addressText = tab.urlText
+            clearSuggestions()
         }
         .onChange(of: tab.urlText) { _, newValue in
             if !addressEditing {
                 addressText = newValue
             }
+        }
+        // 打つそばから組み立て直す。
+        // 編集中かどうかで絞らないのは、受け身の焦点のままいきなり
+        // 打ち始めた場合、編集開始の知らせが一拍遅れて届くため
+        //（出す・出さないは showsSuggestions が持つ）
+        .onChange(of: addressText) { _, _ in
+            refreshSuggestions()
         }
         .onChange(of: tab.addressBarFocusTrigger) { _, _ in
             // フォーカスと全選択は AddressField 側が focusTrigger の変化で行う。
@@ -3709,9 +3876,76 @@ struct BrowserPane: View {
     }
 
     private func submitAddress() {
+        // 選んでいる候補があればそれに従う。
+        // 何も触っていなければ選択は先頭＝入力そのものの解釈なので、
+        // 結局は下の道と同じ場所へ行く
+        if showsSuggestions, suggestions.indices.contains(suggestionIndex) {
+            choose(suggestions[suggestionIndex])
+            return
+        }
         let targetTab = manager.selectedTab ?? tab
         targetTab.urlText = addressText
         targetTab.load()
+    }
+
+    // 候補を実行する（Return でも、行を押した時でも通る）
+    private func choose(_ suggestion: AddressSuggestion) {
+        let targetTab = manager.selectedTab ?? tab
+        switch suggestion.kind {
+        case .navigate(let text), .search(let text):
+            // 整形していない入力をそのまま渡す。
+            // load() が resolveURL に通すので、一覧に出したのと同じ判断になる
+            targetTab.urlText = text
+            targetTab.load()
+        case .bookmark(let url):
+            targetTab.urlText = url
+            targetTab.load()
+        case .openTab(let id):
+            if let target = manager.tabs.first(where: { $0.id == id }) {
+                manager.select(target)
+            }
+        }
+        clearSuggestions()
+        // 欄に打ちかけを残さない。畳んだ拍子に現在の URL が映る
+        addressEndEditingTrigger += 1
+    }
+
+    private func refreshSuggestions() {
+        let query = addressText.trimmingCharacters(in: .whitespaces)
+        // ⌘L で全選択しただけの状態では出さない。
+        // 今いる場所をなぞった候補が出ても邪魔になるだけ
+        guard !query.isEmpty, query != tab.urlText else {
+            clearSuggestions()
+            return
+        }
+        let others = manager.tabs
+            .filter { $0.id != tab.id }
+            .map { TabCandidate(id: $0.id, title: $0.pageTitle, url: $0.urlText) }
+        suggestions = AddressSuggestions.build(query: query,
+                                               bookmarks: store.bookmarks,
+                                               tabs: others)
+        suggestionIndex = 0
+    }
+
+    // ↑↓。端まで来たら巻き戻す（候補は数行なので、行き止まりより回った方が速い）
+    private func moveSelection(_ offset: Int) -> Bool {
+        guard showsSuggestions else { return false }
+        let count = suggestions.count
+        suggestionIndex = ((suggestionIndex + offset) % count + count) % count
+        return true
+    }
+
+    // Esc の一度目。候補を閉じるだけで、打ちかけの語は残す。
+    // 二度目は false を返すので、AppKit 既定の「捨てて URL に戻す」へ落ちる
+    private func dismissSuggestions() -> Bool {
+        guard showsSuggestions else { return false }
+        clearSuggestions()
+        return true
+    }
+
+    private func clearSuggestions() {
+        suggestions = []
+        suggestionIndex = 0
     }
 }
 
