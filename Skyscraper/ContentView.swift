@@ -3692,6 +3692,8 @@ struct BrowserPane: View {
     @State private var suggestionIndex = 0
     // 候補を選び終えたら編集を畳む合図（AddressField が受ける）
     @State private var addressEndEditingTrigger = 0
+    // アドレスバー行の高さ。候補一覧をその真下へ落とすのに使う
+    @State private var addressBarHeight: CGFloat = 0
 
     // 編集中で、かつ出すものがある時だけ垂らす
     private var showsSuggestions: Bool {
@@ -3792,11 +3794,23 @@ struct BrowserPane: View {
             .padding(.vertical, 10)
             .background(Deco.panel)
             // ── 候補一覧 ──
-            // 下へはみ出させる。alignmentGuide で「自分の上端」を
-            // 「アドレスバーの下端」に括りつけるので、一覧の高さが
-            // 何行になっても位置がずれない。
+            //
+            // アドレスバーの下へ垂らす。位置は行の高さを実測して下げるだけで、
+            // alignmentGuide の解決には頼らない——overlay の .bottom に
+            // 「自分の上端」を差し出す手は効かず、一覧の下端が行の下端に
+            // 揃えられて上へ伸び、二行目からタイトルバーに切られていた。
+            //
+            // fixedSize が要るのは、overlay の子には親（＝アドレスバー行）の
+            // 高さしか差し出されないため。そのままだと数十ポイントに
+            // 押し込められて、行が潰れる。
+            //
             // zIndex はブックマークバーや Web の中身より前に出すため
-            .overlay(alignment: .bottom) {
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.size.height
+            } action: { height in
+                addressBarHeight = height
+            }
+            .overlay(alignment: .top) {
                 if showsSuggestions {
                     SuggestionList(
                         suggestions: suggestions,
@@ -3804,7 +3818,8 @@ struct BrowserPane: View {
                         onHover: { suggestionIndex = $0 },
                         onChoose: choose
                     )
-                    .alignmentGuide(.bottom) { $0[.top] }
+                    .fixedSize(horizontal: false, vertical: true)
+                    .offset(y: addressBarHeight)
                 }
             }
             .zIndex(1)
