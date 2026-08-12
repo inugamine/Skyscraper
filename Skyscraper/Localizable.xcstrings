@@ -1,6 +1,310 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Cannot connect securely" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cannot connect securely"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安全に接続できません"
+          }
+        }
+      }
+    },
+    "Cannot reach the server" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cannot reach the server"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバに届きません"
+          }
+        }
+      }
+    },
+    "Check the network connection, then try again." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check the network connection, then try again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ネットワークの接続を確かめて、もう一度お試しください。"
+          }
+        }
+      }
+    },
+    "File not found" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "File not found"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ファイルが見つかりません"
+          }
+        }
+      }
+    },
+    "Server not found" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Server not found"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバが見つかりません"
+          }
+        }
+      }
+    },
+    "Skyscraper cannot open an address of this kind." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skyscraper cannot open an address of this kind."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skyscraper はこの種類のアドレスを開けません。"
+          }
+        }
+      }
+    },
+    "The address may be misspelled, or the site may no longer exist." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The address may be misspelled, or the site may no longer exist."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アドレスの綴りが違うか、そのサイトがもう無いのかもしれません。"
+          }
+        }
+      }
+    },
+    "The certificate could not be verified. Skyscraper offers no way past this, because there is no safe way to tell a misconfigured site from an intercepted one." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The certificate could not be verified. Skyscraper offers no way past this, because there is no safe way to tell a misconfigured site from an intercepted one."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "証明書を確かめられませんでした。設定を誤っているだけのサイトと、通信を覗かれている場合とを安全に見分ける方法は無いので、Skyscraper はここを迂回する道を用意していません。"
+          }
+        }
+      }
+    },
+    "The file may have been moved or deleted." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The file may have been moved or deleted."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移動されたか、消されたのかもしれません。"
+          }
+        }
+      }
+    },
+    "The page could not be opened" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The page could not be opened"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このページを開けませんでした"
+          }
+        }
+      }
+    },
+    "The server did not answer" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The server did not answer"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバから返事がありません"
+          }
+        }
+      }
+    },
+    "The server refused the connection. It may be down, or the port may be wrong." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The server refused the connection. It may be down, or the port may be wrong."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "接続を断られました。相手が止まっているか、ポート番号が違うのかもしれません。"
+          }
+        }
+      }
+    },
+    "The server took too long. It may be busy." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The server took too long. It may be busy."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "応答に時間がかかりすぎました。相手が混んでいるのかもしれません。"
+          }
+        }
+      }
+    },
+    "The site keeps redirecting" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The site keeps redirecting"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "転送が繰り返されています"
+          }
+        }
+      }
+    },
+    "The site sent Skyscraper back and forth too many times." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The site sent Skyscraper back and forth too many times."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サイトから何度も別の場所へ回されました。"
+          }
+        }
+      }
+    },
+    "This address cannot be opened" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This address cannot be opened"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このアドレスは開けません"
+          }
+        }
+      }
+    },
+    "Try Again" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Try Again"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "もう一度"
+          }
+        }
+      }
+    },
+    "Try again. If it keeps happening, the site is likely at fault." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Try again. If it keeps happening, the site is likely at fault."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "もう一度お試しください。続くようなら、サイト側の不具合が疑われます。"
+          }
+        }
+      }
+    },
+    "You are not connected" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You are not connected"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ネットワークに繋がっていません"
+          }
+        }
+      }
+    },
     "“%@” would like to use a capture device." : {
       "comment" : "A question that asks the user for permission to use a capture device.",
       "isCommentAutoGenerated" : true,

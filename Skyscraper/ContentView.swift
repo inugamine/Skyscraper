@@ -632,6 +632,14 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // ブロックしたポップアップ（知らせバーに出す）
     @Published var blockedPopups: [BlockedPopup] = []
 
+    // 読み込みに失敗した顛末。nil なら何も起きていない
+    @Published var loadError: PageError?
+
+    // 失敗した宛先。やり直しに使う。
+    // WKWebView は commit していない読み込みを覚えていないので、
+    // reload() を呼んでも何も起きない（＝自前で持つしかない）
+    private var failedURL: URL?
+
     // ⌘クリックされたリンクを新規タブで開くための連絡先（TabManager が入れる）
     var openInNewTab: ((String) -> Void)?
 
@@ -1334,11 +1342,26 @@ final class Tab: NSObject, ObservableObject, Identifiable {
 
     func goBack()    { webView.goBack() }
     func goForward() { webView.goForward() }
-    func reload()    { webView.reload() }
+    // 顛末書が出ている間は WKWebView 側に読み込むものが無い
+    //（commit まで至らなかった読み込みは覚えられていない）。
+    // 控えておいた宛先へ自分で行き直す
+    func reload() {
+        if let failedURL {
+            webView.load(URLRequest(url: failedURL))
+            return
+        }
+        webView.reload()
+    }
     // ⇧⌘R：キャッシュを一切当てにせず取り直す（画像・CSS・JS まで全部）。
     // reload() は検証（If-None-Match 等）で済ませることがあるが、
     // こちらは WebKit のキャッシュを無視してオリジンに取りに行く
-    func reloadFromOrigin() { webView.reloadFromOrigin() }
+    func reloadFromOrigin() {
+        if let failedURL {
+            webView.load(URLRequest(url: failedURL, cachePolicy: .reloadIgnoringLocalCacheData))
+            return
+        }
+        webView.reloadFromOrigin()
+    }
 
     // アドレスバーにフォーカスを移す合図を送る
     func focusAddressBar() { addressBarFocusTrigger += 1 }
@@ -1581,6 +1604,66 @@ extension Tab: WKNavigationDelegate {
                  navigationResponse: WKNavigationResponse,
                  didBecome download: WKDownload) {
         download.delegate = DownloadManager.shared
+    }
+
+    // MARK: 読み込みの失敗
+
+    // 次の読み込みが始まった／中身が届いた。前の顛末書は畳む
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        clearLoadError()
+    }
+
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        clearLoadError()
+    }
+
+    // 相手に届く前に転んだ（名前が引けない、繋がらない、証明書で止まった等）。
+    // 白紙になるのはほぼこの経路
+    func webView(_ webView: WKWebView,
+                 didFailProvisionalNavigation navigation: WKNavigation!,
+                 withError error: Error) {
+        report(error, on: webView)
+    }
+
+    // 中身が届き始めてから転んだ
+    func webView(_ webView: WKWebView,
+                 didFail navigation: WKNavigation!,
+                 withError error: Error) {
+        report(error, on: webView)
+    }
+
+    private func report(_ error: Error, on webView: WKWebView) {
+        // 行き先が分からない場合の当て。
+        // アドレスバーの文字は打ちかけの綴りかもしれないので、
+        // WKWebView が握っている URL を先に見る
+        let fallback = webView.url ?? Tab.resolveURL(from: urlText)
+        guard let pageError = PageError.make(from: error, fallback: fallback) else {
+            return
+        }
+        let nsError = error as NSError
+        print("Tab: navigation failed url=\(pageError.url?.absoluteString ?? "?") "
+              + "domain=\(nsError.domain) code=\(nsError.code) reason=\(pageError.reason)")
+
+        failedURL = pageError.url
+        loadError = pageError
+        // 転んだ宛先をアドレスバーに残す。
+        // WebKit は commit していない読み込みの url を握らないので、
+        // 黙っていると「何を開こうとして失敗したのか」が消える
+        if let url = pageError.url, urlText != url.absoluteString {
+            urlText = url.absoluteString
+        }
+    }
+
+    private func clearLoadError() {
+        if loadError != nil { loadError = nil }
+        failedURL = nil
+    }
+
+    // 顛末書の「もう一度」。控えておいた宛先へ行き直す
+    func retryFailedLoad() {
+        guard let failedURL else { return }
+        loadError = nil
+        webView.load(URLRequest(url: failedURL))
     }
 
     // WebContent プロセスが落ちたとき（WebKit 内部のクラッシュ）の立て直し。
@@ -3852,12 +3935,20 @@ struct BrowserPane: View {
             // また、常時マウントにより裏タブの読み込み・タイトル更新も進む
             ZStack {
                 ForEach(manager.tabs) { t in
-                    WebView(webView: t.webView,
-                            isInteractive: t.id == tab.id && !t.isHome)
-                        .opacity(t.id == tab.id && !t.isHome ? 1 : 0)
-                        .allowsHitTesting(t.id == tab.id && !t.isHome)
+                    // 顛末書を出している間は WebView を伏せる。
+                    // 上に重ねて隠すのではなく引っ込めるのは、AppKit のビューと
+                    // SwiftUI の重なり順を当てにしないため（ロビーと同じ手）。
+                    // loadError を選択中のタブ（tab）から読むのは、
+                    // BrowserPane が見張っているのがそれだけだから——
+                    // 条件に t.id == tab.id が入っているので同じものを指す
+                    let showsWeb = t.id == tab.id && !t.isHome && tab.loadError == nil
+                    WebView(webView: t.webView, isInteractive: showsWeb)
+                        .opacity(showsWeb ? 1 : 0)
+                        .allowsHitTesting(showsWeb)
                 }
-                if tab.isHome {
+                if let error = tab.loadError {
+                    ErrorPage(error: error) { tab.retryFailedLoad() }
+                } else if tab.isHome {
                     NewTabPage(tab: tab)
                 }
             }
