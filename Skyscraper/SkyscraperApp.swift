@@ -75,6 +75,29 @@ struct BrowserCommands: Commands {
                 .keyboardShortcut("l", modifiers: .command)
                 .disabled(manager == nil)
         }
+        // File メニューの「保存」「印刷」は macOS が置き場所を決めている。
+        // 自前の CommandMenu を足すのではなく、その定位置に相乗りする。
+        // replacing でも、SwiftUI が既定で何も置いていない場合は
+        // 単にその位置へ差し込まれる
+        CommandGroup(replacing: .saveItem) {
+            Button("Save Page As…") {
+                if let tab = manager?.selectedTab { PageExporter.savePage(tab) }
+            }
+            .keyboardShortcut("s", modifiers: .command)
+            .disabled(manager == nil)
+
+            Button("Export as PDF…") {
+                if let tab = manager?.selectedTab { PageExporter.exportPDF(tab) }
+            }
+            .disabled(manager == nil)
+        }
+        CommandGroup(replacing: .printItem) {
+            Button("Print…") {
+                if let tab = manager?.selectedTab { PageExporter.print(tab) }
+            }
+            .keyboardShortcut("p", modifiers: .command)
+            .disabled(manager == nil)
+        }
         // Edit メニュー：ページ内検索
         CommandGroup(after: .textEditing) {
             Button("Find…") { manager?.selectedTab?.showFindBar() }
