@@ -14,6 +14,7 @@ struct SettingsView: View {
     @AppStorage(TabManager.restoreSessionKey) private var restoresSession = true
     @AppStorage(SleepBlocker.enabledKey) private var preventsSleepDuringVideo = true
     @State private var showingAcknowledgements = false
+    @State private var showingPasswords = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -149,6 +150,51 @@ struct SettingsView: View {
                     Spacer()
                 }
 
+                // 預かっているログイン情報の一覧
+                HStack(spacing: 12) {
+                    Button {
+                        showingPasswords = true
+                    } label: {
+                        Text("Saved Passwords…")
+                            .font(.system(size: 11, design: .serif))
+                            .tracking(1)
+                            .foregroundColor(Deco.gold)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .overlay(Hexagon(inset: 6).stroke(Deco.faintGold, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+
+                    Text("Kept in the macOS keychain, not in a file of our own.")
+                        .font(.system(size: 10, design: .serif))
+                        .foregroundColor(Deco.dimGold)
+
+                    Spacer()
+                }
+
+                // 「このサイトでは訊かない」の記憶を忘れる
+                HStack(spacing: 12) {
+                    Button {
+                        privacy.resetPasswordNeverList()
+                    } label: {
+                        Text("Reset Password Prompts")
+                            .font(.system(size: 11, design: .serif))
+                            .tracking(1)
+                            .foregroundColor(Deco.gold)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .overlay(Hexagon(inset: 6).stroke(Deco.faintGold, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+
+                    Text("Sites you told Skyscraper to stop asking will be asked about again.")
+                        .font(.system(size: 10, design: .serif))
+                        .foregroundColor(Deco.dimGold)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Spacer()
+                }
+
                 // 「このサイトでは常に許可」したポップアップの記憶を忘れる
                 HStack(spacing: 12) {
                     Button {
@@ -223,6 +269,9 @@ struct SettingsView: View {
         .animation(.easeInOut(duration: 0.2), value: privacy.lastClearedMessage)
         .sheet(isPresented: $showingAcknowledgements) {
             AcknowledgementsView()
+        }
+        .sheet(isPresented: $showingPasswords) {
+            PasswordListView()
         }
         // 確認ダイアログ
         .confirmationDialog(

@@ -96,6 +96,13 @@ final class PrivacyManager: ObservableObject {
         flash(String(localized: "Done. Pop-up permissions have been reset."))
     }
 
+    // 「このサイトでは訊かない」を忘れる。
+    // 預かっているパスワードそのものには手を触れない（消すのは一覧の画面から）
+    func resetPasswordNeverList() {
+        PasswordNeverList.shared.reset()
+        flash(String(localized: "Done. Password prompts have been reset."))
+    }
+
     // 一言表示を出して、数秒で消す
     private func flash(_ message: String) {
         lastClearedMessage = message

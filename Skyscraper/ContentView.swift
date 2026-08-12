@@ -635,6 +635,18 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // 読み込みに失敗した顛末。nil なら何も起きていない
     @Published var loadError: PageError?
 
+    // ログイン情報について今その場で訊いていること。nil なら何も出さない
+    @Published var passwordPrompt: PasswordPrompt?
+
+    // 送信されたらしい中身の控え。
+    // 打った直後は「ログインが通ったか」がまだ分からないので、
+    // 次の画面へ移るか入力欄が消えるまで、訊かずに手元へ置いておく
+    private var passwordCandidate: PasswordCandidate?
+    // 控えを抱えたまま何も起きなかった時のための番人
+    private var passwordCandidateTimeout: Task<Void, Never>?
+    // 問いを出している間だけ、答えを待つ中身を持つ
+    fileprivate var pendingSave: PasswordCandidate?
+
     // 失敗した宛先。やり直しに使う。
     // WKWebView は commit していない読み込みを覚えていないので、
     // reload() を呼んでも何も起きない（＝自前で持つしかない）
@@ -1113,6 +1125,14 @@ final class Tab: NSObject, ObservableObject, Identifiable {
             contentWorld: .page,
             name: PasskeyBridge.messageHandlerName
         )
+        // ログイン欄の見張りと記入。
+        // ページ本来の JS から覗けない専用の世界に仕込む（PasswordFill.swift）
+        webView.configuration.userContentController.addUserScript(PasswordFill.userScript)
+        webView.configuration.userContentController.add(
+            WeakScriptMessageHandler(delegate: self),
+            contentWorld: PasswordFill.world,
+            name: PasswordFill.messageHandlerName
+        )
         // KVO の通知は nonisolated な場（KVO が発火したスレッド）で届く。
         // [weak self] は仕組み上 `weak var self` なので、そのまま Task の中で
         // self? を触ると「並行実行のコードが var を跨いで参照している」扱いになり、
@@ -1504,6 +1524,12 @@ final class Tab: NSObject, ObservableObject, Identifiable {
 extension Tab: WKScriptMessageHandler {
     func userContentController(_ userContentController: WKUserContentController,
                                didReceive message: WKScriptMessage) {
+        // ログイン欄からの知らせは辞書で届く。真偽値への変換より先に捌く
+        if message.name == PasswordFill.messageHandlerName {
+            handlePasswordMessage(message)
+            return
+        }
+
         let boolBody = (message.body as? Bool)
             ?? (message.body as? NSNumber)?.boolValue
             ?? false
@@ -1517,6 +1543,176 @@ extension Tab: WKScriptMessageHandler {
         default:
             break
         }
+    }
+}
+
+// MARK: - ログイン情報の受け渡し
+
+extension Tab {
+    // 出所はページの申告ではなく WebKit が握っている frameInfo から取る。
+    // ページに名乗らせると、いくらでも他所のサイトを騙れる
+    private static func origin(of message: WKScriptMessage) -> (host: String, scheme: String, port: Int)? {
+        let security = message.frameInfo.securityOrigin
+        let scheme = security.protocol.lowercased()
+        guard !security.host.isEmpty, scheme == "https" || scheme == "http" else {
+            // file:// や about: には預ける先が無い
+            return nil
+        }
+        let port = security.port == 0 ? PasswordStore.defaultPort(for: scheme) : security.port
+        return (security.host, scheme, port)
+    }
+
+    fileprivate func handlePasswordMessage(_ message: WKScriptMessage) {
+        guard let body = message.body as? [String: Any],
+              let kind = body["kind"] as? String,
+              let origin = Self.origin(of: message)
+        else { return }
+
+        switch kind {
+        case "focus":
+            let rect = CGRect(x: (body["x"] as? Double) ?? 0,
+                              y: (body["y"] as? Double) ?? 0,
+                              width: (body["width"] as? Double) ?? 0,
+                              height: (body["height"] as? Double) ?? 0)
+            offerFill(for: origin, at: rect)
+        case "dismiss":
+            PasswordSuggestionPanel.shared.hide()
+        case "submit":
+            let username = (body["username"] as? String) ?? ""
+            let password = (body["password"] as? String) ?? ""
+            holdCandidate(host: origin.host, scheme: origin.scheme, port: origin.port,
+                          username: username, password: password)
+        case "gone":
+            // 入力欄が消えた＝画面を移らずにログインが通った合図
+            flushPasswordCandidate()
+        default:
+            break
+        }
+    }
+
+    // MARK: 記入
+
+    // 一件しか預かっていなくても黙って入れない。
+    // 入力欄に焦点が入った時にだけ、その脇へ一覧を出す
+    private func offerFill(for origin: (host: String, scheme: String, port: Int),
+                           at cssRect: CGRect) {
+        let logins = PasswordStore.shared.logins(host: origin.host,
+                                                 scheme: origin.scheme,
+                                                 port: origin.port)
+            .sorted { ($0.modified ?? .distantPast) > ($1.modified ?? .distantPast) }
+
+        guard !logins.isEmpty, let window = webView.window else {
+            PasswordSuggestionPanel.shared.hide()
+            return
+        }
+
+        PasswordSuggestionPanel.shared.show(logins: logins,
+                                            anchoredTo: anchor(for: cssRect),
+                                            in: window) { [weak self] login in
+            self?.fill(login)
+        }
+    }
+
+    // ページの座標（CSS ピクセル、ビューポートの左上が原点、下向き）を
+    // 画面の座標（下から上）へ移す。
+    //
+    // 上端と下端の両方を渡す。下端だけでは、一覧を上へ返す時に
+    // 欄の頭がどこにあるか分からず、欄そのものを覆ってしまう。
+    // pageZoom を挟むのを忘れると、拡大しているタブで的外れな場所に出る
+    private func anchor(for cssRect: CGRect) -> NSRect {
+        let zoom = webView.pageZoom
+
+        func screenPoint(fromTop distance: CGFloat, x: CGFloat) -> NSPoint {
+            let viewPoint = NSPoint(
+                x: x,
+                y: webView.isFlipped ? distance : webView.bounds.height - distance
+            )
+            let windowPoint = webView.convert(viewPoint, to: nil)
+            return webView.window?.convertPoint(toScreen: windowPoint) ?? windowPoint
+        }
+
+        let left = cssRect.minX * zoom
+        let top = screenPoint(fromTop: cssRect.minY * zoom, x: left)
+        let bottom = screenPoint(fromTop: (cssRect.minY + cssRect.height) * zoom, x: left)
+
+        return NSRect(x: bottom.x,
+                      y: min(top.y, bottom.y),
+                      width: cssRect.width * zoom,
+                      height: abs(top.y - bottom.y))
+    }
+
+    func fill(_ login: SavedLogin) {
+        guard let password = PasswordStore.shared.password(for: login),
+              let script = PasswordFill.fillScript(username: login.username, password: password)
+        else { return }
+        webView.evaluateJavaScript(script, in: nil, in: PasswordFill.world) { result in
+            if case .failure(let error) = result {
+                print("Tab: password fill failed — \(error)")
+            }
+        }
+    }
+
+    // MARK: 保存を訊くまで
+
+    private func holdCandidate(host: String, scheme: String, port: Int,
+                               username: String, password: String) {
+        guard !password.isEmpty, !PasswordNeverList.shared.contains(host) else { return }
+
+        passwordCandidate = PasswordCandidate(host: host, scheme: scheme, port: port,
+                                              username: username, password: password)
+
+        // 画面も移らず入力欄も残ったまま、という作りのページもある。
+        // 取りこぼさないよう、しばらく経ったら自分から訊きに行く
+        passwordCandidateTimeout?.cancel()
+        passwordCandidateTimeout = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            self?.flushPasswordCandidate()
+        }
+    }
+
+    // 控えを保存の問いに変える。
+    // 既に同じ中身を預かっているなら何も訊かない
+    fileprivate func flushPasswordCandidate() {
+        passwordCandidateTimeout?.cancel()
+        passwordCandidateTimeout = nil
+        guard let candidate = passwordCandidate else { return }
+        passwordCandidate = nil
+
+        let store = PasswordStore.shared
+        let saved = store.logins(host: candidate.host,
+                                 scheme: candidate.scheme,
+                                 port: candidate.port)
+
+        if let existing = saved.first(where: { $0.username == candidate.username }) {
+            guard store.password(for: existing) != candidate.password else { return }
+            pendingSave = candidate
+            passwordPrompt = .update(host: candidate.host, username: candidate.username)
+        } else {
+            pendingSave = candidate
+            passwordPrompt = .save(host: candidate.host, username: candidate.username)
+        }
+    }
+
+    // MARK: 問いへの返事
+
+    func acceptPasswordPrompt() {
+        guard let save = pendingSave else { return }
+        PasswordStore.shared.save(host: save.host, scheme: save.scheme, port: save.port,
+                                  username: save.username, password: save.password)
+        dismissPasswordPrompt()
+    }
+
+    func neverSavePasswordsForThisSite() {
+        if let save = pendingSave {
+            PasswordNeverList.shared.add(save.host)
+        }
+        dismissPasswordPrompt()
+    }
+
+    func dismissPasswordPrompt() {
+        pendingSave = nil
+        passwordPrompt = nil
     }
 }
 
@@ -1611,10 +1807,16 @@ extension Tab: WKNavigationDelegate {
     // 次の読み込みが始まった／中身が届いた。前の顛末書は畳む
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         clearLoadError()
+        // 出しっぱなしの一覧を連れて行かない。
+        // 小窓は窓の子なので、ページが変わっても自分では消えない
+        PasswordSuggestionPanel.shared.hide()
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         clearLoadError()
+        // 送信の後で画面が変わった。ログインが通ったとみて、
+        // 控えてあった中身の保存を訊きに行く
+        flushPasswordCandidate()
     }
 
     // 相手に届く前に転んだ（名前が引けない、繋がらない、証明書で止まった等）。
@@ -1805,6 +2007,8 @@ final class TabManager: ObservableObject {
     @Published var selectedID: UUID? {
         didSet {
             guard selectedID != oldValue else { return }
+            // 出しっぱなしの資格情報の一覧を、別のタブへ持ち越さない
+            PasswordSuggestionPanel.shared.hide()
             // 復元されたまま眠っているタブなら、ここで初めて読みに行く
             selectedTab?.activateIfDeferred()
             // スリープ抑制は「今見ているタブ」にだけ効かせる。
@@ -3757,6 +3961,88 @@ struct PopupNoticeBar: View {
     }
 }
 
+// MARK: - ログイン情報の知らせバー
+
+// ポップアップの知らせと同じ様式。ダイアログで手を止めさせず、
+// 画面の中に控えめに出して、無視して先へ進める形にする
+struct PasswordNoticeBar: View {
+    @ObservedObject var tab: Tab
+
+    var body: some View {
+        if let prompt = tab.passwordPrompt {
+            HStack(spacing: 12) {
+                Image(systemName: "key")
+                    .font(.system(size: 11))
+                    .foregroundColor(Deco.gold)
+
+                switch prompt {
+                case .save(let host, let username):
+                    Text("Save the password for \(host)?")
+                        .font(.system(size: 11, design: .serif))
+                        .foregroundColor(Deco.cream)
+                    account(username)
+                    Spacer()
+                    noticeButton("Save") { tab.acceptPasswordPrompt() }
+                    noticeButton("Not Now") { tab.dismissPasswordPrompt() }
+                    noticeButton("Never for This Site") { tab.neverSavePasswordsForThisSite() }
+
+                case .update(let host, let username):
+                    Text("Update the saved password for \(host)?")
+                        .font(.system(size: 11, design: .serif))
+                        .foregroundColor(Deco.cream)
+                    account(username)
+                    Spacer()
+                    noticeButton("Update") { tab.acceptPasswordPrompt() }
+                    noticeButton("Not Now") { tab.dismissPasswordPrompt() }
+                }
+
+                Button { tab.dismissPasswordPrompt() } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10))
+                        .foregroundColor(Deco.dimGold)
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+            .background(Deco.panel2)
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(Deco.faintGold).frame(height: 1)
+            }
+        }
+    }
+
+    // 利用者名。空（名前欄の無いログイン）の時は何も出さない
+    @ViewBuilder
+    private func account(_ username: String) -> some View {
+        if !username.isEmpty {
+            Text(verbatim: username)
+                .font(.system(size: 11, design: .serif))
+                .foregroundColor(Deco.gold)
+                .lineLimit(1)
+        }
+    }
+
+    private func noticeButton(_ title: LocalizedStringKey,
+                              action: @escaping () -> Void) -> some View {
+        Button(action: action) { chip(Text(title)) }
+            .buttonStyle(.plain)
+    }
+
+    private func chip(_ label: Text) -> some View {
+        label
+            .font(.system(size: 10, design: .serif))
+            .tracking(1)
+            .foregroundColor(Deco.gold)
+            .lineLimit(1)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .overlay(Hexagon(inset: 4).stroke(Deco.faintGold, lineWidth: 1))
+    }
+}
+
 // MARK: - 選択中タブの中身
 
 struct BrowserPane: View {
@@ -3921,6 +4207,9 @@ struct BrowserPane: View {
             if !tab.blockedPopups.isEmpty {
                 PopupNoticeBar(tab: tab)
             }
+
+            // ── ログイン情報の預かりについての問い ──
+            PasswordNoticeBar(tab: tab)
 
             // ── ダウンロードの棚 ──
             if downloads.isShelfVisible, !downloads.items.isEmpty {

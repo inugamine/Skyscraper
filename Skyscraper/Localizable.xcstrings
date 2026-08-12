@@ -1,6 +1,22 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "(no user name)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "(no user name)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "（利用者名なし）"
+          }
+        }
+      }
+    },
     "Cannot connect securely" : {
       "localizations" : {
         "en" : {
@@ -33,6 +49,22 @@
         }
       }
     },
+    "Cannot verify who you are, so the password is not shown." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cannot verify who you are, so the password is not shown."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本人確認ができないため、パスワードは表示しません。"
+          }
+        }
+      }
+    },
     "Check the network connection, then try again." : {
       "localizations" : {
         "en" : {
@@ -49,6 +81,38 @@
         }
       }
     },
+    "Choose a CSV exported from Passwords.app or another browser." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose a CSV exported from Passwords.app or another browser."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Passwords.app や他のブラウザから書き出した CSV を選んでください。"
+          }
+        }
+      }
+    },
+    "Could not read that file." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could not read that file."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "そのファイルを読み取れませんでした。"
+          }
+        }
+      }
+    },
     "Could not save the page" : {
       "localizations" : {
         "en" : {
@@ -61,6 +125,70 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "ページを保存できませんでした"
+          }
+        }
+      }
+    },
+    "Delete All" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete All"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "すべて削除"
+          }
+        }
+      }
+    },
+    "Delete every saved password?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete every saved password?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存済みのパスワードをすべて削除しますか？"
+          }
+        }
+      }
+    },
+    "Done" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Done"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完了"
+          }
+        }
+      }
+    },
+    "Done. Password prompts have been reset." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Done. Password prompts have been reset."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完了しました。パスワードの確認をリセットしました。"
           }
         }
       }
@@ -113,6 +241,118 @@
         }
       }
     },
+    "Hide" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "隠す"
+          }
+        }
+      }
+    },
+    "Import…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "読み込む…"
+          }
+        }
+      }
+    },
+    "Kept in the macOS keychain, not in a file of our own." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kept in the macOS keychain, not in a file of our own."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "独自のファイルではなく、macOS のキーチェーンに預けています。"
+          }
+        }
+      }
+    },
+    "Move to Trash" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Move to Trash"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゴミ箱に入れる"
+          }
+        }
+      }
+    },
+    "Never for This Site" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Never for This Site"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このサイトでは訊かない"
+          }
+        }
+      }
+    },
+    "Not Now" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not Now"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今回はしない"
+          }
+        }
+      }
+    },
+    "Nothing is saved yet. Skyscraper asks before it keeps anything." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing is saved yet. Skyscraper asks before it keeps anything."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "まだ何も預かっていません。保存する前に必ず確認します。"
+          }
+        }
+      }
+    },
     "OK" : {
       "localizations" : {
         "en" : {
@@ -161,6 +401,38 @@
         }
       }
     },
+    "Reset Password Prompts" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reset Password Prompts"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "パスワードの確認をリセット"
+          }
+        }
+      }
+    },
+    "Save" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存"
+          }
+        }
+      }
+    },
     "Save Page As…" : {
       "localizations" : {
         "en" : {
@@ -173,6 +445,54 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "ページを別名で保存…"
+          }
+        }
+      }
+    },
+    "Save the password for %@?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save the password for %@?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ のパスワードを保存しますか？"
+          }
+        }
+      }
+    },
+    "Saved Passwords" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saved Passwords"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存済みのパスワード"
+          }
+        }
+      }
+    },
+    "Saved Passwords…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saved Passwords…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存済みのパスワード…"
           }
         }
       }
@@ -193,6 +513,54 @@
         }
       }
     },
+    "Show" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "表示"
+          }
+        }
+      }
+    },
+    "show the saved password" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "show the saved password"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存済みのパスワードを表示"
+          }
+        }
+      }
+    },
+    "Sites you told Skyscraper to stop asking will be asked about again." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sites you told Skyscraper to stop asking will be asked about again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「訊かない」と答えたサイトにも、また確認するようになります。"
+          }
+        }
+      }
+    },
     "Skyscraper cannot open an address of this kind." : {
       "localizations" : {
         "en" : {
@@ -205,6 +573,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skyscraper はこの種類のアドレスを開けません。"
+          }
+        }
+      }
+    },
+    "That file has no address, user name and password columns." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "That file has no address, user name and password columns."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "そのファイルにアドレス・利用者名・パスワードの列が見当たりません。"
+          }
+        }
+      }
+    },
+    "That file holds the passwords in plain text." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "That file holds the passwords in plain text."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "そのファイルにはパスワードが平文で入っています。"
           }
         }
       }
@@ -253,6 +653,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "移動されたか、消されたのかもしれません。"
+          }
+        }
+      }
+    },
+    "The file was moved to the Trash." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The file was moved to the Trash."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ファイルをゴミ箱に入れました。"
+          }
+        }
+      }
+    },
+    "The keychain did not return the password." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The keychain did not return the password."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "キーチェーンからパスワードを取り出せませんでした。"
           }
         }
       }
@@ -353,6 +785,22 @@
         }
       }
     },
+    "They are removed from the keychain and cannot be brought back." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "They are removed from the keychain and cannot be brought back."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "キーチェーンから消え、元に戻すことはできません。"
+          }
+        }
+      }
+    },
     "This address cannot be opened" : {
       "localizations" : {
         "en" : {
@@ -365,6 +813,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "このアドレスは開けません"
+          }
+        }
+      }
+    },
+    "Took in %lld passwords, skipped %lld rows." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Took in %lld passwords, skipped %lld rows."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 件を読み込み、%lld 行を飛ばしました。"
+          }
+        }
+      }
+    },
+    "Took in %lld passwords." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Took in %lld passwords."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 件を読み込みました。"
           }
         }
       }
@@ -413,6 +893,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "名称未設定"
+          }
+        }
+      }
+    },
+    "Update" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Update"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新"
+          }
+        }
+      }
+    },
+    "Update the saved password for %@?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Update the saved password for %@?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ の保存済みパスワードを更新しますか？"
           }
         }
       }
