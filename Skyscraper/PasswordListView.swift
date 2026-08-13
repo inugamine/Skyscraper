@@ -54,11 +54,22 @@ struct PasswordListView: View {
                 .padding(.bottom, 14)
 
             if logins.isEmpty {
-                Text("Nothing is saved yet. Skyscraper asks before it keeps anything.")
-                    .font(.system(size: 11, design: .serif))
-                    .foregroundColor(Deco.dimGold)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                    .multilineTextAlignment(.center)
+                // 初めて開いた時に必ず通る場所。
+                // 「まだ空だ」で終わらせず、どこから引き取れるかまで示す
+                VStack(spacing: 14) {
+                    Text("Nothing is saved yet. Skyscraper asks before it keeps anything.")
+                        .font(.system(size: 11, design: .serif))
+                        .foregroundColor(Deco.dimGold)
+                        .multilineTextAlignment(.center)
+                    Text("Passwords.app can hand over what it holds: export from its File menu, then import the file here.")
+                        .font(.system(size: 10, design: .serif))
+                        .foregroundColor(Deco.dimGold.opacity(0.8))
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: 320)
+                    button("Open Passwords.app") { openPasswordsApp() }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             } else {
                 ScrollView {
                     VStack(spacing: 0) {
@@ -207,6 +218,23 @@ struct PasswordListView: View {
     }
 
     // MARK: - 取り込み
+
+    // Passwords.app を開く。書き出しはあちらの「ファイル」メニューにある。
+    //
+    // 場所を決め打ちせず、識別子から引くのは、システムのアプリでも
+    // 置き場所が変わることがあるため。見つからない時に黙って何も
+    // 起きないと、押し間違えたのか壊れているのか分からない
+    private func openPasswordsApp() {
+        importNote = nil
+        guard let app = NSWorkspace.shared
+            .urlForApplication(withBundleIdentifier: "com.apple.Passwords")
+        else {
+            importNote = String(localized: "Passwords.app could not be found.")
+            return
+        }
+        NSWorkspace.shared.openApplication(at: app,
+                                           configuration: NSWorkspace.OpenConfiguration())
+    }
 
     private func chooseFile() {
         let panel = NSOpenPanel()

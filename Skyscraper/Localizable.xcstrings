@@ -284,7 +284,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "独自のファイルではなく、macOS のキーチェーンに預けています。"
+            "value" : "macOS のキーチェーンに預けています。"
           }
         }
       }
@@ -369,6 +369,22 @@
         }
       }
     },
+    "Open Passwords.app" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Passwords.app"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Passwords.app を開く"
+          }
+        }
+      }
+    },
     "Page Source" : {
       "localizations" : {
         "en" : {
@@ -381,6 +397,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "ページのソース"
+          }
+        }
+      }
+    },
+    "Passwords.app can hand over what it holds: export from its File menu, then import the file here." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Passwords.app can hand over what it holds: export from its File menu, then import the file here."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Passwords.app に預けてあるものも引き取れます。あちらの「ファイル」メニューから書き出して、ここで読み込んでください。"
+          }
+        }
+      }
+    },
+    "Passwords.app could not be found." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Passwords.app could not be found."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Passwords.app が見つかりませんでした。"
           }
         }
       }

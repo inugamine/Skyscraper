@@ -198,19 +198,22 @@ final class PasswordStore: ObservableObject {
 
     // 設定画面の「すべて削除」。
     // キーチェーン全体ではなく、こちらが預けた印の付いた項目だけを消す
+    //
+    // 印だけを条件にして一発で SecItemDelete を呼ぶ道は取らない。
+    // 同じ条件が SecItemCopyMatching では効くのに、削除では当てが
+    // 外れて errSecItemNotFound が返ることがある。これは
+    // 「もう無い」と区別がつかないので、何も消えていないのに
+    // 成功と読めてしまう——押しても何も起きない、という顔をする。
+    //
+    // 一件ずつ渡す。一覧を出す時と同じ鍵（場所・利用者名）で
+    // 照合するので、確実に当たる
     @discardableResult
     func deleteAll() -> Bool {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassInternetPassword,
-            kSecAttrSecurityDomain as String: Self.securityDomain,
-        ]
-        let status = SecItemDelete(query as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            print("PasswordStore: deleteAll failed status=\(status)")
-            return false
+        var allDone = true
+        for login in allLogins() {
+            if !delete(login) { allDone = false }
         }
-        revision += 1
-        return true
+        return allDone
     }
 }
 

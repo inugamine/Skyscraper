@@ -124,6 +124,7 @@ struct SettingsView: View {
                     Text("Sites will be asked about again.")
                         .font(.system(size: 10, design: .serif))
                         .foregroundColor(Deco.dimGold)
+                        .fixedSize(horizontal: false, vertical: true)
 
                     Spacer()
                 }
@@ -146,6 +147,7 @@ struct SettingsView: View {
                     Text("Links will be confirmed again.")
                         .font(.system(size: 10, design: .serif))
                         .foregroundColor(Deco.dimGold)
+                        .fixedSize(horizontal: false, vertical: true)
 
                     Spacer()
                 }
@@ -168,6 +170,7 @@ struct SettingsView: View {
                     Text("Kept in the macOS keychain, not in a file of our own.")
                         .font(.system(size: 10, design: .serif))
                         .foregroundColor(Deco.dimGold)
+                        .fixedSize(horizontal: false, vertical: true)
 
                     Spacer()
                 }
@@ -213,6 +216,7 @@ struct SettingsView: View {
                     Text("Pop-ups will be blocked again.")
                         .font(.system(size: 10, design: .serif))
                         .foregroundColor(Deco.dimGold)
+                        .fixedSize(horizontal: false, vertical: true)
 
                     Spacer()
                 }
@@ -341,9 +345,12 @@ struct SettingsView: View {
             }
             .buttonStyle(.plain)
 
+            // HStack の中の Text は、幅が足りないと黙って一行に切り詰められる。
+            // 縦だけ理想の高さを使わせて、折り返しを許す
             Text(note)
                 .font(.system(size: 10, design: .serif))
                 .foregroundColor(Deco.dimGold)
+                .fixedSize(horizontal: false, vertical: true)
 
             Spacer()
         }
