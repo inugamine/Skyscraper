@@ -42,8 +42,12 @@ struct PageError {
         let error = error as NSError
         guard !isRoutine(error) else { return nil }
 
-        let failing = (error.userInfo[NSURLErrorFailingURLErrorKey] as? URL)
-            ?? (error.userInfo[NSURLErrorFailingURLStringErrorKey] as? String).flatMap(URL.init(string:))
+        // 失敗した宛先。userInfo には昔から同じものが URL 型と文字列型の
+        // 二種類の鍵で入っていたが、macOS 15.4 で文字列版の鍵が非推奨になった。
+        // 鍵は一つに絞り、中身が URL でも文字列でも受け取れる形にしておく
+        let failingValue = error.userInfo[NSURLErrorFailingURLErrorKey]
+        let failing = (failingValue as? URL)
+            ?? (failingValue as? String).flatMap(URL.init(string:))
 
         return PageError(kind: kind(for: error),
                          url: failing ?? fallback,
