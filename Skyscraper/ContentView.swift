@@ -4111,53 +4111,7 @@ struct BrowserPane: View {
                 .background(Hexagon(inset: 6).fill(Deco.field))
                 .overlay(Hexagon(inset: 6).stroke(Deco.faintGold, lineWidth: 1))
 
-                // リーダーモードボタン。本文のあるページでだけ現れる
-                if tab.isReaderAvailable {
-                    Button {
-                        tab.toggleReader()
-                    } label: {
-                        Image(systemName: tab.isReaderActive ? "book.fill" : "book")
-                            .font(.system(size: 13))
-                            .foregroundColor(tab.isReaderActive ? Deco.cream : Deco.gold)
-                            .frame(width: 24, height: 24)
-                    }
-                    .buttonStyle(.plain)
-                    .help(tab.isReaderActive ? "Hide Reader" : "Show Reader")
-                }
-
-                // 星ボタン：現在のページを登録／解除
-                Button {
-                    store.toggle(title: tab.pageTitle, url: tab.urlText)
-                } label: {
-                    Image(systemName: store.isBookmarked(tab.urlText) ? "star.fill" : "star")
-                        .font(.system(size: 13))
-                        .foregroundColor(tab.isHome ? Deco.faintGold : Deco.gold)
-                        .frame(width: 24, height: 24)
-                }
-                .buttonStyle(.plain)
-                .disabled(tab.isHome)
-
-                // ダウンロードの棚を開け閉めする。
-                // 今回の起動で何か落としていれば現れる
-                if !downloads.items.isEmpty {
-                    Button {
-                        downloads.isShelfVisible.toggle()
-                    } label: {
-                        Image(systemName: downloads.hasActive
-                              ? "arrow.down.circle.fill" : "arrow.down.circle")
-                            .font(.system(size: 13))
-                            .foregroundColor(downloads.isShelfVisible ? Deco.cream : Deco.gold)
-                            .frame(width: 24, height: 24)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Downloads")
-                }
-
-                if tab.isLoading {
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(Deco.gold)
-                }
+                trailingControls
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -4267,6 +4221,64 @@ struct BrowserPane: View {
             // フォーカスと全選択は AddressField 側が focusTrigger の変化で行う。
             // ここでは表示文字列を現在の URL に揃えるだけ
             addressText = tab.urlText
+        }
+    }
+
+    // ── アドレスバー右端の道具 ──
+    //
+    // body から切り出してあるのは、型検査を軽くするため。
+    // 条件分岐が一つ増えるたびに ViewBuilder は分岐の型を
+    // 入れ子に積むので、三つ並べて上に三項演算子を重ねると
+    // 式全体が膨らんで、型検査が時間切れを起こす。
+    // 見た目も動きも変わらない——置き場所を移しただけだ
+    @ViewBuilder
+    private var trailingControls: some View {
+        // リーダーモードボタン。本文のあるページでだけ現れる
+        if tab.isReaderAvailable {
+            Button {
+                tab.toggleReader()
+            } label: {
+                Image(systemName: tab.isReaderActive ? "book.fill" : "book")
+                    .font(.system(size: 13))
+                    .foregroundColor(tab.isReaderActive ? Deco.cream : Deco.gold)
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .help(tab.isReaderActive ? "Hide Reader" : "Show Reader")
+        }
+
+        // 星ボタン：現在のページを登録／解除
+        Button {
+            store.toggle(title: tab.pageTitle, url: tab.urlText)
+        } label: {
+            Image(systemName: store.isBookmarked(tab.urlText) ? "star.fill" : "star")
+                .font(.system(size: 13))
+                .foregroundColor(tab.isHome ? Deco.faintGold : Deco.gold)
+                .frame(width: 24, height: 24)
+        }
+        .buttonStyle(.plain)
+        .disabled(tab.isHome)
+
+        // ダウンロードの棚を開け閉めする。
+        // 今回の起動で何か落としていれば現れる
+        if !downloads.items.isEmpty {
+            Button {
+                downloads.isShelfVisible.toggle()
+            } label: {
+                Image(systemName: downloads.hasActive
+                      ? "arrow.down.circle.fill" : "arrow.down.circle")
+                    .font(.system(size: 13))
+                    .foregroundColor(downloads.isShelfVisible ? Deco.cream : Deco.gold)
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .help("Downloads")
+        }
+
+        if tab.isLoading {
+            ProgressView()
+                .controlSize(.small)
+                .tint(Deco.gold)
         }
     }
 
