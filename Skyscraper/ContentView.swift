@@ -10,6 +10,7 @@ import AppKit
 import WebKit
 import Combine
 import UniformTypeIdentifiers
+import Translation
 
 // MARK: - アール・デコ配色
 
@@ -4356,12 +4357,230 @@ struct BrowserPane: View {
     }
 }
 
+// MARK: - 翻訳パネル
+
+// 右端に引き出す縦長の盤。原文と訳文を上下に並べる。
+// 縦タブの帯と左右対称になる位置だ
+//
+// 幅を固定にしてあるのは、Web の中身の幅が開け閉めのたびに
+// 跡形もなく変わると、ページ側の再レイアウトが重いため
+struct TranslationPanel: View {
+    @ObservedObject var translator: Translator
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+
+            Zigzag(teeth: 16)
+                .stroke(Deco.gold, lineWidth: 1)
+                .frame(height: 5)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 12)
+
+            languageRow
+                .padding(.horizontal, 14)
+                .padding(.bottom, 12)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    caption("Original")
+                    Text(verbatim: translator.sourceText)
+                        .font(.system(size: 12, design: .serif))
+                        .foregroundColor(Deco.dimGold)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Rectangle()
+                        .fill(Deco.faintGold)
+                        .frame(height: 1)
+                        .padding(.vertical, 4)
+
+                    caption("Translation")
+                    result
+                }
+                .padding(.horizontal, 14)
+                .padding(.bottom, 14)
+            }
+
+            footer
+        }
+        .frame(width: 320)
+        .background(Deco.panel)
+        // 左端に一本罫を引いて、Web の中身との境をはっきりさせる
+        .overlay(alignment: .leading) {
+            Rectangle().fill(Deco.faintGold).frame(width: 1)
+        }
+    }
+
+    // ── 見出し ──
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "character.book.closed")
+                .font(.system(size: 11))
+                .foregroundColor(Deco.gold)
+
+            Text("Translation")
+                .font(.system(size: 12, design: .serif))
+                .tracking(2)
+                .foregroundColor(Deco.cream)
+
+            Spacer()
+
+            Button { translator.close() } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10))
+                    .foregroundColor(Deco.dimGold)
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
+    }
+
+    // ── 判定された言語 → 訳先 ──
+
+    private var languageRow: some View {
+        HStack(spacing: 8) {
+            Text(verbatim: translator.detectedLanguageName)
+                .font(.system(size: 11, design: .serif))
+                .foregroundColor(Deco.gold)
+                .lineLimit(1)
+
+            Image(systemName: "arrow.right")
+                .font(.system(size: 9))
+                .foregroundColor(Deco.faintGold)
+
+            Menu {
+                ForEach(translator.availableLanguages, id: \.self) { language in
+                    Button(Translator.displayName(of: language)) {
+                        translator.targetLanguage = language
+                    }
+                }
+            } label: {
+                HStack(spacing: 5) {
+                    Text(verbatim: Translator.displayName(of: translator.targetLanguage))
+                        .font(.system(size: 11, design: .serif))
+                        .foregroundColor(Deco.cream)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8))
+                        .foregroundColor(Deco.dimGold)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .overlay(Hexagon(inset: 4).stroke(Deco.faintGold, lineWidth: 1))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    // ── 訳文（もしくは途中経過）──
+
+    @ViewBuilder
+    private var result: some View {
+        switch translator.phase {
+        case .idle:
+            EmptyView()
+
+        case .preparing:
+            // 初回の言語はここでシステムのダウンロード確認が出る。
+            // 無言で待たせると壊れたように見えるので、別の文言にする
+            busy("Preparing the language…")
+
+        case .translating:
+            busy("Translating…")
+
+        case .done(let text):
+            Text(verbatim: text)
+                .font(.system(size: 13, design: .serif))
+                .foregroundColor(Deco.cream)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+        case .failed(let message):
+            VStack(alignment: .leading, spacing: 8) {
+                Text(verbatim: message)
+                    .font(.system(size: 11, design: .serif))
+                    .foregroundColor(Deco.dimGold)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                chipButton("Try Again") { translator.retry() }
+            }
+        }
+    }
+
+    private func busy(_ title: LocalizedStringKey) -> some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
+                .tint(Deco.gold)
+            Text(title)
+                .font(.system(size: 11, design: .serif))
+                .tracking(1)
+                .foregroundColor(Deco.dimGold)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // ── 足元 ──
+
+    @ViewBuilder
+    private var footer: some View {
+        if let text = translator.translatedText {
+            VStack(spacing: 0) {
+                Rectangle().fill(Deco.faintGold).frame(height: 1)
+                HStack {
+                    Spacer()
+                    chipButton("Copy") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(text, forType: .string)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+            }
+        }
+    }
+
+    // ── 部品 ──
+
+    private func caption(_ title: LocalizedStringKey) -> some View {
+        Text(title)
+            .font(.system(size: 9, design: .serif))
+            .tracking(2)
+            .foregroundColor(Deco.faintGold)
+    }
+
+    private func chipButton(_ title: LocalizedStringKey,
+                            action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 10, design: .serif))
+                .tracking(1)
+                .foregroundColor(Deco.gold)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+                .overlay(Hexagon(inset: 4).stroke(Deco.faintGold, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 // MARK: - 全体
 
 struct ContentView: View {
     // 管理人は窓ごとに一人。ここを App 直下から移したことで、
     // ⌘N で窓を増やせばタブも別々になる
     @StateObject private var manager = TabManager()
+    // 翻訳も窓ごと。盤が窓の右端に一つだから、タブではなく窓に付ける
+    @StateObject private var translator = Translator()
     // ブックマークは窓をまたいで共通なので、外から受け取る
     @ObservedObject var bookmarks: BookmarkStore
     @Environment(\.openWindow) private var openWindow
@@ -4378,13 +4597,27 @@ struct ContentView: View {
             } else {
                 Spacer()
             }
+
+            // 翻訳の盤。疑似大画面中はサイドバーと同じく引っ込める
+            if translator.isPresented, manager.selectedTab?.isVideoFullscreen != true {
+                TranslationPanel(translator: translator)
+                    .transition(.move(edge: .trailing))
+            }
         }
+        .animation(.easeOut(duration: 0.18), value: translator.isPresented)
         .frame(minWidth: 900, minHeight: 600)
         .background(Deco.ink)
         .environmentObject(bookmarks)
         .preferredColorScheme(.dark)
-        // この窓が手前に来たら、自分の管理人をメニューに差し出す
+        // この窓が手前に来たら、自分の管理人と翻訳役をメニューに差し出す
         .focusedSceneValue(\.tabManager, manager)
+        .focusedSceneValue(\.translator, translator)
+        // TranslationSession は自前で作れない。このモディファイアからしか
+        // 降ってこないので、翻訳の本体はここで受け取って Translator に渡す。
+        // configuration の中身が変わるか、invalidate() されると発火する
+        .translationTask(translator.configuration) { session in
+            await translator.perform(with: session)
+        }
         .onAppear {
             manager.markOpen()
             // 復元待ちがまだ残っていれば、次の窓を開く。

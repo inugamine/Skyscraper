@@ -17,10 +17,21 @@ struct FocusedTabManagerKey: FocusedValueKey {
     typealias Value = TabManager
 }
 
+// 翻訳役も同じ理屈で窓ごとに居る。
+// 盤は手前の窓の右端に出すので、メニューはこちらも受け取る
+struct FocusedTranslatorKey: FocusedValueKey {
+    typealias Value = Translator
+}
+
 extension FocusedValues {
     var tabManager: TabManager? {
         get { self[FocusedTabManagerKey.self] }
         set { self[FocusedTabManagerKey.self] = newValue }
+    }
+
+    var translator: Translator? {
+        get { self[FocusedTranslatorKey.self] }
+        set { self[FocusedTranslatorKey.self] = newValue }
     }
 }
 
@@ -57,6 +68,7 @@ struct SkyscraperApp: App {
 // manager が nil になるのは、どの窓にも focus が無い時（設定画面だけ開いている等）
 struct BrowserCommands: Commands {
     @FocusedValue(\.tabManager) private var manager: TabManager?
+    @FocusedValue(\.translator) private var translator: Translator?
 
     var body: some Commands {
         // File メニュー：SwiftUI が用意する New Window（⌘N）の下にタブ操作を並べる。
@@ -109,6 +121,16 @@ struct BrowserCommands: Commands {
             Button("Find Previous") { manager?.selectedTab?.findAgain(backwards: true) }
                 .keyboardShortcut("g", modifiers: [.command, .shift])
                 .disabled(manager == nil)
+            Divider()
+            // 選択した文字列を右端の盤で訳す。
+            // ⌘⇧T は Reopen Closed Tab で埋まっているので ⌥⌘T
+            Button("Translate Selection…") {
+                if let webView = manager?.selectedTab?.webView {
+                    translator?.translateSelection(in: webView)
+                }
+            }
+            .keyboardShortcut("t", modifiers: [.command, .option])
+            .disabled(manager == nil || translator == nil)
         }
         // 表示メニュー：ズーム。
         // CommandMenu("View") だと macOS が既に持っている「表示」の隣に
