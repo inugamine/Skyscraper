@@ -677,6 +677,10 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // パスキー（WebAuthn）の橋渡し役。実体は PasskeyManager.swift
     private let passkeyBridge = PasskeyBridge()
 
+    // HTTP の認証チャレンジ（Basic / Digest / NTLM）の受け手。実体は HTTPAuth.swift。
+    // 一度答えたら同じ場所には訊き直さないので、タブごとに一人持つ
+    private let httpAuth = HTTPAuthPrompter()
+
     private static let mediaStateMessageHandlerName = "skyscraperMediaState"
     private static let fullscreenMessageHandlerName = "skyscraperFullscreen"
     private static let mediaPlaybackObserverScript = WKUserScript(
@@ -1803,6 +1807,34 @@ extension Tab: WKNavigationDelegate {
         download.delegate = DownloadManager.shared
     }
 
+    // MARK: HTTP の認証要求
+
+    // 401 と共に Basic / Digest / NTLM を求められた。
+    // これを実装しない限り WebKit は資格情報を手に入れられず、
+    // 白紙かサーバの素の 401 本文が残る。判断と記憶は HTTPAuth.swift に任せる
+    func webView(_ webView: WKWebView,
+                 didReceive challenge: URLAuthenticationChallenge,
+                 completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        // サーバ証明書の検証とクライアント証明書は WebKit の既定処理のままだ。
+        // ここで引き取ると、検証を素通しする道を自分で作ることになる
+        guard HTTPAuthPrompter.canHandle(challenge) else {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+        Task { @MainActor in
+            guard let answer = await httpAuth.answer(for: challenge, in: webView.window) else {
+                completionHandler(.cancelAuthenticationChallenge, nil)
+                return
+            }
+            // 預かるのはこちらの仕事（キーチェーン）なので、
+            // WebKit には今回の接続限りのものとして渡す
+            completionHandler(.useCredential,
+                              URLCredential(user: answer.user,
+                                            password: answer.password,
+                                            persistence: .forSession))
+        }
+    }
+
     // MARK: 読み込みの失敗
 
     // 次の読み込みが始まった／中身が届いた。前の顛末書は畳む
@@ -1811,6 +1843,8 @@ extension Tab: WKNavigationDelegate {
         // 出しっぱなしの一覧を連れて行かない。
         // 小窓は窓の子なので、ページが変わっても自分では消えない
         PasswordSuggestionPanel.shared.hide()
+        // 断った記憶を仕切り直す（「もう一度」で訊き直せるように）
+        httpAuth.noteNavigationStarted()
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
@@ -1818,6 +1852,14 @@ extension Tab: WKNavigationDelegate {
         // 送信の後で画面が変わった。ログインが通ったとみて、
         // 控えてあった中身の保存を訊きに行く
         flushPasswordCandidate()
+        // 認証を通して中身が届いた──打ったものは正しかった
+        httpAuth.noteNavigationSucceeded()
+    }
+
+    // 画像や CSS だけが認証を求める作りもある。
+    // その場合 didCommit は通らないので、読み終わりでも拾う
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        httpAuth.noteNavigationSucceeded()
     }
 
     // 相手に届く前に転んだ（名前が引けない、繋がらない、証明書で止まった等）。

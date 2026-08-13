@@ -21,6 +21,7 @@ struct PageError {
         case cannotConnect      // 相手に届かない・断られた
         case timedOut           // 返事が来ない
         case insecureConnection // TLS で止まった
+        case signInRequired     // 認証を求められ、答えなかった
         case badAddress         // そもそも開けない綴り
         case fileMissing        // file:// の行き先が無い
         case tooManyRedirects   // 回され続けた
@@ -101,6 +102,11 @@ struct PageError {
              NSURLErrorClientCertificateRequired,
              NSURLErrorAppTransportSecurityRequiresSecureConnection:
             return .insecureConnection
+        case NSURLErrorUserCancelledAuthentication,
+             NSURLErrorUserAuthenticationRequired:
+            // 認証の窓を断った（または答えが通らなかった）。
+            // 失敗というより「まだ名乗っていない」状態だ
+            return .signInRequired
         case NSURLErrorUnsupportedURL,
              NSURLErrorBadURL:
             return .badAddress
@@ -125,6 +131,7 @@ struct PageError {
         case .cannotConnect:      return "xmark.circle"
         case .timedOut:           return "hourglass"
         case .insecureConnection: return "lock.trianglebadge.exclamationmark"
+        case .signInRequired:     return "person.badge.key"
         case .badAddress:         return "exclamationmark.triangle"
         case .fileMissing:        return "doc.questionmark"
         case .tooManyRedirects:   return "arrow.triangle.2.circlepath"
@@ -144,6 +151,8 @@ struct PageError {
             return String(localized: "The server did not answer")
         case .insecureConnection:
             return String(localized: "Cannot connect securely")
+        case .signInRequired:
+            return String(localized: "This page requires a sign-in")
         case .badAddress:
             return String(localized: "This address cannot be opened")
         case .fileMissing:
@@ -167,6 +176,8 @@ struct PageError {
             return String(localized: "The server took too long. It may be busy.")
         case .insecureConnection:
             return String(localized: "The certificate could not be verified. Skyscraper offers no way past this, because there is no safe way to tell a misconfigured site from an intercepted one.")
+        case .signInRequired:
+            return String(localized: "The server asked for a user name and password. Choose Try Again to enter them.")
         case .badAddress:
             return String(localized: "Skyscraper cannot open an address of this kind.")
         case .fileMissing:
