@@ -51,7 +51,7 @@ Apple Foundation Models（オンデバイス）でタブの内容を判断し、
 
 | | |
 |---|---|
-| 広告ブロック | [uBlock Origin Lite](https://github.com/gorhill/uBlock) を同梱しています。EasyList などのフィルタを WebKit がエンジンレベルで実行します。国内の広告網（fluct・Geniee・Zucks・nend など）と、遮断後に残る空枠は自前の `WKContentRuleList` で補っています |
+| 広告ブロック | [uBlock Origin Lite](https://github.com/gorhill/uBlock) を同梱しています。EasyList などのフィルタを WebKit がエンジンレベルで実行します。国内の広告網にも AdGuard Japanese を有効にして対応済みです。遮断後に残る空枠だけ、自前の `WKContentRuleList` で掃除しています |
 | YouTube | 再生前の広告を検出して飛ばします |
 | ポップアップ | `window.open()` を監視します。ただし**黙って捨てることはしません**。止めたことをお知らせして、その場で開き直せるようにしています（OAuth や決済の window を壊さないためです） |
 
@@ -60,17 +60,24 @@ Apple Foundation Models（オンデバイス）でタブの内容を判断し、
 Safari や Chrome と同じ Web Extensions に対応しています（WebKit の `WKWebExtension`）。
 
 標準で uBlock Origin Lite を同梱していますので、入れた直後から広告が消えます。
+アドレスバーの右に拡張のボタンが並び、遮断数のバッジとポップアップが使えます。
+フィルターリストの切り替えなど、拡張側の設定画面も専用のウィンドウで開きます。
+
 自分で拡張を追加したい場合は、展開済みのフォルダ（`manifest.json` が入った状態）を
 `~/Library/Application Support/Skyscraper/Extensions/` に置いて再起動してください。
-
-> [!NOTE]
-> ツールバーの拡張ボタン（popup）はまだ実装していません。
-> 拡張側の設定画面を開く操作は現時点ではできません。
+`⌘,` の設定画面から、読み込まれている拡張の一覧と入切を確認できます。
 
 ### 読む
 
 - リーダーモード (Mozilla Readability.js)。読み取れるページでのみボタンが表示されます
 - 黒地に金の、目に優しい配色です
+- `⌥⌘T` で右から翻訳パネルが出ます（Apple Translation。言語は自動で見分けます）
+
+### パスワード
+
+- Keychain に保管し、フォームへ差し込みます
+- HTTP 認証 (Basic / Digest / NTLM) に対応しています
+- 他のブラウザからの取り込みもできます
 
 ### そのほか
 
@@ -138,19 +145,43 @@ Target → Signing & Capabilities の Team をご自身のものに変更して�
 Skyscraper/
 ├── SkyscraperApp.swift     エントリポイント、メニュー、ウィンドウ管理
 ├── ContentView.swift       本体。タブ・ツールバー・WebView・アール・デコの意匠
-├── TabGrouper.swift        Foundation Models によるタブの自動グループ分け
-├── AdBlocker.swift         WKContentRuleList の組み立て（拡張機能の補完）
-├── WebExtensionManager.swift  拡張機能の読み込みと管理
-├── WebExtensionBridge.swift   拡張から見たタブと窓の橋渡し
+│
+│   拡張機能
+├── WebExtensionManager.swift      読み込みと管理、デリゲート
+├── WebExtensionBridge.swift       拡張から見たタブと窓の橋渡し
+├── WebExtensionActionButton.swift ツールバーのボタンと popup
+├── WebExtensionOptionsWindow.swift 拡張の設定ページ用の窓
+├── WebExtensionListView.swift     設定画面の拡張一覧
+│
+│   ページを整える
+├── AdBlocker.swift         遮断後に残る空枠の掃除
 ├── PopupBlocker.swift      window.open() の監視と許可リスト
-├── ExternalScheme.swift    mailto: などを担当アプリへ引き渡す
 ├── ReaderMode.swift        Readability.js の橋渡し
-├── DownloadManager.swift   ダウンロード棚
-├── MediaPermission.swift   カメラ・マイクのサイトごとの許可
+├── Translator.swift        Apple Translation による翻訳パネル
+├── PageExporter.swift      ページの書き出し
+├── PageError.swift         読み込み失敗時の表示
+│
+│   認証・資格情報
+├── HTTPAuth.swift          Basic / Digest / NTLM
+├── PasswordStore.swift     Keychain への保管
+├── PasswordFill.swift      フォームへの差し込み
+├── PasswordSuggestionPanel.swift  候補の一覧
+├── PasswordListView.swift  保存済みパスワードの管理
+├── PasswordImport.swift    他ブラウザからの取り込み
 ├── PasskeyManager.swift    WebAuthn (審査待ち)
+│
+│   そのほか
+├── TabGrouper.swift        Foundation Models によるタブの自動グループ分け
+├── AddressSuggestions.swift アドレスバーの候補
+├── DownloadManager.swift   ダウンロード棚
+├── ExternalScheme.swift    mailto: などを担当アプリへ引き渡す
+├── MediaPermission.swift   カメラ・マイクのサイトごとの許可
+├── SleepBlocker.swift      再生中のスリープ抑制
+├── IMEGuard.swift          日本語入力中の誤発防止
 ├── PrivacyManager.swift    閲覧データの削除
 ├── Updater.swift           Sparkle
-└── SettingsView.swift      設定画面
+├── SettingsView.swift      設定画面
+└── Acknowledgements.swift  同梱しているものの表記
 ```
 
 ## 使用しているもの

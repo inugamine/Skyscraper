@@ -291,4 +291,75 @@ extension WebExtensionManager: WKWebExtensionControllerDelegate {
             manager.selectedTab?.webView.window?.isKeyWindow == true
         } ?? windows.first
     }
+
+    // アイコンやバッジが変わった。
+    //
+    // uBOL はページごとに遮断数をバッジへ出すので、ここが頻繁に呼ばれる。
+    // action はタブごとに違う実体なので、associatedTab を見て
+    // 該当する Tab に直接知らせる（全タブを起こすと無駄が多い）
+    func webExtensionController(_ controller: WKWebExtensionController,
+                                didUpdate action: WKWebExtension.Action,
+                                forExtensionContext context: WKWebExtensionContext) {
+        guard let tab = action.associatedTab as? Tab else { return }
+        tab.extensionActionsDidChange()
+    }
+
+    // 拡張が popup を出したいと言ってきた。
+    //
+    // ツールバーのボタンを押して performAction(for:) を呼んだ場合も、
+    // 拡張側の JS が自発的に開こうとした場合も、どちらもここに来る。
+    //
+    // NSPopover は WebKit が組み立て済みで action.popupPopover に入っている。
+    // 中身の WebView も寸法調整も自動で、閉じれば closePopup() まで呼ばれる。
+    // こちらの仕事は「どのビューの横に出すか」を決めることだけだ
+    func webExtensionController(_ controller: WKWebExtensionController,
+                                presentActionPopup action: WKWebExtension.Action,
+                                for context: WKWebExtensionContext,
+                                completionHandler: @escaping ((any Error)?) -> Void) {
+        guard let popover = action.popupPopover else {
+            completionHandler(nil)
+            return
+        }
+
+        // ボタンの実体を探す。
+        // 鍵は uniqueIdentifier（登録側と必ず揃えること）
+        let anchor = ExtensionActionAnchorRegistry.shared.view(
+            forExtension: context.uniqueIdentifier
+        )
+
+        if let anchor {
+            popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
+        } else if let webView = (action.associatedTab as? Tab)?.webView,
+                  webView.window != nil {
+            // ボタンの実体が掴めなかった場合の逃げ道。
+            // WebView の上端中央を基準にする——contentView を使うと
+            // 座標系の上下で窓の外に出てしまう
+            let rect = CGRect(x: webView.bounds.midX - 1, y: 0, width: 2, height: 2)
+            popover.show(relativeTo: rect, of: webView, preferredEdge: .maxY)
+        }
+
+        completionHandler(nil)
+    }
+
+    // 拡張の設定ページを開きたい。
+    //
+    // uBOL の popup 右下の歯車から runtime.openOptionsPage() が呼ばれ、
+    // ここが未実装だと "It is not implemented" で弾かれる。
+    //
+    // 設定ページは webkit-extension:// スキームで、
+    // 拡張専用の configuration で作った WebView からしか開けない。
+    // 通常のタブでは遷移が取り消されるので、専用の窓を立てる
+    func webExtensionController(_ controller: WKWebExtensionController,
+                                openOptionsPageFor context: WKWebExtensionContext,
+                                completionHandler: @escaping ((any Error)?) -> Void) {
+        if WebExtensionOptionsWindowController.shared.show(for: context) {
+            completionHandler(nil)
+        } else {
+            completionHandler(NSError(
+                domain: "net.live-on.inugamine.Skyscraper",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "The options page could not be opened."]
+            ))
+        }
+    }
 }

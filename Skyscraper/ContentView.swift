@@ -640,6 +640,16 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // ブロックしたポップアップ（知らせバーに出す）
     @Published var blockedPopups: [BlockedPopup] = []
 
+    // 拡張機能のボタンを描き直す合図。
+    // アイコンやバッジは WKWebExtension.Action が持っていて、
+    // 変わったことはデリゲート（didUpdate action:）でしか分からない。
+    // 値そのものを持たず、「変わった」という事実だけを数えて View を起こす
+    @Published var extensionActionRevision: Int = 0
+
+    func extensionActionsDidChange() {
+        extensionActionRevision &+= 1
+    }
+
     // 読み込みに失敗した顛末。nil なら何も起きていない
     @Published var loadError: PageError?
 
@@ -4299,6 +4309,10 @@ struct BrowserPane: View {
     // 見た目も動きも変わらない——置き場所を移しただけだ
     @ViewBuilder
     private var trailingControls: some View {
+        // 拡張機能のボタン。
+        // 拡張が無ければ何も出ないので、幅を食わない
+        WebExtensionActionBar(tab: tab)
+
         // リーダーモードボタン。本文のあるページでだけ現れる
         if tab.isReaderAvailable {
             Button {

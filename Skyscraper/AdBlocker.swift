@@ -2,28 +2,23 @@
 //  AdBlocker.swift
 //  Skyscraper
 //
-//  拡張機能（uBlock Origin Lite）の穴を埋める、国内向けの補完ルール。
+//  拡張機能（uBlock Origin Lite）が構造上できない後始末をする。
 //
 //  ── 分担 ──
-//  通信の遮断そのものは uBOL が受け持つ。あちらは EasyList / EasyPrivacy /
-//  Peter Lowe's list を内蔵し、WebKit が DNR をエンジンレベルで実行する
-//  （変換済みのルールは 120MB 規模になる）。追加も更新も自動だ。
+//  通信の遮断は全部 uBOL の仕事だ。
+//  EasyList / EasyPrivacy / Peter Lowe's に加え、設定画面から
+//  AdGuard Japanese（jpn-1）を有効にしてあるので、
+//  国内のアドネットワークも含めてこちらが手を出す必要はない。
+//  リストの更新も uBOL 側で完結する。
 //
-//  だが、それでも二つ穴が残る。
+//  では何が残るか。サイト固有の空枠だ。
 //
-//  1. 国内アドネットワーク
-//     uBOL の既定で有効なリストは欧米向けで、日本語圏の配信元は薄い。
-//     AdGuard Japanese 相当のリストは uBOL に同梱されているが「既定で無効」で、
-//     有効にするには拡張のポップアップ画面が要る。
-//     Skyscraper はまだ拡張のポップアップを出せない（WKWebExtensionTab には
-//     準拠したが、popup の表示は未実装）ので、ここで自前で持つ。
-//     ポップアップを出せるようになったら、この一覧は捨ててよくなる。
-//
-//  2. サイト固有の空枠
-//     通信が止まっても、枠を作っている div や section は DOM に残る。
-//     min-height が直書きされていると、そこだけ真っ白に空く。
-//     EasyList にも uBOL にも、日本のサイト固有のクラス名は入っていない。
-//     ここが今のこのファイルの主戦場だ。
+//  通信が止まっても、枠を作っている div や section は DOM に残る。
+//  min-height が直書きされていると、そこだけ真っ白に空く。
+//  特に Google Ad Manager の div（id が div-gpt-ad-<数字>）は
+//  公開フィルタリストが拾わない。id がサイトごとに違う上、
+//  前方一致で潰すのは誤爆の危険があるからだろう。
+//  自分専用のブラウザならその割り切りができる——それがここの価値だ。
 //
 //  ── 育て方 ──
 //  普段見るサイトで空枠が残っていたら、Web インスペクタで要素を掴んで
@@ -40,7 +35,7 @@ final class AdBlocker {
 
     // ルールを変えたらここの番号を上げる。
     // 識別子が変わると古いコンパイル済みキャッシュを捨てて作り直す
-    private let identifier = "skyscraper.adblock.v4"
+    private let identifier = "skyscraper.adblock.v5"
 
     private var cached: WKContentRuleList?
     private var compileTask: Task<WKContentRuleList?, Never>?
@@ -91,39 +86,25 @@ final class AdBlocker {
         }
     }
 
-    // MARK: - 通信の遮断（国内アドネットワークのみ）
+    // MARK: - 通信の遮断
 
-    // 海外の大手（doubleclick / criteo / taboola / outbrain / pubmatic 等）は
-    // uBOL の EasyList と完全に重複するので持たない。
-    // ここに残すのは、uBOL の既定リストが手薄な日本語圏の配信元だけだ。
+    // 空。通信の遮断は全部 uBOL に任せている。
     //
-    // url-filter は WebKit の限定正規表現なので、素直に「ドメイン名を含むか」で判定する。
-    // load-type: third-party により、広告会社のサイト自体を開くことは妨げない
-    private static let domesticAdDomains: [String] = [
-        "i-mobile\\.co\\.jp",
-        "im-apps\\.net",
-        "adingo\\.jp",
-        "fluct\\.jp",
-        "fout\\.jp",
-        "microad\\.jp",
-        "gmossp-sp\\.jp",
-        "impact-ad\\.jp",
-        "socdm\\.com",
-        "deqwas\\.net",
-        "logly\\.co\\.jp",
-        "gsspcln\\.jp",
-        "gssprt\\.jp",
-        "zucks\\.net",
-        "nend\\.net",
-        "ad-stir\\.com",
-        "yieldone\\.com",
-        "fam-ad\\.com",
-        "yads\\.c\\.yimg\\.jp",
-        // レコメンド型広告（記事下の「おすすめ」風の枠）
-        "popin\\.cc",
-        "dable\\.io",
-        "speee-ad\\.jp",
-    ]
+    // 以前は国内アドネットワーク（i-mobile・microad・fluct・zucks・nend 等）
+    // 22 件を自前で持っていたが、uBOL の AdGuard Japanese（jpn-1）を
+    // 有効にしたことで不要になった。
+    // 実測して、一覧を空にしても livedoor ・GIGAZINE などで
+    // 広告の中身が一切出ないことを確かめてある（AdGuard Japanese は
+    // 通信遮断 1911 件を持つ）。
+    //
+    // この配列は、今後 uBOL ではどうしても止まらない送信先が
+    // 見つかった時のために残してある。
+    //
+    // 書き方：url-filter は WebKit の限定正規表現なので、
+    // "example\\.com" のように「ドメイン名を含むか」で判定する。
+    // alternation（|）は使えないので 1 ドメイン 1 ルール。
+    // load-type: third-party により、その会社のサイト自体を開くことは妨げない
+    private static let blockedDomains: [String] = []
 
     // MARK: - 空枠の掃除
 
@@ -178,7 +159,7 @@ final class AdBlocker {
     // 二重化が必要）。エスケープは JSONSerialization に任せる
     private static var rulesJSON: String {
         // 通信遮断ルール（1ドメイン1ルール。alternation | は使えないため）
-        var rules: [[String: Any]] = domesticAdDomains.map { domain in
+        var rules: [[String: Any]] = blockedDomains.map { domain in
             [
                 "trigger": ["url-filter": domain, "load-type": ["third-party"]],
                 "action": ["type": "block"],
