@@ -94,8 +94,8 @@ echo "  ビルド番号    : $APP_BUILD"
 
 if [ "$APP_VERSION" != "$VERSION" ]; then
     echo ""
-    echo "エラー: 引数のバージョン（$VERSION）と"
-    echo "       app の MARKETING_VERSION（$APP_VERSION）が違う。"
+    echo "エラー: 引数のバージョン（${VERSION}）と"
+    echo "       app の MARKETING_VERSION（${APP_VERSION}）が違う。"
     echo "       どちらかが間違っている。"
     exit 1
 fi
@@ -142,7 +142,9 @@ for ext in "$EXT_DIR"/*/; do
     ext_version="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$ext/manifest.json" | head -1)"
     [ -n "$ext_version" ] || ext_version="?"
     ext_size="$(du -sh "$ext" | cut -f1)"
-    echo "  $name $ext_version（$ext_size）"
+    # 変数名の直後に全角括弧を置くと、bash がその先頭バイトまで
+    # 変数名として食うことがある。必ず ${} で区切る
+    echo "  ${name} ${ext_version}（${ext_size}）"
     EXT_COUNT=$((EXT_COUNT + 1))
 done
 
@@ -306,7 +308,7 @@ echo ""
 echo "次にやること:"
 echo "  ./publish.sh ${VERSION}"
 echo ""
-echo "  ・ビルド番号（$APP_BUILD）は dist/build-${VERSION}.txt に控えてあるので"
+echo "  ・ビルド番号（${APP_BUILD}）は dist/build-${VERSION}.txt に控えてあるので"
 echo "    publish.sh に手で渡す必要はない"
 echo "  ・GitHub Release・appcast.xml 更新・push・サーバー配置まで一括で行われる"
 echo ""
