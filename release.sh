@@ -147,6 +147,54 @@ if [ "$EXT_COUNT" -eq 0 ]; then
     exit 1
 fi
 
+# ───────────────────────────────────────
+# 0.3 ライセンス表記の照らし合わせ
+# ───────────────────────────────────────
+
+# uBOL は GPL-3.0 だ。「対応するソースの入手先」を示す義務があり、
+# NOTICE と THIRD-PARTY-NOTICES.md にタグを書いている。
+# UBOL_TAG を上げた時にここを直し忘れると、嘘の入手先を示すことになる。
+# 実際にビルドしたタグ（.skyscraper-version）と見比べる
+echo ""
+echo "▸ ライセンス表記を確認..."
+
+UBOL_STAMP="$EXT_DIR/uBOLite/.skyscraper-version"
+
+if [ ! -f "$UBOL_STAMP" ]; then
+    echo "  （uBOLite のタグ控えがないので飛ばす）"
+else
+    UBOL_TAG="$(cat "$UBOL_STAMP")"
+    echo "  同梱している uBOL: $UBOL_TAG"
+
+    NOTICE_NG=false
+
+    for f in NOTICE THIRD-PARTY-NOTICES.md; do
+        [ -f "$f" ] || continue
+        # ファイルの中のバージョンらしい並びを拾って、
+        # 実際のタグと違うものが混ざっていないか見る
+        stale="$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+' "$f" 2>/dev/null \
+                 | grep -v "^${UBOL_TAG}\$" | sort -u || true)"
+        if ! grep -q "$UBOL_TAG" "$f" 2>/dev/null; then
+            echo "エラー: $f に $UBOL_TAG の記述がない"
+            NOTICE_NG=true
+        elif [ -n "$stale" ]; then
+            echo "  警告: $f に古いバージョン表記が残っているかもしれない"
+            echo "$stale" | sed 's/^/        /'
+        else
+            echo "  $f OK"
+        fi
+    done
+
+    if [ "$NOTICE_NG" = true ]; then
+        echo ""
+        echo "       uBOL のタグを上げたなら、下記を直すこと。"
+        echo "       GPL-3.0 の「対応するソースの入手先」にあたる部分だ："
+        echo "       ・NOTICE                  ... built from tag X.Y.Z"
+        echo "       ・THIRD-PARTY-NOTICES.md  ... 同梱しているバージョン / tree の URL"
+        exit 1
+    fi
+fi
+
 # ─────────────────────────────────────────
 # 1. Sparkle 用の zip を作る
 # ─────────────────────────────────────────
