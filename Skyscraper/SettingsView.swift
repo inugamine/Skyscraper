@@ -15,6 +15,7 @@ struct SettingsView: View {
     @AppStorage(SleepBlocker.enabledKey) private var preventsSleepDuringVideo = true
     @State private var showingAcknowledgements = false
     @State private var showingPasswords = false
+    @State private var showingExtensions = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -70,6 +71,32 @@ struct SettingsView: View {
             }
             .toggleStyle(.switch)
             .tint(Deco.gold)
+            .padding(.bottom, 22)
+
+            // ══ 拡張機能 ══
+            sectionHeader("Extensions")
+
+            HStack(spacing: 12) {
+                Button {
+                    showingExtensions = true
+                } label: {
+                    Text("Manage Extensions…")
+                        .font(.system(size: 11, design: .serif))
+                        .tracking(1)
+                        .foregroundColor(Deco.gold)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .overlay(Hexagon(inset: 6).stroke(Deco.faintGold, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+
+                Text(Self.extensionSummary)
+                    .font(.system(size: 10, design: .serif))
+                    .foregroundColor(Deco.dimGold)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer()
+            }
             .padding(.bottom, 22)
 
             // ══ プライバシー ══
@@ -267,7 +294,7 @@ struct SettingsView: View {
             }
         }
         .padding(24)
-        .frame(width: 500, height: 790)
+        .frame(width: 500, height: 880)
         .background(Deco.ink)
         .preferredColorScheme(.dark)
         .animation(.easeInOut(duration: 0.2), value: privacy.lastClearedMessage)
@@ -276,6 +303,9 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showingPasswords) {
             PasswordListView()
+        }
+        .sheet(isPresented: $showingExtensions) {
+            WebExtensionListView()
         }
         // 確認ダイアログ
         .confirmationDialog(
@@ -308,6 +338,18 @@ struct SettingsView: View {
         let short = info?["CFBundleShortVersionString"] as? String ?? "?"
         let build = info?["CFBundleVersion"] as? String ?? "?"
         return "Skyscraper \(short) (\(build))"
+    }
+
+    // 設定画面に出す一行の要約。
+    // 一覧の中身はシート側で見せるので、ここは数だけでいい。
+    //
+    // 「～ extensions are on」と書かないのは、英語では単数の時に
+    // are / extensions が崩れるため。数だけを並べれば両言語で破綻がない
+    private static var extensionSummary: LocalizedStringKey {
+        let all = WebExtensionManager.shared.loaded
+        guard !all.isEmpty else { return "No extensions are loaded." }
+        let active = all.filter(\.isEnabled).count
+        return "\(active) of \(all.count) enabled."
     }
 
     private func sectionHeader(_ title: LocalizedStringKey) -> some View {

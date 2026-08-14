@@ -42,6 +42,16 @@ struct SkyscraperApp: App {
     @StateObject private var bookmarks = BookmarkStore()
     @StateObject private var updater = Updater()
 
+    init() {
+        // 拡張機能を読み込む。
+        // 置き場所は ~/Library/Application Support/Skyscraper/Extensions/。
+        //
+        // WKWebExtension の生成が async なのでここで待てない。
+        // 最初のタブより後になる可能性があるが、controller 自体は
+        // 既に全 WKWebView に刺さっているので、後から拡張を足しても届く
+        Task { await WebExtensionManager.shared.loadAll() }
+    }
+
     var body: some Scene {
         WindowGroup(id: "browser") {
             ContentView(bookmarks: bookmarks)

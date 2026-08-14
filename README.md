@@ -51,9 +51,21 @@ Apple Foundation Models（オンデバイス）でタブの内容を判断し、
 
 | | |
 |---|---|
-| 広告ブロック | `WKContentRuleList` で約 40 ドメイン。fluct・Geniee・Zucks・nend など国内の広告網にも対応しています |
+| 広告ブロック | [uBlock Origin Lite](https://github.com/gorhill/uBlock) を同梱しています。EasyList などのフィルタを WebKit がエンジンレベルで実行します。国内の広告網（fluct・Geniee・Zucks・nend など）と、遮断後に残る空枠は自前の `WKContentRuleList` で補っています |
 | YouTube | 再生前の広告を検出して飛ばします |
 | ポップアップ | `window.open()` を監視します。ただし**黙って捨てることはしません**。止めたことをお知らせして、その場で開き直せるようにしています（OAuth や決済の window を壊さないためです） |
+
+### 拡張機能
+
+Safari や Chrome と同じ Web Extensions に対応しています（WebKit の `WKWebExtension`）。
+
+標準で uBlock Origin Lite を同梱していますので、入れた直後から広告が消えます。
+自分で拡張を追加したい場合は、展開済みのフォルダ（`manifest.json` が入った状態）を
+`~/Library/Application Support/Skyscraper/Extensions/` に置いて再起動してください。
+
+> [!NOTE]
+> ツールバーの拡張ボタン（popup）はまだ実装していません。
+> 拡張側の設定画面を開く操作は現時点ではできません。
 
 ### 読む
 
@@ -92,11 +104,27 @@ Developer ID 署名と Apple の公証を済ませていますので、Gatekeepe
 ```sh
 git clone https://github.com/inugamine/Skyscraper.git
 cd Skyscraper
+./fetch-extensions.sh      # 同梱する拡張機能を用意する（初回のみ、数分）
 open Skyscraper.xcodeproj
 ```
 
 Xcode 26.6 以降が必要です。ご自身の環境でビルドする場合は、
 Target → Signing & Capabilities の Team をご自身のものに変更してください。
+
+### fetch-extensions.sh について
+
+同梱する uBlock Origin Lite は生成物で 50MB を超えるため、
+リポジトリには含めていません。代わりに、取得から配置までを
+[fetch-extensions.sh](fetch-extensions.sh) が一括で行います。
+
+- Node.js 17.5.0 以上、`git`、`make`、およびネット接続が必要です
+- 同梱するバージョンはスクリプト先頭の `UBOL_TAG` で固定しています
+- 実行しなくてもビルドは通ります（広告遮断が効かないだけです）
+
+> [!IMPORTANT]
+> Build Settings の **User Script Sandboxing** を `No` にしてください。
+> 拡張機能をアプリに写す Run Script フェーズが、
+> サンドボックスによって `Operation not permitted` で弾かれます。
 
 
 > [!IMPORTANT]
@@ -111,7 +139,9 @@ Skyscraper/
 ├── SkyscraperApp.swift     エントリポイント、メニュー、ウィンドウ管理
 ├── ContentView.swift       本体。タブ・ツールバー・WebView・アール・デコの意匠
 ├── TabGrouper.swift        Foundation Models によるタブの自動グループ分け
-├── AdBlocker.swift         WKContentRuleList の組み立て
+├── AdBlocker.swift         WKContentRuleList の組み立て（拡張機能の補完）
+├── WebExtensionManager.swift  拡張機能の読み込みと管理
+├── WebExtensionBridge.swift   拡張から見たタブと窓の橋渡し
 ├── PopupBlocker.swift      window.open() の監視と許可リスト
 ├── ExternalScheme.swift    mailto: などを担当アプリへ引き渡す
 ├── ReaderMode.swift        Readability.js の橋渡し
@@ -127,6 +157,7 @@ Skyscraper/
 
 - [Sparkle](https://sparkle-project.org/) — 自動更新 (MIT)
 - [Readability.js](https://github.com/mozilla/readability) — Mozilla (Apache-2.0)
+- [uBlock Origin Lite](https://github.com/gorhill/uBlock) — 広告遮断 (GPL-3.0)。拡張機能として同梱しており、本体のコードとリンクされることはありません
 - Apple Foundation Models / NaturalLanguage / AuthenticationServices
 
 ## ライセンス

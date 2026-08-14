@@ -17,3 +17,10 @@ Copyright (c) 2006-2017 Andy Matuschak, Elgato Systems GmbH, Kornel Lesiński,
 Mayur Pawashe, C.W. Betts, Petroules Corporation, Big Nerd Ranch.
 Licensed under the MIT License.
 https://sparkle-project.org/
+
+uBlock Origin Lite
+Copyright (c) Raymond Hill and uBlock Origin contributors.
+Licensed under the GNU General Public License, Version 3.
+Bundled as a standalone web extension; not linked with Skyscraper's own code.
+Unmodified, built from tag 1.73.0.
+https://github.com/gorhill/uBlock

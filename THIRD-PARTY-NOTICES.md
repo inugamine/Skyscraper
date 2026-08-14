@@ -184,7 +184,49 @@ Apache License 2.0 の全文は、本リポジトリの [LICENSE](LICENSE) を�
 
 ---
 
-## 3. Apple のフレームワーク
+## 3. uBlock Origin Lite
+
+- 用途: 広告・トラッカーの遮断（拡張機能として同梱）
+- 配布元: https://github.com/gorhill/uBlock
+- 同梱しているバージョン: タグ `1.73.0`
+- ライセンス: GNU General Public License, Version 3
+
+著作権者: Raymond Hill および uBlock Origin の貢献者
+
+### 同梱の形
+
+`Skyscraper.app/Contents/Resources/Extensions/uBOLite/` に、
+独立した Web Extension として置いています。
+Skyscraper 本体のコードとリンクされることはなく、
+WebKit の `WKWebExtension` API 経由で読み込まれるだけです。
+このフォルダを取り除いても Skyscraper は動作します。
+
+GPL-3.0 の全文は、同梱される
+`Extensions/uBOLite/LICENSE.txt` に含まれています。
+
+### 対応するソースコード（GPL-3.0 第6条）
+
+同梱しているのは、上記タグのソースから
+`make mv3-safari` で生成したものです。
+ソースは配布元リポジトリの同タグから入手できます。
+
+https://github.com/gorhill/uBlock/tree/1.73.0
+
+取得から配置までの手順は、本リポジトリの
+[fetch-extensions.sh](fetch-extensions.sh) にそのまま書かれています。
+
+### 改変の有無
+
+ソースコードに一切手を加えていません。`manifest.json` も未改変です。
+
+ただし、配布物の大きさを抑えるために
+`rulesets/debug/` ディレクトリ（約 42MB）を取り除いています。
+これは各フィルタセットを人間が検証するための展開形で、
+`manifest.json` から一切参照されておらず、実行時には使われません。
+
+---
+
+## 4. Apple のフレームワーク
 
 WebKit / SwiftUI / FoundationModels / NaturalLanguage / AuthenticationServices などは
 Apple Inc. が macOS SDK の一部として提供するものであり、

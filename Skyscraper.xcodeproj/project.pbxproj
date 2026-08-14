@@ -73,6 +73,7 @@
 				F15697D73001792F00C19AB2 /* Sources */,
 				F15697D83001792F00C19AB2 /* Frameworks */,
 				F15697D93001792F00C19AB2 /* Resources */,
+				F10335BB302F4F6D00AF2F9B /* Copy Bundled Extensions */,
 			);
 			buildRules = (
 			);
@@ -136,6 +137,28 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		F10335BB302F4F6D00AF2F9B /* Copy Bundled Extensions */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Copy Bundled Extensions";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "SRC=\"${SRCROOT}/Extensions\"\nDST=\"${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Extensions\"\n\nif [ -d \"$SRC\" ]; then\n    rm -rf \"$DST\"\n    mkdir -p \"$DST\"\n    cp -R \"$SRC/\" \"$DST/\"\n    echo \"note: bundled web extensions from $SRC\"\nelse\n    echo \"warning: $SRC が無い。./fetch-extensions.sh を先に叩くこと（拡張なしでビルドは通る）\"\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		F15697D73001792F00C19AB2 /* Sources */ = {
@@ -284,6 +307,7 @@
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Skyscraper/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Skyscraper;
@@ -320,6 +344,7 @@
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Skyscraper/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Skyscraper;

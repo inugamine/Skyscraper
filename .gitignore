@@ -7,6 +7,11 @@ DerivedData/
 *.dmg
 *.zip
 
+# 同梱する拡張機能をビルドして置く場所。
+# uBlock Origin Lite の中身は生成物で 50MB 超えあるので追跡しない。
+# 作り方は fetch-extensions.sh に書いてあり、そちらは追跡する
+Extensions/
+
 # ─────────────────────────────────
 # Xcode
 # ─────────────────────────────────
@@ -38,5 +43,6 @@ Icon
 # 追跡するもの（念のため明示）
 # ─────────────────────────────────
 # release.sh          … リリース手順そのもの。環境が飛んでも復元できるように残す
+# fetch-extensions.sh … 同梱拡張の取得手順。これがあれば Extensions/ は何度でも作り直せる
 # dmg-background.png  … dmg の背景。ソース素材として残す
 # appcast.xml         … 自動更新の台帳。GitHub から参照されるので必須

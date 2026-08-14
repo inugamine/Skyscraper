@@ -583,6 +583,13 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         if popup != nil {
             configuration.userContentController = WKUserContentController()
         }
+        // 拡張機能（Web Extensions）を有効にする。
+        // 管理役は全タブ・全ウィンドウで一つを共有する。
+        // popup 経由で渡される configuration は開いた側の複製なので、
+        // そちらには既に刺さっている——上書きしない
+        if configuration.webExtensionController == nil {
+            configuration.webExtensionController = WebExtensionManager.shared.controller
+        }
         // 動画の全画面ボタン（Fullscreen API）を使えるようにする。
         // macOS の WKWebView はこれが既定で無効で、ページが
         // requestFullscreen() を呼んでも黙って拒否される（おかげで
@@ -1099,7 +1106,10 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         // 実機 Safari（macOS 27 / Version 27.0）の UA を名乗って回避する。
         // OS 部分の 10_15_7 は Safari 自身が凍結している値なので、これで正しい
         webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Safari/605.1.15"
-        // 広告・トラッカーの遮断ルールを適用（初回はコンパイル後に非同期で効く）
+        // 広告の空枠を隠す。
+        // 通信の遮断自体は拡張機能（uBOL）が受け持つので、
+        // こちらは遮られた後に残る国内サイト固有の枠を掃除する。
+        // 詳しい分担は AdBlocker.swift の冒頭に書いた
         AdBlocker.shared.apply(to: webView)
         webView.navigationDelegate = self
         webView.uiDelegate = self
@@ -2043,9 +2053,14 @@ private struct SessionState: Codable {
 }
 
 @MainActor
-final class TabManager: ObservableObject {
+final class TabManager: NSObject, ObservableObject {
     @Published var tabs: [Tab] = [] {
-        didSet { scheduleSave() }
+        didSet {
+            // 拡張機能へ「タブが開いた／閉じた」を知らせる。
+            // 挿入経路が六つあるので、個別に差し込まずここで差分を取る
+            WebExtensionManager.shared.tabsChanged(from: oldValue, to: tabs, in: self)
+            scheduleSave()
+        }
     }
     @Published var selectedID: UUID? {
         didSet {
@@ -2054,6 +2069,11 @@ final class TabManager: ObservableObject {
             PasswordSuggestionPanel.shared.hide()
             // 復元されたまま眠っているタブなら、ここで初めて読みに行く
             selectedTab?.activateIfDeferred()
+            // 拡張機能へ「見ているタブが変わった」を知らせる
+            WebExtensionManager.shared.tabDidActivate(
+                selectedTab,
+                previous: tabs.first { $0.id == oldValue }
+            )
             // スリープ抑制は「今見ているタブ」にだけ効かせる。
             // 見張り側からは誰が選ばれているか分からないので、ここから告げる。
             // 窓を閉じた時（tearDownTabs で nil になる）もここを通る
@@ -2129,11 +2149,13 @@ final class TabManager: ObservableObject {
         isClosed = false
         // 万が一 onDisappear の誤発火で片付けられていた場合の保険
         if tabs.isEmpty { addTab() }
+        WebExtensionManager.shared.windowDidOpen(self)
     }
 
     func markClosed() {
         guard !Self.isTerminating else { return }
         isClosed = true
+        WebExtensionManager.shared.windowDidClose(self)
         Self.saveAll()
 
         // まずは即座に鳴っているものを止める。
@@ -2212,7 +2234,8 @@ final class TabManager: ObservableObject {
         UserDefaults.standard.set(data, forKey: sessionKey)
     }
 
-    init() {
+    override init() {
+        super.init()
         // 名簿に載る順＝窓が生まれた順。保存もこの順で並ぶ
         Self.registry.append(WeakManager(manager: self))
         restoreSession()
