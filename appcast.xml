@@ -7,6 +7,28 @@
     <language>en</language>
 
     <item>
+      <title>Version 1.12</title>
+      <pubDate>Sat, 15 Aug 2026 02:20:50 +0900</pubDate>
+      <sparkle:version>12</sparkle:version>
+      <sparkle:shortVersionString>1.12</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>Skyscraper 1.12</h2>
+        <ul>
+          <li>動画再生中にスクリーンセーバーを起動しないようにしました。</li>
+          <li>閉じたタブを再度開き直した際に、「戻る」機能が使えるようになりました。</li>
+          <li>パスワード.app から書き出したパスワードをインポートできるようになりました。</li>
+          <li>というかパスワードマネージャ機能を試しに搭載しました。(エクスポートはできません)</li>
+          <li>Command+Option+T で選択中の文字を Apple Foundation Models の力で翻訳できるようになりました。</li>
+          <li>広告ブロックの仕組みを従来の手入力のものから uBlock Origin Lite で行うようにしました。</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://github.com/inugamine/Skyscraper/releases/download/v1.12/Skyscraper-1.12.zip"
+        sparkle:edSignature="bB6SZRcU8dK5bcQEDOGCjMwk7UiNklZrFc6V/rfUNWie+vJvO6xvBrIUFm6vGs7nucT3RWcrMHYPHPekaf1dAQ=="
+        length="12838376"
+        type="application/octet-stream" />
+    </item>    <item>
       <title>Version 1.11</title>
       <pubDate>Sun, 02 Aug 2026 11:22:58 +0900</pubDate>
       <sparkle:version>11</sparkle:version>
