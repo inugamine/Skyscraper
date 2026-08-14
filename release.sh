@@ -135,7 +135,12 @@ for ext in "$EXT_DIR"/*/; do
         echo "エラー: $name に manifest.json がない"
         exit 1
     fi
-    ext_version="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('version','?'))" "$ext/manifest.json" 2>/dev/null || echo '?')"
+    # manifest から "version": "x.y.z" を拾う。
+    # set -u の下では代入が飛ぶと即死するので、
+    # 先に空で初期化してから入れる
+    ext_version=""
+    ext_version="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$ext/manifest.json" | head -1)"
+    [ -n "$ext_version" ] || ext_version="?"
     ext_size="$(du -sh "$ext" | cut -f1)"
     echo "  $name $ext_version（$ext_size）"
     EXT_COUNT=$((EXT_COUNT + 1))
