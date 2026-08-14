@@ -127,6 +127,18 @@ Target → Signing & Capabilities の Team をご自身のものに変更して�
 - Node.js 17.5.0 以上、`git`、`make`、およびネット接続が必要です
 - 同梱するバージョンはスクリプト先頭の `UBOL_TAG` で固定しています
 - 実行しなくてもビルドは通ります（広告遮断が効かないだけです）
+- 二度目以降は取得済みを見て即終了しますので、毎回叩いても構いません
+
+```sh
+./fetch-extensions.sh           # 取得済みなら何もしない
+./fetch-extensions.sh --force   # 作り直す
+```
+
+> [!TIP]
+> `UBOL_TAG` が固定するのは uBOL の**コード**だけです。
+> フィルターリストはビルド時に配信元から落ちてくるため、
+> 同じタグでも作った日によって中身が違います。
+> リリース前には `--force` で取り直してください。
 
 > [!IMPORTANT]
 > Build Settings の **User Script Sandboxing** を `No` にしてください。

@@ -3,11 +3,19 @@
 # fetch-extensions.sh — 同梱する拡張機能を取ってきて組み立てる
 #
 # 使い方:
-#   ./fetch-extensions.sh
+#   ./fetch-extensions.sh           取得済みなら何もしない
+#   ./fetch-extensions.sh --force   控えを無視して作り直す
 #
 # やること:
 #   uBlock Origin Lite を指定のタグからビルドして、
 #   Skyscraper/Extensions/uBOLite/ に置く。
+#
+# --force がいる場面:
+#   UBOL_TAG が固定するのは uBOL の「コード」だけで、
+#   フィルタリスト（EasyList・AdGuard Japanese 等）は
+#   make の実行時に配信元から落ちてくる。
+#   つまり同じタグでも、今日と一ヶ月後では中身が違う。
+#   リリース前は --force で最新のフィルタを取り直すこと。
 #
 # ここで作られるものは生成物なので git には入れない（.gitignore 済み）。
 # clone した直後は Extensions/ が空なので、ビルドの前に一度これを叩くこと。
@@ -20,6 +28,29 @@
 #
 
 set -euo pipefail
+
+# ─────────────────────────────────────────
+# 引数
+# ─────────────────────────────────────────
+
+FORCE=false
+
+for arg in "$@"; do
+    case "$arg" in
+        --force|-f)
+            FORCE=true
+            ;;
+        --help|-h)
+            sed -n '2,20p' "$0" | sed 's/^#\{0,1\} \{0,1\}//'
+            exit 0
+            ;;
+        *)
+            echo "知らない引数: $arg"
+            echo "使い方: $0 [--force]"
+            exit 1
+            ;;
+    esac
+done
 
 # ─────────────────────────────────────────
 # 設定
@@ -49,12 +80,17 @@ echo "════════════════════════�
 echo " 同梱する拡張機能の取得"
 echo "══════════════════════════════════════"
 
-# 既に同じタグで取得済みなら何もしない
-if [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$UBOL_TAG" ]; then
+# 既に同じタグで取得済みなら何もしない（--force で無視する）
+if [ "$FORCE" = false ] && [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$UBOL_TAG" ]; then
     echo ""
     echo "▸ uBlock Origin Lite $UBOL_TAG は取得済み。何もしない"
-    echo "  （作り直したい場合は $DEST を消してから叩く）"
+    echo "  フィルタリストを最新にしたいなら --force を付けて叩くこと"
     exit 0
+fi
+
+if [ "$FORCE" = true ]; then
+    echo ""
+    echo "▸ --force: 取得済みでも作り直す"
 fi
 
 # ─────────────────────────────────────────
