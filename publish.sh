@@ -3,15 +3,19 @@
 # publish.sh — release.sh で作った成果物を世に出す
 #
 # 使い方:
-#   ./publish.sh <バージョン> <ビルド番号> [リリースノートのファイル]
+#   ./publish.sh <バージョン> [リリースノートのファイル]
 #
 # 例:
-#   ./publish.sh 1.1 2 notes-1.1.md
+#   ./publish.sh 1.1 notes-1.1.md
 #
 # 前提:
 #   - 先に ./release.sh を通してあること（dist/ に dmg と zip がある）
 #   - gh コマンドがログイン済み（gh auth login）
 #   - raspi5 に鍵で ssh できること
+#
+# ビルド番号は release.sh が dist/build-<バージョン>.txt に控えているので、
+# 手で渡す必要はない。app の中身から直接読んだ値なので、
+# 打ち間違えで appcast が嘘をつく事故が起きない
 #
 # やること:
 #   1. zip の長さと Sparkle 署名を取る
@@ -38,18 +42,18 @@ SERVER_DIR="/var/www/flask_static/skyscraper"
 # 引数チェック
 # ─────────────────────────────────────────
 
-if [ $# -lt 2 ]; then
-    echo "使い方: $0 <バージョン> <ビルド番号> [リリースノートのファイル]"
-    echo "例:     $0 1.1 2 notes-1.1.md"
+if [ $# -lt 1 ]; then
+    echo "使い方: $0 <バージョン> [リリースノートのファイル]"
+    echo "例:     $0 1.1 notes-1.1.md"
     exit 1
 fi
 
 VERSION="$1"
-BUILD="$2"
-NOTES_FILE="${3:-}"
+NOTES_FILE="${2:-}"
 
 DMG="dist/Skyscraper-$VERSION.dmg"
 ZIP="dist/Skyscraper-$VERSION.zip"
+BUILD_FILE="dist/build-$VERSION.txt"
 
 for f in "$DMG" "$ZIP"; do
     if [ ! -f "$f" ]; then
@@ -57,6 +61,21 @@ for f in "$DMG" "$ZIP"; do
         exit 1
     fi
 done
+
+# ビルド番号は release.sh が app の Info.plist から読んで控えている。
+# これが無いなら、古い release.sh で作ったか、手で dist/ を触っている
+if [ ! -f "$BUILD_FILE" ]; then
+    echo "エラー: $BUILD_FILE がない。"
+    echo "       ./release.sh を通し直せ。"
+    exit 1
+fi
+
+BUILD="$(cat "$BUILD_FILE")"
+
+if ! [[ "$BUILD" =~ ^[0-9]+$ ]]; then
+    echo "エラー: ビルド番号が数字じゃない: $BUILD"
+    exit 1
+fi
 
 if ! command -v gh >/dev/null 2>&1; then
     echo "エラー: gh がない。brew install gh してから gh auth login しろ。"
@@ -77,6 +96,31 @@ fi
 echo "══════════════════════════════════════"
 echo " Skyscraper $VERSION (build $BUILD) を公開する"
 echo "══════════════════════════════════════"
+
+# ───────────────────────────────────────
+# 0. ビルド番号が前に進んでいるか
+# ───────────────────────────────────────
+
+# Sparkle はこの番号だけを見て新旧を判断する。
+# 上げ忘れると、公開しても誰にも更新が降らない。
+# appcast に入っている直近の番号と見比べて、進んでいなければ弾く
+PREV_BUILD="$(sed -n 's/.*<sparkle:version>\([0-9]*\)<\/sparkle:version>.*/\1/p' appcast.xml | head -1)"
+
+if [ -n "$PREV_BUILD" ]; then
+    if [ "$BUILD" -le "$PREV_BUILD" ]; then
+        echo ""
+        echo "エラー: ビルド番号が前に進んでいない。"
+        echo "       appcast の最新: $PREV_BUILD"
+        echo "       今回の app  : $BUILD"
+        echo ""
+        echo "       Sparkle はこの番号だけで新旧を判断する。"
+        echo "       Xcode の CURRENT_PROJECT_VERSION を上げて"
+        echo "       Archive からやり直せ。"
+        exit 1
+    fi
+    echo ""
+    echo "▸ ビルド番号: $PREV_BUILD → $BUILD"
+fi
 
 # ─────────────────────────────────────────
 # 1. Sparkle 署名と長さ
