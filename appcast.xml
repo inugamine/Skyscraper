@@ -7,6 +7,24 @@
     <language>en</language>
 
     <item>
+      <title>Version 1.13</title>
+      <pubDate>Sat, 15 Aug 2026 10:12:57 +0900</pubDate>
+      <sparkle:version>13</sparkle:version>
+      <sparkle:shortVersionString>1.13</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>Skyscraper 1.13</h2>
+        <ul>
+          <li>「戻る」、「進む」ボタン長押しで行き来したページの履歴が出るようになりました。</li>
+          <li>ブックマークのインポート機能を実装しました。(エクスポートはできません)</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://github.com/inugamine/Skyscraper/releases/download/v1.13/Skyscraper-1.13.zip"
+        sparkle:edSignature="AlFe8sjgdJtRmxuepKrXEZgjQpSR4DEzsdSlV9YmX2y7780bgKO8rIz+9c0Bvd+1NmIGwNZcOOeOd7mTvW2HBQ=="
+        length="12874186"
+        type="application/octet-stream" />
+    </item>    <item>
       <title>Version 1.12</title>
       <pubDate>Sat, 15 Aug 2026 02:20:50 +0900</pubDate>
       <sparkle:version>12</sparkle:version>
