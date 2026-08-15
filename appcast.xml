@@ -7,6 +7,25 @@
     <language>en</language>
 
     <item>
+      <title>Version 1.14</title>
+      <pubDate>Sat, 15 Aug 2026 16:43:20 +0900</pubDate>
+      <sparkle:version>14</sparkle:version>
+      <sparkle:shortVersionString>1.14</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>Skyscraper 1.14</h2>
+        <ul>
+          <li>iCloud を用いたブックマークの同期機能を試しに実装しました</li>
+          <li>拡張機能のアイコンを非表示にする機能を実装しました</li>
+          <li>その他細かい修正や調整を行いました</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://github.com/inugamine/Skyscraper/releases/download/v1.14/Skyscraper-1.14.zip"
+        sparkle:edSignature="YJEnfzHQ6d6AD1h0QVtJCePux0gorKPLjTNsUNv/3IEvPmJuF5+gfrAA8I6pnteuiiVyjFUrZ6a3M8cFyXiuBA=="
+        length="12907732"
+        type="application/octet-stream" />
+    </item>    <item>
       <title>Version 1.13</title>
       <pubDate>Sat, 15 Aug 2026 10:12:57 +0900</pubDate>
       <sparkle:version>13</sparkle:version>
