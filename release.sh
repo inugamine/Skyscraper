@@ -215,14 +215,14 @@ if [ -n "$EXPIRY" ]; then
         NOW_EPOCH="$(date "+%s")"
         DAYS_LEFT=$(( (EXPIRY_EPOCH - NOW_EPOCH) / 86400 ))
         if [ "$DAYS_LEFT" -lt 0 ]; then
-            echo "エラー: プロファイルの期限が切れている（$EXPIRY）"
+            echo "エラー: プロファイルの期限が切れている（${EXPIRY}）"
             echo "       このまま出すと、配った先で起動しない。"
             exit 1
         elif [ "$DAYS_LEFT" -lt 365 ]; then
-            echo "  警告: 期限まで残り ${DAYS_LEFT} 日（$EXPIRY）"
+            echo "  警告: 期限まで残り ${DAYS_LEFT} 日（${EXPIRY}）"
             echo "        切れる前にプロファイルを作り直すこと"
         else
-            echo "  期限: $EXPIRY（残り ${DAYS_LEFT} 日）"
+            echo "  期限: ${EXPIRY}（残り ${DAYS_LEFT} 日）"
         fi
     else
         echo "  期限: $EXPIRY"
@@ -266,7 +266,7 @@ if echo "$ECHO_ENT" | grep -q "icloud-container-environment"; then
         | grep -A1 "icloud-container-environment" \
         | sed -n 's/.*<string>\(.*\)<\/string>.*/\1/p' | head -1)"
     if [ "$ENV_VALUE" != "Production" ]; then
-        echo "エラー: CloudKit の環境が Production ではない（$ENV_VALUE）"
+        echo "エラー: CloudKit の環境が Production ではない（${ENV_VALUE}）"
         echo "       Development のまま出すと、配った先は空の物置を見る。"
         echo "       Developer ID で署名し直すこと。"
         exit 1
