@@ -67,7 +67,7 @@ struct SkyscraperApp: App {
 
         // 設定画面（⌘, で開く。Sparkle のダイアログが案内する「設定」の実体）
         Settings {
-            SettingsView(updater: updater)
+            SettingsView(updater: updater, bookmarks: bookmarks)
         }
     }
 }

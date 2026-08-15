@@ -155,6 +155,129 @@ if [ "$EXT_COUNT" -eq 0 ]; then
 fi
 
 # ───────────────────────────────────────
+# 0.25 プロビジョニングプロファイルの確認
+# ───────────────────────────────────────
+
+# iCloud（CloudKit）を使うようになった時点で、この app は
+# 「プロファイルが埋まっていないと動かない」代物になった。
+#
+# 埋め忘れが恐ろしいのは、こちらの手元では気づけないことだ。
+# Xcode から走らせる分には Development の署名で動いてしまうし、
+# 出荷した dmg も普通に開いてインストールできる。
+# 起動しなくなるのは配った先だけだ。
+#
+# しかも Gatekeeper はプロファイルを「毎回の起動時」に見る。
+# 期限が切れた日に、既に入っている全員の手元で一斉に起動しなくなる。
+# 出す前にここで見ておく
+echo ""
+echo "▸ プロビジョニングプロファイルを確認..."
+
+PROFILE="$APP_PATH/Contents/embedded.provisionprofile"
+
+if [ ! -f "$PROFILE" ]; then
+    echo "エラー: $PROFILE がない。"
+    echo ""
+    echo "       この app は iCloud の権限を持っているので、"
+    echo "       プロファイルが埋まっていないと配った先で起動しない。"
+    echo ""
+    echo "       Xcode の Archive → Distribute App からやり直すこと。"
+    echo "       署名なしで書き出したり、後から codesign で上書きすると"
+    echo "       このファイルが落ちる。"
+    exit 1
+fi
+
+# プロファイルは CMS で包まれているので、剥いてから中の plist を読む
+PROFILE_PLIST="$(mktemp -t skyscraper-profile)"
+trap 'rm -f "$PROFILE_PLIST"' EXIT
+
+if ! security cms -D -i "$PROFILE" -o "$PROFILE_PLIST" 2>/dev/null; then
+    echo "エラー: プロファイルを開けない（壊れている可能性）"
+    exit 1
+fi
+
+PROFILE_NAME="$(/usr/libexec/PlistBuddy -c 'Print :Name' "$PROFILE_PLIST" 2>/dev/null || echo '?')"
+echo "  名前: $PROFILE_NAME"
+
+# ── 期限 ──
+#
+# 2017年2月22日より後に作ったものは作成から18年もつので、
+# 普通は引っかからない。それでも見るのは、切れた時の被害が
+# 「配った全員の手元で起動しなくなる」という形で出るからだ。
+# 一年を切ったら知らせる
+EXPIRY="$(/usr/libexec/PlistBuddy -c 'Print :ExpirationDate' "$PROFILE_PLIST" 2>/dev/null || echo '')"
+
+if [ -n "$EXPIRY" ]; then
+    # PlistBuddy が返すのは "Sat Aug 15 15:21:00 JST 2044" の形。
+    # date に食わせて数字に直す（失敗しても止めない——
+    # 期限の読み取りに失敗したくらいで出荷を止める筋合いはない）
+    EXPIRY_EPOCH="$(date -j -f "%a %b %d %T %Z %Y" "$EXPIRY" "+%s" 2>/dev/null || echo '')"
+    if [ -n "$EXPIRY_EPOCH" ]; then
+        NOW_EPOCH="$(date "+%s")"
+        DAYS_LEFT=$(( (EXPIRY_EPOCH - NOW_EPOCH) / 86400 ))
+        if [ "$DAYS_LEFT" -lt 0 ]; then
+            echo "エラー: プロファイルの期限が切れている（$EXPIRY）"
+            echo "       このまま出すと、配った先で起動しない。"
+            exit 1
+        elif [ "$DAYS_LEFT" -lt 365 ]; then
+            echo "  警告: 期限まで残り ${DAYS_LEFT} 日（$EXPIRY）"
+            echo "        切れる前にプロファイルを作り直すこと"
+        else
+            echo "  期限: $EXPIRY（残り ${DAYS_LEFT} 日）"
+        fi
+    else
+        echo "  期限: $EXPIRY"
+    fi
+fi
+
+# ── 実際に署名へ乗った権限 ──
+#
+# 見るのは entitlements ファイルの中身ではなく、署名済みの app から
+# 取り出したものだ。書いたつもりと、実際に焼かれたものは別物になり得る
+ECHO_ENT="$(codesign -d --entitlements - --xml "$APP_PATH" 2>/dev/null || echo '')"
+
+if [ -z "$ECHO_ENT" ]; then
+    echo "エラー: app から entitlements を読めなかった"
+    exit 1
+fi
+
+for key in \
+    com.apple.developer.icloud-services \
+    com.apple.developer.icloud-container-identifiers
+do
+    if ! echo "$ECHO_ENT" | grep -q "$key"; then
+        echo "エラー: 署名に $key が乗っていない"
+        echo "       Skyscraper.entitlements が Build Settings の"
+        echo "       CODE_SIGN_ENTITLEMENTS に結ばれているか確かめること"
+        exit 1
+    fi
+done
+echo "  iCloud の権限 OK"
+
+# ── 見に行く先が本番かどうか ──
+#
+# ここが Development のまま出ると、配った先は誰も居ない物置を覗く。
+# 起動もするし操作もできるので、事故に気づくのが遅れる質の悪い失敗だ。
+#
+# この値は entitlements ファイルには書いていない。Xcode が
+# 署名の種類（Developer ID か否か）を見て自分で足す。
+# だからこそ、こちらで書いた覚えのない値を目で確かめる意味がある
+if echo "$ECHO_ENT" | grep -q "icloud-container-environment"; then
+    ENV_VALUE="$(echo "$ECHO_ENT" \
+        | grep -A1 "icloud-container-environment" \
+        | sed -n 's/.*<string>\(.*\)<\/string>.*/\1/p' | head -1)"
+    if [ "$ENV_VALUE" != "Production" ]; then
+        echo "エラー: CloudKit の環境が Production ではない（$ENV_VALUE）"
+        echo "       Development のまま出すと、配った先は空の物置を見る。"
+        echo "       Developer ID で署名し直すこと。"
+        exit 1
+    fi
+    echo "  CloudKit の環境: Production"
+else
+    echo "  警告: icloud-container-environment が署名に無い"
+    echo "        既定では Development 側を見に行く可能性がある"
+fi
+
+# ───────────────────────────────────────
 # 0.3 ライセンス表記の照らし合わせ
 # ───────────────────────────────────────
 

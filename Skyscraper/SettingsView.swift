@@ -10,9 +10,12 @@ import Foundation
 
 struct SettingsView: View {
     @ObservedObject var updater: Updater
+    // ブックマークの持ち主。同期の入り切りを伝えるためだけに受け取る
+    let bookmarks: BookmarkStore
     @StateObject private var privacy = PrivacyManager()
     @AppStorage(TabManager.restoreSessionKey) private var restoresSession = true
     @AppStorage(SleepBlocker.enabledKey) private var preventsSleepDuringVideo = true
+    @AppStorage(BookmarkSync.enabledKey) private var syncsBookmarks = true
     @State private var showingAcknowledgements = false
     @State private var showingPasswords = false
     @State private var showingExtensions = false
@@ -72,6 +75,35 @@ struct SettingsView: View {
             .toggleStyle(.switch)
             .tint(Deco.gold)
             .padding(.bottom, 22)
+
+            // ══ iCloud ══
+            sectionHeader("iCloud")
+
+            // ── ブックマークの持ち回り ──
+            //
+            // iCloud に入っていない人の所では、これを入れても
+            // 何も起きない（BookmarkSync が黙って見送る）。
+            // それでも札を出すのは、入っている上で
+            //「この Mac では持ち回したくない」人の逃げ道になるからだ
+            Toggle(isOn: $syncsBookmarks) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Sync bookmarks across your Macs")
+                        .font(.system(size: 12, design: .serif))
+                        .foregroundColor(Deco.cream)
+                    Text("Bookmarks are saved to your iCloud account. If the content differs across multiple Macs, the content from the Mac where the changes were last made takes precedence.")
+                        .font(.system(size: 10, design: .serif))
+                        .foregroundColor(Deco.dimGold)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .toggleStyle(.switch)
+            .tint(Deco.gold)
+            .padding(.bottom, 22)
+            .onChange(of: syncsBookmarks) { _, _ in
+                // 入れ直した直後は、手元と向こうが食い違っている見込みが高い。
+                // 切られた時は待ちの列を破棄させる
+                bookmarks.syncSettingChanged()
+            }
 
             // ══ 拡張機能 ══
             sectionHeader("Extensions")
@@ -294,7 +326,7 @@ struct SettingsView: View {
             }
         }
         .padding(24)
-        .frame(width: 500, height: 880)
+        .frame(width: 500, height: 970)
         .background(Deco.ink)
         .preferredColorScheme(.dark)
         .animation(.easeInOut(duration: 0.2), value: privacy.lastClearedMessage)
@@ -400,5 +432,5 @@ struct SettingsView: View {
 }
 
 #Preview {
-    SettingsView(updater: Updater())
+    SettingsView(updater: Updater(), bookmarks: BookmarkStore())
 }

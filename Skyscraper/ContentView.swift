@@ -349,6 +349,12 @@ final class BookmarkStore: ObservableObject {
     // 全ての持ち物が埋まるまで self は渡せない
     private var sync: BookmarkSync?
 
+    // 設定画面で入り切りされた時の取次ぎ。
+    // 設定側は BookmarkSync を直に見ていないので、ここを通す
+    func syncSettingChanged() {
+        sync?.settingChanged()
+    }
+
     private let key = "skyscraper.bookmarks.v1"
 
     init() {
