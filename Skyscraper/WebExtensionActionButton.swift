@@ -122,6 +122,13 @@ struct WebExtensionActionButton: View {
             .disabled(!action.isEnabled)
             .onHover { hovering = $0 }
             .help(action.label.isEmpty ? entry.displayName : action.label)
+            // 右クリックでその場からしまえる。
+            // 拡張自体は切らない。戻すのは設定の拡張一覧から
+            .contextMenu {
+                Button("Hide from Toolbar") {
+                    WebExtensionManager.shared.setShowsAction(false, for: entry.id)
+                }
+            }
         }
     }
 
@@ -161,14 +168,15 @@ struct WebExtensionActionButton: View {
 
 // MARK: - 並び
 
-// 有効な拡張ぶんのボタンを横に並べる。
+// 有効で、かつ「ツールバーに出す」とされた拡張ぶんのボタンを横に並べる。
+// 隠されているだけの拡張は背後で普通に動いている。
 // 拡張が無ければ何も出さない（アドレスバーの幅を食わない）
 struct WebExtensionActionBar: View {
     @ObservedObject var tab: Tab
     @ObservedObject private var manager = WebExtensionManager.shared
 
     var body: some View {
-        ForEach(manager.loaded.filter(\.isEnabled)) { entry in
+        ForEach(manager.loaded.filter { $0.isEnabled && $0.showsAction }) { entry in
             WebExtensionActionButton(tab: tab, entry: entry)
         }
     }

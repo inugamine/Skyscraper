@@ -47,6 +47,11 @@ final class WebExtensionManager: NSObject, ObservableObject {
         let baseURL: URL
         let context: WKWebExtensionContext
         var isEnabled: Bool
+
+        // ツールバー（アドレスバー右端）にボタンを出すか。
+        // 拡張そのものの有効・無効とは別勘定で、これを倒しても
+        // 遮断やコンテンツスクリプトは動き続ける。見た目だけの話
+        var showsAction: Bool
     }
 
     // 全タブ・全ウィンドウで一つを共有する。
@@ -72,6 +77,16 @@ final class WebExtensionManager: NSObject, ObservableObject {
     private static var disabledIDs: Set<String> {
         get { Set(UserDefaults.standard.stringArray(forKey: disabledKey) ?? []) }
         set { UserDefaults.standard.set(Array(newValue).sorted(), forKey: disabledKey) }
+    }
+
+    // ツールバーのボタンを隠している拡張のフォルダ名。
+    // 切った側を覚えるのは disabledIDs と同じ理由で、
+    // 新しく入れた拡張のボタンは既定で出す
+    private static let hiddenActionKey = "skyscraper.extensions.hiddenAction"
+
+    private static var hiddenActionIDs: Set<String> {
+        get { Set(UserDefaults.standard.stringArray(forKey: hiddenActionKey) ?? []) }
+        set { UserDefaults.standard.set(Array(newValue).sorted(), forKey: hiddenActionKey) }
     }
 
     private override init() {
@@ -208,7 +223,8 @@ final class WebExtensionManager: NSObject, ObservableObject {
                 source: source,
                 baseURL: resourceBaseURL,
                 context: context,
-                isEnabled: enabled
+                isEnabled: enabled,
+                showsAction: !Self.hiddenActionIDs.contains(name)
             ))
             let origin = source == .bundled ? "bundled" : "user"
             let state = enabled ? "" : ", disabled"
@@ -252,6 +268,30 @@ final class WebExtensionManager: NSObject, ObservableObject {
         Self.disabledIDs = disabled
 
         print("WebExtension[\(id)]: \(enabled ? "enabled" : "disabled")")
+    }
+
+    // ツールバーにボタンを出すかどうかだけを切り替える。
+    //
+    // controller には触らない。拡張は載ったまま動き続け、
+    // 消えるのはボタンだけなのでリロードも要らない。
+    //
+    // 注意：popup しか入口を持たない拡張（uBOL の遮断レベル切替など）は、
+    // ボタンを隠すと設定に触る手立てが無くなる。呼ぶ側で一言添えること
+    func setShowsAction(_ shows: Bool, for id: String) {
+        guard let index = loaded.firstIndex(where: { $0.id == id }) else { return }
+        guard loaded[index].showsAction != shows else { return }
+
+        loaded[index].showsAction = shows
+
+        var hidden = Self.hiddenActionIDs
+        if shows {
+            hidden.remove(id)
+        } else {
+            hidden.insert(id)
+        }
+        Self.hiddenActionIDs = hidden
+
+        print("WebExtension[\(id)]: action \(shows ? "shown" : "hidden")")
     }
 
     // 利用者の拡張フォルダを Finder で開く。

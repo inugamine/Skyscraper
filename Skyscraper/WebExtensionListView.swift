@@ -68,6 +68,14 @@ struct WebExtensionListView: View {
         source == .bundled ? "Bundled" : "Added by you"
     }
 
+    // 目ボタンの説明。三項演算子を .help() に直接渡すと
+    // String と解されて翻訳が当たらないので、sourceLabel と同じやり方で逃がす
+    private static func actionVisibilityHelp(_ shows: Bool) -> LocalizedStringKey {
+        shows
+            ? "Hide the button from the toolbar. The extension keeps working."
+            : "Show the button in the toolbar."
+    }
+
     // ── 一覧 ──
 
     private var list: some View {
@@ -105,6 +113,27 @@ struct WebExtensionListView: View {
             }
 
             Spacer(minLength: 8)
+
+            // ツールバーにボタンを出すか。
+            // 拡張の入切とは別なので、切っても遮断は動き続ける。
+            // 切られている拡張にはそもそもボタンが無いので伸ばす
+            Button {
+                manager.setShowsAction(!entry.showsAction, for: entry.id)
+            } label: {
+                Image(systemName: entry.showsAction ? "eye" : "eye.slash")
+                    .font(.system(size: 12))
+                    .foregroundColor(entry.showsAction ? Deco.gold : Deco.dimGold)
+                    .frame(width: 30, height: 24)
+                    .overlay(Hexagon(inset: 5).stroke(
+                        entry.showsAction ? Deco.faintGold : Deco.faintGold.opacity(0.5),
+                        lineWidth: 0.5
+                    ))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!entry.isEnabled)
+            .opacity(entry.isEnabled ? 1 : 0.35)
+            .help(Self.actionVisibilityHelp(entry.showsAction))
 
             Toggle("", isOn: Binding(
                 get: { entry.isEnabled },
