@@ -320,6 +320,18 @@ struct Bookmark: Identifiable, Codable, Hashable {
     var id = UUID()
     var title: String
     var url: String
+    // 入っているフォルダの道筋。["仕事", "参考"] なら二階層目。
+    // nil なら帯の直下に置く。
+    //
+    // 木を組まず、平坦な配列のまま道筋だけを持たせている。
+    // 階層は描く直前に BookmarkTree が組み直すので、
+    // 並べ替えも重複判定も今までの仕組みがそのまま生きる。
+    //
+    // Optional にしてあるのは古い保存を壊さないためだ。
+    // 自動生成の Codable は、非 Optional の項目の鍵が無いと
+    // 既定値に落ちず keyNotFound を投げる。下の init は try? で
+    // 受けているので、それをやると保存済みが丸ごと消える
+    var folder: [String]? = nil
 }
 
 @MainActor
@@ -364,8 +376,53 @@ final class BookmarkStore: ObservableObject {
         bookmarks.append(Bookmark(title: String(localized: "New bookmark"), url: "https://"))
     }
 
+    // 取り込み用：既にある場所と重ならないものだけを後ろに足し、足した数を返す。
+    //
+    // 一件ずつ append しないのは didSet のため。あれは差し替わるたびに
+    // 全件を JSON へ書き出すので、千件を一件ずつ足すと千回書き出す羽目になる。
+    // 手元で組み上げてから、最後に一度だけ差し替える
+    func merge(_ incoming: [Bookmark]) -> Int {
+        var merged = bookmarks
+        var seen = Set(merged.map { Self.dedupeKey($0.url) })
+        var added = 0
+
+        for bookmark in incoming {
+            let key = Self.dedupeKey(bookmark.url)
+            guard !key.isEmpty, !seen.contains(key) else { continue }
+            seen.insert(key)
+            merged.append(bookmark)
+            added += 1
+        }
+
+        if added > 0 { bookmarks = merged }
+        return added
+    }
+
+    // 重複を見るための均し。scheme と host の大文字小文字、末尾の /
+    // の有無だけで同じ場所が二件に割れるのを防ぐ。
+    // 保存する URL そのものには手を触れない（表示も遷移も書かれた通りに）
+    private static func dedupeKey(_ url: String) -> String {
+        var text = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return "" }
+
+        if var components = URLComponents(string: text), let host = components.host {
+            components.scheme = (components.scheme ?? "https").lowercased()
+            components.host = host.lowercased()
+            text = components.string ?? text
+        }
+        while text.count > 1, text.hasSuffix("/") { text.removeLast() }
+        return text
+    }
+
     func remove(_ bm: Bookmark) {
         bookmarks.removeAll { $0.id == bm.id }
+    }
+
+    // 取り込みを引っ返す時の逃げ道。
+    // 一件ずつ押して消すのは十件で限界だ
+    func deleteAll() {
+        guard !bookmarks.isEmpty else { return }
+        bookmarks = []
     }
 
     func moveUp(_ i: Int) {
@@ -1387,6 +1444,38 @@ final class Tab: NSObject, ObservableObject, Identifiable {
 
     func goBack()    { webView.goBack() }
     func goForward() { webView.goForward() }
+
+    // ── 戻る／進むの履歴（長押しメニュー用）──
+
+    // メニューに並べる上限。深いサイトだと数十件になり、
+    // 画面の端まで伸びて選べなくなる
+    private static let historyMenuLimit = 15
+
+    // どちらも「近い順」で返す（先頭が一つ前・一つ先）。
+    // WKBackForwardList の backList は古い順なので、こちらで引っくり返す。
+    // forwardList は元から近い順なのでそのまま
+    var backHistory: [WKBackForwardListItem] {
+        Array(webView.backForwardList.backList.reversed().prefix(Self.historyMenuLimit))
+    }
+
+    var forwardHistory: [WKBackForwardListItem] {
+        Array(webView.backForwardList.forwardList.prefix(Self.historyMenuLimit))
+    }
+
+    // 履歴の一件へ直接飛ぶ。
+    // 既に一覧から外れた項目を渡しても WKWebView が黙って無視するので、
+    // メニューを開いてから選ぶまでの間にページが動いても壊れない
+    func go(to item: WKBackForwardListItem) {
+        webView.go(to: item)
+    }
+
+    // メニューの一行。題名が無ければ URL で代用し、長すぎるものは切る
+    static func historyLabel(for item: WKBackForwardListItem) -> String {
+        let title = item.title ?? ""
+        let text = title.isEmpty ? item.url.absoluteString : title
+        return text.count > 60 ? String(text.prefix(60)) + "…" : text
+    }
+
     // 顛末書が出ている間は WKWebView 側に読み込むものが無い
     //（commit まで至らなかった読み込みは覚えられていない）。
     // 控えておいた宛先へ自分で行き直す
@@ -3239,6 +3328,154 @@ struct NavButton: View {
     }
 }
 
+// 押しっぱなしで履歴のメニューを出すボタン（戻る／進む）。
+//
+// SwiftUI だけでは組めない。Button に長押しのジェスチャを重ねると、
+// 指を離した拍子に本来の動作（戻る）も一緒に走るし、
+// Menu は押した瞬間に開いてしまって「短く押せば戻る」が成立しない。
+// 押してから離すまでの一部始終を自分で握るために AppKit まで降りる——
+// アドレスバー（AddressField）と同じ判断だ。
+//
+// 見た目は NavButton に合わせてある（13pt の記号・金・24×24）。
+// 並べて置いても差は出ない
+final class HoldNavButtonView: NSView {
+    // 短く押した時の動作（戻る／進む）
+    var onClick: @MainActor () -> Void = {}
+    // メニューを開く直前に呼ぶ。その場の履歴を並べてもらう
+    var titles: @MainActor () -> [String] = { [] }
+    // 何番目を選んだか
+    var onSelect: @MainActor (Int) -> Void = { _ in }
+
+    var isDisabled = false {
+        didSet { imageView.contentTintColor = tint }
+    }
+
+    // 「押しっぱなし」と見なすまでの間（秒）
+    private let holdDelay: TimeInterval = 0.35
+
+    private let imageView = NSImageView()
+    private var holdTimer: Timer?
+    // この押下はメニューが食った（離しても戻らない）
+    private var consumed = false
+
+    init(symbol: String) {
+        super.init(frame: .zero)
+        let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)
+        imageView.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(config)
+        imageView.imageScaling = .scaleNone
+        imageView.contentTintColor = tint
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(imageView)
+        NSLayoutConstraint.activate([
+            imageView.centerXAnchor.constraint(equalTo: centerXAnchor),
+            imageView.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    // メニューを下へ垂らすので、原点を左上に揃えておく
+    override var isFlipped: Bool { true }
+
+    override var intrinsicContentSize: NSSize { NSSize(width: 24, height: 24) }
+
+    // 窓が手前に無い時の一発目も拾う（道具帯のボタンはそうあるべきだ）
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    private var tint: NSColor {
+        NSColor(isDisabled ? Deco.faintGold : Deco.gold)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard !isDisabled else { return }
+        consumed = false
+        holdTimer?.invalidate()
+        // モードに .common を使う。既定の .default だけだと、
+        // 追跡中（eventTracking）に入った途端に時計が止まる
+        let timer = Timer(timeInterval: holdDelay,
+                          target: self,
+                          selector: #selector(holdFired),
+                          userInfo: nil,
+                          repeats: false)
+        RunLoop.main.add(timer, forMode: .common)
+        holdTimer = timer
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        holdTimer?.invalidate()
+        holdTimer = nil
+        guard !isDisabled, !consumed else { return }
+        // 押した後で外へ逃げて離した場合は何もしない（AppKit の作法）
+        guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
+        onClick()
+    }
+
+    // 右クリックでも同じメニューを出す（Safari と同じ）
+    override func rightMouseDown(with event: NSEvent) {
+        guard !isDisabled else { return }
+        showMenu()
+    }
+
+    @objc private func holdFired() {
+        holdTimer = nil
+        consumed = true
+        showMenu()
+    }
+
+    private func showMenu() {
+        let entries = titles()
+        guard !entries.isEmpty else { return }
+
+        let menu = NSMenu()
+        // 盤全体の体裁に揃えてセリフ体にする
+        let size: CGFloat = 12
+        let serif = NSFont.systemFont(ofSize: size).fontDescriptor.withDesign(.serif)
+        menu.font = serif.flatMap { NSFont(descriptor: $0, size: size) }
+            ?? NSFont.systemFont(ofSize: size)
+        for (index, title) in entries.enumerated() {
+            let item = NSMenuItem(title: title, action: #selector(pick(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = index
+            menu.addItem(item)
+        }
+        // 押したまま開くので、そのまま下へ滑らせて離せば選べる。
+        // すぐ離しても AppKit がメニューを留めてくれる
+        _ = menu.popUp(positioning: nil, at: NSPoint(x: 0, y: bounds.height + 4), in: self)
+    }
+
+    @objc private func pick(_ sender: NSMenuItem) {
+        onSelect(sender.tag)
+    }
+}
+
+struct HoldNavButton: NSViewRepresentable {
+    let system: String
+    let disabled: Bool
+    let action: @MainActor () -> Void
+    let titles: @MainActor () -> [String]
+    let onSelect: @MainActor (Int) -> Void
+
+    func makeNSView(context: Context) -> HoldNavButtonView {
+        let view = HoldNavButtonView(symbol: system)
+        apply(to: view)
+        return view
+    }
+
+    // クロージャは body の評価のたびに作り直される。
+    // 古いものを握ったままだと、切り替えた後のタブの履歴を見に行けない
+    func updateNSView(_ view: HoldNavButtonView, context: Context) {
+        apply(to: view)
+    }
+
+    private func apply(to view: HoldNavButtonView) {
+        view.onClick = action
+        view.titles = titles
+        view.onSelect = onSelect
+        view.isDisabled = disabled
+    }
+}
+
 // MARK: - ブックマークバー
 
 struct BookmarkBar: View {
@@ -3256,11 +3493,11 @@ struct BookmarkBar: View {
                 .foregroundColor(Deco.faintGold)
                 .padding(.trailing, 6)
 
-            ForEach(store.bookmarks) { bm in
-                BookmarkBarItem(bm: bm, tab: tab, manager: manager, indicatorModel: indicatorModel)
-            }
+            strip
 
-            Spacer()
+            if entries.count > Self.overflowThreshold {
+                allBookmarksMenu
+            }
 
             Button {
                 showingManager = true
@@ -3281,6 +3518,74 @@ struct BookmarkBar: View {
         .sheet(isPresented: $showingManager) {
             BookmarkManager()
                 .environmentObject(store)
+        }
+    }
+
+    // この件数を越えたら、全件を引けるメニューも出す。
+    // 数えるのは帯に立つ数（フォルダは中身が何件でも一つ）だ
+    private static let overflowThreshold = 8
+
+    // 描く直前に階層へ組み直す。
+    // 保存されているのは今まで通り平坦な一列だ
+    private var entries: [BookmarkEntry] {
+        BookmarkTree.build(store.bookmarks)
+    }
+
+    // 帯の中身。横に溢れさせない。
+    //
+    // 素の HStack は、中身が求める幅をそのまま親へ差し出す。
+    // ブックマークが八十件もあれば「この帯には数千ポイント要る」と
+    // 申告し、それが BrowserPane → ウィンドウまで押し上げられる。
+    // 結果、縦タブの帯は幅ゼロまで潰され、帯自体も画面の外へ出る
+    //（件数を増やした途端に盤全体が崩れるのはこれが原因だ）。
+    // ScrollView は差し出された幅を素直に受けるので、何件あっても崩れない。
+    //
+    // fixedSize で縦だけを固めるのは、横スクロールの器が
+    // 縦にも伸びて Web の中身を食うのを止めるため
+    private var strip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 2) {
+                ForEach(entries) { entry in
+                    switch entry {
+                    case .item(let bm):
+                        // 並べ替えのドラッグは平の一件だけが受ける。
+                        // フォルダごと抱えて動かすのは、道筋の付け替えが
+                        // 絡むので管理シート側の仕事にしてある
+                        BookmarkBarItem(bm: bm, tab: tab, manager: manager,
+                                        indicatorModel: indicatorModel)
+                    case .folder(let folder):
+                        BookmarkFolderMenu(folder: folder, open: open)
+                    }
+                }
+            }
+            .padding(.trailing, 8)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    // 帯に収まりきらない数になったら、全件をメニューからも引けるようにする。
+    // 横に引っ張って探すより、一覧から選ぶ方が早い
+    private var allBookmarksMenu: some View {
+        Menu {
+            BookmarkMenuItems(entries: entries, open: open)
+        } label: {
+            Image(systemName: "chevron.down")
+                .font(.system(size: 10))
+                .foregroundColor(Deco.dimGold)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("All bookmarks")
+    }
+
+    // 帯の一件と同じ規則。⌘ を押しながらなら裏の新規タブで開く
+    private func open(_ bm: Bookmark) {
+        if NSEvent.modifierFlags.contains(.command) {
+            manager.addTabInBackground(url: bm.url)
+        } else {
+            tab.urlText = bm.url
+            tab.load()
         }
     }
 }
@@ -3422,6 +3727,7 @@ struct BookmarkDropDelegate: DropDelegate {
 struct BookmarkManager: View {
     @EnvironmentObject var store: BookmarkStore
     @Environment(\.dismiss) private var dismiss
+    @State private var confirmingDeleteAll = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -3431,6 +3737,9 @@ struct BookmarkManager: View {
                     .font(.system(size: 15, design: .serif))
                     .tracking(2)
                     .foregroundColor(Deco.cream)
+                Text(verbatim: "\(store.bookmarks.count)")
+                    .font(.system(size: 11, design: .serif))
+                    .foregroundColor(Deco.dimGold)
                 Spacer()
                 Button {
                     dismiss()
@@ -3476,6 +3785,22 @@ struct BookmarkManager: View {
                                 .overlay(Rectangle().stroke(Deco.faintGold, lineWidth: 0.5))
                                 .frame(width: 130)
 
+                            // フォルダの道筋。スラッシュ区切りで階層になる
+                            //（"仕事/参考"）。空にすれば帯の直下へ戻る。
+                            // 同じ名前を打てばそのフォルダに入る——
+                            // フォルダは実体を持たず、道筋の一致で束ねているからだ
+                            TextField("Folder", text: Binding(
+                                get: { (bm.folder ?? []).joined(separator: "/") },
+                                set: { $bm.folder.wrappedValue = Self.folderPath(from: $0) }
+                            ))
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 12, design: .serif))
+                                .foregroundColor(Deco.dimGold)
+                                .padding(.horizontal, 10).padding(.vertical, 6)
+                                .background(Deco.field)
+                                .overlay(Rectangle().stroke(Deco.faintGold, lineWidth: 0.5))
+                                .frame(width: 120)
+
                             TextField("URL", text: $bm.url)
                                 .textFieldStyle(.plain)
                                 .font(.system(size: 12, design: .serif))
@@ -3508,11 +3833,42 @@ struct BookmarkManager: View {
                 }
                 .buttonStyle(.plain)
                 Spacer()
+
+                if !store.bookmarks.isEmpty {
+                    Button { confirmingDeleteAll = true } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "trash").font(.system(size: 11))
+                            Text("Delete All").font(.system(size: 12, design: .serif)).tracking(1)
+                        }
+                        .foregroundColor(Deco.dimGold)
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .overlay(Hexagon(inset: 7).stroke(Deco.faintGold, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             .padding(16)
         }
-        .frame(minWidth: 520, minHeight: 420)
+        .frame(minWidth: 660, minHeight: 420)
         .background(Deco.ink)
+        .confirmationDialog("Delete every bookmark?",
+                            isPresented: $confirmingDeleteAll,
+                            titleVisibility: .visible) {
+            Button("Delete All", role: .destructive) { store.deleteAll() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The bookmark bar will be emptied. This cannot be undone.")
+        }
+    }
+
+    // "仕事 / 参考" を ["仕事", "参考"] にする。
+    // 前後の空白と空の段は落とすので、"/仕事//" も受ける
+    private static func folderPath(from text: String) -> [String]? {
+        let parts = text
+            .split(separator: "/")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        return parts.isEmpty ? nil : parts
     }
 }
 
@@ -4152,8 +4508,7 @@ struct BrowserPane: View {
             if !tab.isVideoFullscreen {
             // ── アドレスバー ──
             HStack(spacing: 10) {
-                NavButton(system: "chevron.left",  disabled: !tab.canGoBack)    { tab.goBack() }
-                NavButton(system: "chevron.right", disabled: !tab.canGoForward) { tab.goForward() }
+                historyButtons
                 NavButton(system: "arrow.clockwise", disabled: false)           { tab.reload() }
 
                 // アドレスバーは AppKit 直書き（AddressField）。
@@ -4297,6 +4652,42 @@ struct BrowserPane: View {
             // フォーカスと全選択は AddressField 側が focusTrigger の変化で行う。
             // ここでは表示文字列を現在の URL に揃えるだけ
             addressText = tab.urlText
+        }
+    }
+
+    // ── 戻る／進む ──
+    //
+    // 短く押せば普段どおり。押しっぱなし（か右クリック）で履歴の一覧が垂れる。
+    // 一覧を作るのはメニューを開く直前だけだ——
+    // 描き直しのたびに WKBackForwardList をなぞる理由は無い
+    @ViewBuilder
+    private var historyButtons: some View {
+        HStack(spacing: 10) {
+            HoldNavButton(
+                system: "chevron.left",
+                disabled: !tab.canGoBack,
+                action: { tab.goBack() },
+                titles: { tab.backHistory.map { Tab.historyLabel(for: $0) } },
+                onSelect: { index in
+                    let items = tab.backHistory
+                    guard items.indices.contains(index) else { return }
+                    tab.go(to: items[index])
+                }
+            )
+            .frame(width: 24, height: 24)
+
+            HoldNavButton(
+                system: "chevron.right",
+                disabled: !tab.canGoForward,
+                action: { tab.goForward() },
+                titles: { tab.forwardHistory.map { Tab.historyLabel(for: $0) } },
+                onSelect: { index in
+                    let items = tab.forwardHistory
+                    guard items.indices.contains(index) else { return }
+                    tab.go(to: items[index])
+                }
+            )
+            .frame(width: 24, height: 24)
         }
     }
 

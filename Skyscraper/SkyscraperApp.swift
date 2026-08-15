@@ -62,7 +62,7 @@ struct SkyscraperApp: App {
                 Button("Check for Updates…") { updater.checkForUpdates() }
                     .disabled(!updater.canCheckForUpdates)
             }
-            BrowserCommands()
+            BrowserCommands(bookmarks: bookmarks)
         }
 
         // 設定画面（⌘, で開く。Sparkle のダイアログが案内する「設定」の実体）
@@ -77,6 +77,10 @@ struct SkyscraperApp: App {
 // App から切り出して独立した Commands にしてある。
 // manager が nil になるのは、どの窓にも focus が無い時（設定画面だけ開いている等）
 struct BrowserCommands: Commands {
+    // ブックマークは窓をまたいで一つなので、focus ではなく App から直に受け取る。
+    // 見張る必要は無い（メニューからは入れるだけで、中身を読まない）
+    let bookmarks: BookmarkStore
+
     @FocusedValue(\.tabManager) private var manager: TabManager?
     @FocusedValue(\.translator) private var translator: Translator?
 
@@ -112,6 +116,14 @@ struct BrowserCommands: Commands {
                 if let tab = manager?.selectedTab { PageExporter.exportPDF(tab) }
             }
             .disabled(manager == nil)
+        }
+        // 他所のブラウザからの引っ越し。
+        // .importExport は File メニューの「書き出し」の定位置で、
+        // macOS の他のアプリもここに置いている
+        CommandGroup(after: .importExport) {
+            Button("Import Bookmarks…") {
+                BookmarkImport.chooseFile(into: bookmarks)
+            }
         }
         CommandGroup(replacing: .printItem) {
             Button("Print…") {
