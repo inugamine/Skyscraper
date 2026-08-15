@@ -113,7 +113,14 @@ struct BookmarkMenuItems: View {
                 Menu {
                     AnyView(BookmarkMenuItems(entries: folder.entries, open: open))
                 } label: {
-                    Text(verbatim: folder.name)
+                    // メニューの中では Label の絵柄が項目の左に並ぶ。
+                    // 入れ子の矢印は AppKit が自分で右端に出すので、
+                    // こちらは中身が畳まっていることだけを示せばいい
+                    Label {
+                        Text(verbatim: folder.name)
+                    } icon: {
+                        Image(systemName: "folder")
+                    }
                 }
             }
         }
@@ -130,13 +137,13 @@ struct BookmarkFolderMenu: View {
             BookmarkMenuItems(entries: folder.entries, open: open)
         } label: {
             HStack(spacing: 5) {
-                // 中身が畳まれていることの印。
-                // 段々の三角（塔のモチーフ）を小さく置いて、
-                // 平の一件と一目で見分けられるようにする
-                Triangle()
-                    .fill(Deco.faintGold)
-                    .frame(width: 7, height: 5)
-                    .rotationEffect(.degrees(180))
+                // 畳まっていることの印。
+                // 平の一件と一目で見分けられるのが仕事だから、線画のフォルダを置く。
+                // 色を一段落としてあるのは、帯の文字と同じ重さで入ると
+                // 並んだ時に絵だけが浮いて見えるためだ
+                Image(systemName: "folder")
+                    .font(.system(size: 10))
+                    .foregroundColor(Deco.faintGold)
 
                 Text(verbatim: folder.name)
                     .font(.system(size: 11, design: .serif))
