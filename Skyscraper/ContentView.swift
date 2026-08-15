@@ -737,6 +737,11 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // window.close() で自分を畳むための連絡先（TabManager が入れる）
     var requestClose: (() -> Void)?
 
+    // 自分を前に出してもらうための連絡先（TabManager が入れる）。
+    // 裏のタブが alert() を出した時に使う——見えていないページの問いに
+    // 答えろと言われても、利用者には何のことか分からない
+    var requestActivate: (() -> Void)?
+
     // セッション復元で作られたが、まだ中身を読みに行っていない URL。
     // 起動時に全タブを一斉に読み込むと回線も CPU も持っていかれるので、
     // 復元直後は URL と題名だけを持たせておき、実際の読み込みは
@@ -754,6 +759,10 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // HTTP の認証チャレンジ（Basic / Digest / NTLM）の受け手。実体は HTTPAuth.swift。
     // 一度答えたら同じ場所には訊き直さないので、タブごとに一人持つ
     private let httpAuth = HTTPAuthPrompter()
+
+    // alert() / confirm() / prompt() の受け手。実体は JSDialog.swift。
+    // 「このページではもう出すな」を覚えるので、こちらもタブごとに一人持つ
+    private let jsDialogs = JSDialogPresenter()
 
     private static let mediaStateMessageHandlerName = "skyscraperMediaState"
     private static let fullscreenMessageHandlerName = "skyscraperFullscreen"
@@ -1954,6 +1963,8 @@ extension Tab: WKNavigationDelegate {
         PasswordSuggestionPanel.shared.hide()
         // 断った記憶を仕切り直す（「もう一度」で訊き直せるように）
         httpAuth.noteNavigationStarted()
+        // ダイアログの抑制も前のページ限りだ。ここで解く
+        jsDialogs.reset()
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
@@ -2134,6 +2145,83 @@ extension Tab: WKUIDelegate {
                 in: webView.window
             )
             decisionHandler(decision)
+        }
+    }
+
+    // MARK: JavaScript のダイアログ
+
+    // この三つを実装しない限り、WebKit は alert() を何も出さず、
+    // confirm() には常に false、prompt() には常に null を返す。
+    // 体裁と判断は JSDialog.swift に任せ、ここでは前口上だけ整える。
+    //
+    // WKSecurityOrigin は持ち回さず、必要な文字列だけをここで抜く
+    //（macOS 26 でメインアクター隔離になった。MediaPermission と同じ作法）。
+    // 出所をページの申告ではなく frameInfo から取るのも同じ理由だ
+
+    func webView(_ webView: WKWebView,
+                 runJavaScriptAlertPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo,
+                 completionHandler: @escaping () -> Void) {
+        let host = frame.securityOrigin.host
+        Task { @MainActor in
+            self.requestActivate?()
+            await self.jsDialogs.alert(message: message, host: host, in: webView.window)
+            // 途中で抜けてはならない。呼ばない限りページの JS は止まったままだ
+            completionHandler()
+        }
+    }
+
+    func webView(_ webView: WKWebView,
+                 runJavaScriptConfirmPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo,
+                 completionHandler: @escaping (Bool) -> Void) {
+        let host = frame.securityOrigin.host
+        Task { @MainActor in
+            self.requestActivate?()
+            let answer = await self.jsDialogs.confirm(message: message,
+                                                      host: host,
+                                                      in: webView.window)
+            completionHandler(answer)
+        }
+    }
+
+    func webView(_ webView: WKWebView,
+                 runJavaScriptTextInputPanelWithPrompt prompt: String,
+                 defaultText: String?,
+                 initiatedByFrame frame: WKFrameInfo,
+                 completionHandler: @escaping (String?) -> Void) {
+        let host = frame.securityOrigin.host
+        Task { @MainActor in
+            self.requestActivate?()
+            let answer = await self.jsDialogs.prompt(message: prompt,
+                                                     defaultText: defaultText ?? "",
+                                                     host: host,
+                                                     in: webView.window)
+            completionHandler(answer)
+        }
+    }
+
+    // 離脱確認（beforeunload）。
+    //
+    // これだけは WKUIDelegate に公開の窓口が無い。受け口は
+    // _WKUIDelegatePrivate 側にしか無く、実装しなければ WebKit は
+    // 問いを飛ばして無条件に離脱を許す（書きかけの投稿が黙って消える）。
+    //
+    // WebKit は respondsToSelector で見てから呼ぶので、非公開の名前を
+    // @objc で名乗るだけでいい（リンクはしない）。将来 WebKit が
+    // この綴りを変えたら、呼ばれなくなるだけで元の振る舞いに戻る——
+    // 落ちはしない。それでも非公開は非公開だ。
+    // 嫌ならこの一つだけ削ればいい（上の三つは公開 API だけで成立する）
+    @objc(_webView:runBeforeUnloadConfirmPanelWithMessage:initiatedByFrame:completionHandler:)
+    func webView(_ webView: WKWebView,
+                 runBeforeUnloadConfirmPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo,
+                 completionHandler: @escaping (Bool) -> Void) {
+        let host = frame.securityOrigin.host
+        Task { @MainActor in
+            self.requestActivate?()
+            let leaves = await self.jsDialogs.confirmUnload(host: host, in: webView.window)
+            completionHandler(leaves)
         }
     }
 }
@@ -2549,6 +2637,13 @@ final class TabManager: NSObject, ObservableObject {
         tab.requestClose = { [weak self, weak tab] in
             guard let self, let tab else { return }
             self.closeTab(tab)
+        }
+        // ダイアログを出す前に、そのタブを前へ出す。
+        // 盤は窓に貼るので、裏のタブの問いをそのまま出すと
+        // 全く関係の無いページの前に文句だけが垂れることになる
+        tab.requestActivate = { [weak self, weak tab] in
+            guard let self, let tab else { return }
+            self.select(tab)
         }
         // タイトルが確定・変化したらグループを組み直す。
         // デバウンスは grouper 側が持つので、ここは遠慮なく呼ぶ
