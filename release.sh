@@ -260,11 +260,19 @@ echo "  iCloud の権限 OK"
 #
 # この値は entitlements ファイルには書いていない。Xcode が
 # 署名の種類（Developer ID か否か）を見て自分で足す。
-# だからこそ、こちらで書いた覚えのない値を目で確かめる意味がある
-if echo "$ECHO_ENT" | grep -q "icloud-container-environment"; then
-    ENV_VALUE="$(echo "$ECHO_ENT" \
-        | grep -A1 "icloud-container-environment" \
-        | sed -n 's/.*<string>\(.*\)<\/string>.*/\1/p' | head -1)"
+# だからこそ、こちらで書いた覚えのない値を目で確かめる意味がある。
+#
+# 読み取りに plutil を使うのは、XML を行で切ると事故るからだ。
+# grep -A1 で「鍵の次の行」を取る手は、別の鍵の値を掍むことがある
+#（実際、チーム ID を拾って誤報を出した）。
+# 一旦ファイルに落として、構造として引く
+ENT_PLIST="$(mktemp -t skyscraper-ent)"
+trap 'rm -f "$PROFILE_PLIST" "$ENT_PLIST"' EXIT
+echo "$ECHO_ENT" > "$ENT_PLIST"
+
+ENV_VALUE="$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.icloud-container-environment' "$ENT_PLIST" 2>/dev/null || echo '')"
+
+if [ -n "$ENV_VALUE" ]; then
     if [ "$ENV_VALUE" != "Production" ]; then
         echo "エラー: CloudKit の環境が Production ではない（${ENV_VALUE}）"
         echo "       Development のまま出すと、配った先は空の物置を見る。"
