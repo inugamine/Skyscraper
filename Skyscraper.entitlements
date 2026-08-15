@@ -6,5 +6,13 @@
 	<true/>
 	<key>com.apple.security.device.audio-input</key>
 	<true/>
+	<key>com.apple.developer.icloud-services</key>
+	<array>
+		<string>CloudKit</string>
+	</array>
+	<key>com.apple.developer.icloud-container-identifiers</key>
+	<array>
+		<string>iCloud.net.live-on.inugamine.Skyscraper</string>
+	</array>
 </dict>
 </plist>

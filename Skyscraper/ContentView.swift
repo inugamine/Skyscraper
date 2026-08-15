@@ -337,8 +337,17 @@ struct Bookmark: Identifiable, Codable, Hashable {
 @MainActor
 final class BookmarkStore: ObservableObject {
     @Published var bookmarks: [Bookmark] {
-        didSet { save() }
+        didSet {
+            save()
+            sync?.scheduleUpload()
+        }
     }
+
+    // iCloud への持ち回り役。こちらが強く持ち、あちらは弱く持ち返す。
+    //
+    // 下の init で後回しに結んでいるのは、BookmarkSync が self を要るからだ。
+    // 全ての持ち物が埋まるまで self は渡せない
+    private var sync: BookmarkSync?
 
     private let key = "skyscraper.bookmarks.v1"
 
@@ -350,6 +359,10 @@ final class BookmarkStore: ObservableObject {
         } else {
             bookmarks = []
         }
+
+        let sync = BookmarkSync(store: self)
+        sync.start()
+        self.sync = sync
     }
 
     private func save() {
