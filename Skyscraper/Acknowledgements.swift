@@ -434,81 +434,38 @@ enum Acknowledgements {
 //  画面
 // ══════════════════════════════════════════════════════════
 
-struct AcknowledgementsView: View {
-    @Environment(\.dismiss) private var dismiss
+// 設定画面の「ライセンス」の頁に埋め込む一覧。
+//
+// 見出しも巻物（ScrollView）も外側が持っているので、
+// ここは中身だけを並べる。巻物の入れ子は
+// どちらも中途半端に巻いて使いにくい
+struct AcknowledgementsList: View {
     @Environment(\.openURL) private var openURL
 
     // 開いている項目。既定はすべて畳んでおく
     @State private var expanded: Set<String> = []
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-
-            // ── 見出し ──
-            HStack(spacing: 8) {
-                Image(systemName: "diamond")
-                    .font(.system(size: 11))
-                    .foregroundColor(Deco.gold)
-                Text("Acknowledgements")
-                    .font(.system(size: 14, design: .serif))
-                    .tracking(3)
-                    .foregroundColor(Deco.cream)
-                Spacer()
-            }
-            .padding(.bottom, 10)
-
-            Zigzag(teeth: 22)
-                .stroke(Deco.gold, lineWidth: 1)
-                .frame(height: 5)
-                .padding(.bottom, 14)
+        VStack(alignment: .leading, spacing: 14) {
 
             Text("Skyscraper is built on the work of others. The licenses below are reproduced in full.")
                 .font(.system(size: 10, design: .serif))
                 .foregroundColor(Deco.dimGold)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.bottom, 16)
 
-            // ── 一覧 ──
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    ForEach(Acknowledgements.all) { item in
-                        entry(item)
-                    }
-
-                    // ── ライセンス本文 ──
-                    Zigzag(teeth: 22)
-                        .stroke(Deco.faintGold, lineWidth: 1)
-                        .frame(height: 5)
-                        .padding(.vertical, 6)
-
-                    entry(Acknowledgements.apacheLicense)
-                }
-                .padding(.trailing, 4)
+            ForEach(Acknowledgements.all) { item in
+                entry(item)
             }
 
-            // ── 閉じる ──
-            HStack {
-                Spacer()
-                Button {
-                    dismiss()
-                } label: {
-                    Text("Close")
-                        .font(.system(size: 11, design: .serif))
-                        .tracking(1)
-                        .foregroundColor(Deco.gold)
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 7)
-                        .overlay(Hexagon(inset: 6).stroke(Deco.faintGold, lineWidth: 1))
-                }
-                .buttonStyle(.plain)
-                .keyboardShortcut(.cancelAction)
-            }
-            .padding(.top, 14)
+            // ── ライセンス本文 ──
+            Zigzag(teeth: 22)
+                .stroke(Deco.faintGold, lineWidth: 1)
+                .frame(height: 5)
+                .padding(.vertical, 6)
+
+            entry(Acknowledgements.apacheLicense)
         }
-        .padding(24)
-        .frame(width: 560, height: 620)
-        .background(Deco.ink)
-        .preferredColorScheme(.dark)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // ── 一件分の表示 ──
@@ -581,5 +538,9 @@ struct AcknowledgementsView: View {
 }
 
 #Preview {
-    AcknowledgementsView()
+    AcknowledgementsList()
+        .padding(24)
+        .frame(width: 520)
+        .background(Deco.ink)
+        .preferredColorScheme(.dark)
 }
