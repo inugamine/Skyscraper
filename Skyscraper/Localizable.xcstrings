@@ -1774,6 +1774,40 @@
         }
       }
     },
+    "It has expired." : {
+      "comment" : "A note in the certificate dialog when the certificate is past its validity period.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "It has expired."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有効期限が切れています。"
+          }
+        }
+      }
+    },
+    "It is not valid yet. Check the clock on both machines." : {
+      "comment" : "A note in the certificate dialog when the certificate's validity has not started yet.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "It is not valid yet. Check the clock on both machines."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "まだ有効期間に入っていません。両方の時計を確かめてください。"
+          }
+        }
+      }
+    },
     "It was opened from the disk, so nothing travelled over the network." : {
       "comment" : "An explanation shown in the site information popover for a file:// page.",
       "localizations" : {
@@ -4026,6 +4060,23 @@
         }
       }
     },
+    "This certificate signed itself. No authority vouches for it — which is normal for a server you set up yourself." : {
+      "comment" : "A note in the certificate dialog when the certificate is self-signed.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This certificate signed itself. No authority vouches for it — which is normal for a server you set up yourself."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この証明書は自分で自分に署名しています。どの認証局も裏書きしていません——自分で立てたサーバなら普通のことです。"
+          }
+        }
+      }
+    },
     "This connection is not encrypted. Your user name and password will be sent in the clear." : {
       "localizations" : {
         "en" : {
@@ -4465,19 +4516,19 @@
         }
       }
     },
-    "Valid: %1$@ – %2$@" : {
+    "Valid: %@ – %@" : {
       "comment" : "A line in the certificate dialog. The arguments are the start and the end of the validity period.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Valid: %1$@ – %2$@"
+            "value" : "Valid: %@ – %@"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "有効期間：%1$@ 〜 %2$@"
+            "value" : "有効期間：%@ 〜 %@"
           }
         }
       }

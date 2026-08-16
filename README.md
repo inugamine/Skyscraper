@@ -82,6 +82,8 @@ Safari や Chrome と同じ Web Extensions に対応しています（WebKit の
 ### そのほか
 
 - ダウンロード棚 (進捗表示つき、常駐)
+- アドレスバーの鍵アイコン。押すとサイトの調書が開き、証明書・このサイトに許したこと・このサイトのデータの削除がまとまっています
+- 自己署名証明書のサーバには、中身を確かめた上で「危険を承知で続行」できます。例外はその一枚 (指紋) 限り、アプリを終うまでの間だけで、ディスクには残りません
 - カメラ・マイクのサイトごとの許可
 - `mailto:` `tel:` `itms-apps:` などは既定のアプリへ引き渡します (受け取り先をこちらから指定することはしません)
 - キャッシュ／Cookie／閲覧データの削除 (`⌘,` の設定画面から)
@@ -175,6 +177,7 @@ Skyscraper/
 │
 │   認証・資格情報
 ├── HTTPAuth.swift          Basic / Digest / NTLM
+├── CertificateTrust.swift  サーバ証明書の読み下しと、その場限りの例外
 ├── PasswordStore.swift     Keychain への保管
 ├── PasswordFill.swift      フォームへの差し込み
 ├── PasswordSuggestionPanel.swift  候補の一覧
@@ -188,6 +191,7 @@ Skyscraper/
 ├── DownloadManager.swift   ダウンロード棚
 ├── ExternalScheme.swift    mailto: などを担当アプリへ引き渡す
 ├── MediaPermission.swift   カメラ・マイクのサイトごとの許可
+├── SiteInfo.swift          アドレスバーの鍵と、サイトごとの調書
 ├── SleepBlocker.swift      再生中のスリープ抑制
 ├── IMEGuard.swift          日本語入力中の誤発防止
 ├── PrivacyManager.swift    閲覧データの削除

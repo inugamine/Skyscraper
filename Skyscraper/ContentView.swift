@@ -1506,7 +1506,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
             return .local
         case "https":
             guard let host = url.host(), !host.isEmpty else { return .secure }
-            return CertificateExceptionStore.shared.isAllowed(host: host, port: url.port ?? 443)
+            return CertificateExceptionStore.shared.hasException(host: host, port: url.port ?? 443)
                 ? .exception
                 : .secure
         case "http":
@@ -2051,7 +2051,9 @@ extension Tab: WKNavigationDelegate {
         serverTrusts[space.host] = trust
 
         let port = space.port == 0 ? 443 : space.port
-        if CertificateExceptionStore.shared.isAllowed(host: space.host, port: port) {
+        if CertificateExceptionStore.shared.isAllowed(host: space.host,
+                                                      port: port,
+                                                      matching: trust) {
             completionHandler(.useCredential, URLCredential(trust: trust))
             return
         }
@@ -2133,10 +2135,24 @@ extension Tab: WKNavigationDelegate {
         failedURL = nil
     }
 
+    // 顛末書に「危険を承知で続行」を出せるか。
+    //
+    // 証明書を控えていなければ札を出さない。
+    // 見せる中身が無いのに「承知で」と言わせるのは筋が通らないし、
+    // 指紋を取れなければ例外自体が作れない——
+    // 押しても何も起きない札になる
+    var canProceedPastCertificateError: Bool {
+        guard loadError?.kind == .insecureConnection,
+              let url = failedURL ?? loadError?.url,
+              let host = url.host(), !host.isEmpty
+        else { return false }
+        return serverTrusts[host] != nil
+    }
+
     // 顛末書の「危険を承知で続行」。
     //
     // 控えてある証明書の中身を見せ、それでも押し切られた時だけ
-    // 例外に加えて開き直す。例外はその場所（ホストとポート）限りで、
+    // 例外に加えて開き直す。例外はその場所の、その一枚限りで、
     // アプリを終えば消える。ディスクには何も書かない
     func proceedPastCertificateError() async {
         guard let url = failedURL ?? loadError?.url,
@@ -2150,7 +2166,13 @@ extension Tab: WKNavigationDelegate {
                                   in: webView.window)
         else { return }
 
-        store.allow(host: host, port: port)
+        // 指紋を取れなければ例外は作らない。
+        // このまま読み直しても同じ顛末書が戻るだけなので、何もしない
+        guard store.allow(host: host, port: port, trust: serverTrusts[host]) else {
+            print("Tab: could not pin the certificate for \(host); exception not created")
+            return
+        }
+
         loadError = nil
         failedURL = nil
         webView.load(URLRequest(url: url))
@@ -4830,9 +4852,11 @@ struct BrowserPane: View {
                     ErrorPage(
                         error: error,
                         onRetry: { tab.retryFailedLoad() },
-                        // 証明書で止まった時だけ札が出る。
+                        // 証明書を控えている時だけ札が出る。
                         // 押した先で中身を見せ、押し切られた時に限って通す
-                        onProceed: { Task { await tab.proceedPastCertificateError() } }
+                        onProceed: tab.canProceedPastCertificateError
+                            ? { Task { await tab.proceedPastCertificateError() } }
+                            : nil
                     )
                 } else if tab.isHome {
                     NewTabPage(tab: tab)

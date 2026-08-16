@@ -11,14 +11,19 @@
 //
 //  とはいえ「検証を素通しする道」を常設するのは論外なので、条件を絞る。
 //  ・利用者が証明書の中身を見た上で、自分で押した時だけ
-//  ・その場所（ホストとポート）に限って
+//  ・その場所（ホストとポート）の、その一枚（指紋）に限って
 //  ・アプリを終うまでの間だけ
 //  ディスクには何も書かない——次の起動では、また同じ問いから始まる。
 //  「一度通したら以後ずっと」は、間に誰かが割り込んでいた場合に
 //  取り返しがつかなくなる。
 //
+//  番地だけで許すと、一度押した場所については
+//  以後どんな証明書でも通ってしまう。指紋で縛るのはそのためだ——
+//  見た一枚と同じものである間だけ通す（差し替わったら訊き直す）。
+//
 
 import AppKit
+import Combine
 import CryptoKit
 import Foundation
 import Security
@@ -52,10 +57,27 @@ struct CertificateSummary {
     // ダイアログの本文。項目名を左に揃えて縦に並べる
     var detailText: String {
         var lines: [String] = []
+
+        // Security framework の言い分は英語のままだし、
+        //「certificate is not trusted」と言われても何が悪いのかは分からない。
+        // よくある事情だけはこちらの言葉で先に添える
+        if isSelfSigned {
+            lines.append(String(localized: "This certificate signed itself. No authority vouches for it — which is normal for a server you set up yourself."))
+        }
+        if isExpired {
+            lines.append(String(localized: "It has expired."))
+        }
+        if isNotYetValid {
+            lines.append(String(localized: "It is not valid yet. Check the clock on both machines."))
+        }
+
         if !problem.isEmpty {
             lines.append(problem)
+        }
+        if !lines.isEmpty {
             lines.append("")
         }
+
         if !subject.isEmpty {
             lines.append(String(localized: "Issued to: \(subject)"))
         }
@@ -164,8 +186,7 @@ enum CertificateInspector {
     // SHA-256 の指紋。
     // 一目で見比べられるよう、二桁ずつ空けて三行に折る
     private static func fingerprint(of certificate: SecCertificate) -> String {
-        let data = SecCertificateCopyData(certificate) as Data
-        let bytes = Array(SHA256.hash(data: data))
+        let bytes = Array(sha256(of: certificate))
         let groups = stride(from: 0, to: bytes.count, by: 12).map { start -> String in
             bytes[start..<min(start + 12, bytes.count)]
                 .map { String(format: "%02X", $0) }
@@ -173,43 +194,86 @@ enum CertificateInspector {
         }
         return groups.joined(separator: "\n")
     }
+
+    // 照合のための指紋。
+    // 上の表示用と違って折り返しを入れず、小文字で詰めて返す。
+    // 例外の照らし合わせはこちらを使う
+    static func digest(of trust: SecTrust) -> String? {
+        guard let chain = SecTrustCopyCertificateChain(trust) as? [SecCertificate],
+              let leaf = chain.first
+        else { return nil }
+        return sha256(of: leaf).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func sha256(of certificate: SecCertificate) -> SHA256Digest {
+        SHA256.hash(data: SecCertificateCopyData(certificate) as Data)
+    }
 }
 
 // MARK: - 例外の控え
 
 @MainActor
-final class CertificateExceptionStore {
+final class CertificateExceptionStore: ObservableObject {
     static let shared = CertificateExceptionStore()
 
-    // "host:port"。UserDefaults にもキーチェーンにも書かない。
-    // アプリを終えば消える——それがこの仕組みの肝だ
-    private var allowed: Set<String> = []
+    // "host:port" → 通した一枚の指紋（SHA-256）。
+    // UserDefaults にもキーチェーンにも書かない。
+    // アプリを終えば消える——それがこの仕組みの根幹だ。
+    //
+    // @Published にしてあるのは、鍵の色をその場で変えるためだ。
+    // 例外は番地に紐づくが、番地を変えずに取り消されることがある
+    //（盤の「取り消す」）。見張り先が無いと、
+    // 次のページ遷移まで鍵が古いままになる
+    @Published private var allowed: [String: String] = [:]
 
     private init() {}
 
     var isEmpty: Bool { allowed.isEmpty }
 
     // 通した場所の一覧（設定画面の表示用）
-    var places: [String] { allowed.sorted() }
+    var places: [String] { allowed.keys.sorted() }
 
     private static func key(host: String, port: Int) -> String {
         "\(host.lowercased()):\(port)"
     }
 
-    func isAllowed(host: String, port: Int) -> Bool {
-        !host.isEmpty && allowed.contains(Self.key(host: host, port: port))
+    // この接続を通すか。
+    //
+    // 番地に例外があるだけでは足りない——利用者が見て押した
+    // その一枚と同じものが差し出されている時に限る
+    func isAllowed(host: String, port: Int, matching trust: SecTrust?) -> Bool {
+        guard let expected = allowed[Self.key(host: host, port: port)],
+              let trust,
+              let actual = CertificateInspector.digest(of: trust)
+        else { return false }
+        return actual == expected
     }
 
-    func allow(host: String, port: Int) {
-        guard !host.isEmpty else { return }
-        allowed.insert(Self.key(host: host, port: port))
+    // この番地に例外を作ってあるか。
+    // 鍵の表示と盤の一覧に使う（こちらは指紋を見ない）
+    func hasException(host: String, port: Int) -> Bool {
+        !host.isEmpty && allowed[Self.key(host: host, port: port)] != nil
+    }
+
+    // 見せた一枚を控えて例外にする。
+    // 指紋を取れなければ何もしない——照合できない例外は
+    // 「番地だけで素通し」と同じことになる
+    @discardableResult
+    func allow(host: String, port: Int, trust: SecTrust?) -> Bool {
+        guard !host.isEmpty,
+              let trust,
+              let digest = CertificateInspector.digest(of: trust)
+        else { return false }
+        allowed[Self.key(host: host, port: port)] = digest
+        return true
     }
 
     func forget(host: String, port: Int) {
-        allowed.remove(Self.key(host: host, port: port))
+        allowed.removeValue(forKey: Self.key(host: host, port: port))
     }
 
     func reset() {
+        guard !allowed.isEmpty else { return }
         allowed.removeAll()
     }
 

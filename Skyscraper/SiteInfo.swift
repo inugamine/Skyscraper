@@ -42,10 +42,10 @@ enum SiteSecurity: Equatable {
 
     var tint: Color {
         switch self {
-        case .none, .local:       return Deco.dimGold
-        case .secure:             return Deco.gold
-        case .exception:          return Deco.rust
-        case .insecure:           return Deco.rust
+        case .none, .local:      return Deco.dimGold
+        case .secure:            return Deco.gold
+        case .exception,
+             .insecure:          return Deco.rust
         }
     }
 
@@ -90,6 +90,9 @@ struct SitePermission: Identifiable {
 
 struct SiteInfoPopover: View {
     @ObservedObject var tab: Tab
+    // 例外の増減を盤に届ける。
+    // ここで取り消した直後に、見出しの鍵も変わらないと嘘になる
+    @ObservedObject private var exceptions = CertificateExceptionStore.shared
     // 証明書の窓（シート）を出す時に、この盤を先に畳むために持つ
     @Binding var isPresented: Bool
 
@@ -106,7 +109,11 @@ struct SiteInfoPopover: View {
             header
             connection
             permissionSection
-            dataSection
+            // 保存されたデータの話は、相手がサーバの時だけだ。
+            // 手元のファイルやロビーに「このサイトのデータ」は無い
+            if !host.isEmpty {
+                dataSection
+            }
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 16)
@@ -299,29 +306,40 @@ struct SiteInfoPopover: View {
 
     // 散らばった Store を順に当たって、このサイトの分だけ拾う
     private func rebuild() {
+        // 前回の「削除しました」を引きずらない
+        clearedData = false
+
         let site = host
-        guard let url, !site.isEmpty else {
+        guard let url else {
             permissions = []
             return
         }
         var list: [SitePermission] = []
 
         // ── カメラ・マイク ──
+        //
+        // 鍵は scheme://host[:port]。host を持たない場所（file: など）は
+        // そもそも許可を訊かれないので、空なら見に行かない
         let origin = MediaPermissionStore.storageOrigin(for: url)
-        for device in ["camera", "microphone"] {
-            guard let allowed = MediaPermissionStore.shared.decision(origin: origin,
-                                                                     device: device)
-            else { continue }
-            list.append(SitePermission(
-                id: "media.\(device)",
-                label: device == "camera" ? "Camera" : "Microphone",
-                state: allowed ? "Allowed" : "Blocked",
-                clearTitle: "Forget",
-                clear: { MediaPermissionStore.shared.forget(origin: origin, device: device) }
-            ))
+        if !origin.isEmpty {
+            for device in ["camera", "microphone"] {
+                guard let allowed = MediaPermissionStore.shared.decision(origin: origin,
+                                                                         device: device)
+                else { continue }
+                list.append(SitePermission(
+                    id: "media.\(device)",
+                    label: device == "camera" ? "Camera" : "Microphone",
+                    state: allowed ? "Allowed" : "Blocked",
+                    clearTitle: "Forget",
+                    clear: { MediaPermissionStore.shared.forget(origin: origin, device: device) }
+                ))
+            }
         }
 
         // ── ポップアップ ──
+        //
+        // こちらは file: にも鍵がある。PopupAllowList が、host を
+        // 持たない場所にはスキームとパスから代わりの鍵を組む
         let popupKey = PopupAllowList.originKey(for: url)
         if PopupAllowList.shared.isAllowed(popupKey) {
             list.append(SitePermission(
@@ -334,7 +352,7 @@ struct SiteInfoPopover: View {
         }
 
         // ── パスワードの問い ──
-        if PasswordNeverList.shared.contains(site) {
+        if !site.isEmpty, PasswordNeverList.shared.contains(site) {
             list.append(SitePermission(
                 id: "password",
                 label: "Saving passwords",
@@ -346,7 +364,7 @@ struct SiteInfoPopover: View {
 
         // ── 証明書の例外（この起動の間だけ）──
         let port = url.port ?? 443
-        if CertificateExceptionStore.shared.isAllowed(host: site, port: port) {
+        if !site.isEmpty, CertificateExceptionStore.shared.hasException(host: site, port: port) {
             list.append(SitePermission(
                 id: "certificate",
                 label: "Untrusted certificate",
@@ -393,6 +411,11 @@ struct SiteInfoPopover: View {
 
 struct SiteSecurityButton: View {
     @ObservedObject var tab: Tab
+    // 例外の増減を鍵の色へ届ける。
+    // 番地を変えずに例外が消える道がある以上
+    //（盤の「取り消す」と、設定画面の一括消し）、
+    // tab だけ見張っていても鍵は古いままになる
+    @ObservedObject private var exceptions = CertificateExceptionStore.shared
     @State private var showingInfo = false
 
     var body: some View {
@@ -407,6 +430,8 @@ struct SiteSecurityButton: View {
         }
         .buttonStyle(.plain)
         .disabled(!tab.security.isShown)
+        // ロビーでは鍵を消すが、場所は空けたままにする。
+        // 引っ込めると、タブを移るたびに欄の左端が横へ跳ねる
         .opacity(tab.security.isShown ? 1 : 0)
         .help("Site Information")
         .popover(isPresented: $showingInfo, arrowEdge: .bottom) {
