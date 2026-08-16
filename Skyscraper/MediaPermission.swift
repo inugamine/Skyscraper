@@ -33,6 +33,28 @@ final class MediaPermissionStore {
         UserDefaults.standard.removeObject(forKey: storageKey)
     }
 
+    // MARK: - サイト一件ぶんの出し入れ（アドレスバーのサイト情報から）
+
+    // その場所について覚えていること。nil なら未設定（次に訊く）
+    func decision(origin: String, device: String) -> Bool? {
+        decisions["\(origin)|\(device)"]
+    }
+
+    // その場所の記憶を忘れる。他のサイトには手を触れない。
+    // device を渡せばその装置だけ、省けばその場所の分を丸ごと。
+    // カメラだけ許してマイクは断った、という状態があり得るので、
+    // 一覧からは一行ずつ消せる形にしてある
+    func forget(origin: String, device: String? = nil) {
+        let prefix = origin + "|"
+        let targets = decisions.keys.filter { key in
+            if let device { return key == prefix + device }
+            return key.hasPrefix(prefix)
+        }
+        guard !targets.isEmpty else { return }
+        for key in targets { decisions.removeValue(forKey: key) }
+        UserDefaults.standard.set(decisions, forKey: storageKey)
+    }
+
     // MARK: - 判断
 
     // origin は保存用のキー（scheme://host:port）、host は画面に出す名前
@@ -101,6 +123,20 @@ final class MediaPermissionStore {
         let scheme = origin.`protocol`
         var text = scheme.isEmpty ? origin.host : "\(scheme)://\(origin.host)"
         if origin.port != 0 { text += ":\(origin.port)" }
+        return text
+    }
+
+    // URL から同じ形の鍵を組む（サイト情報の監査用）。
+    //
+    // 上の WKSecurityOrigin 版は既定のポートを 0 で差し出すので、
+    // "https://example.com" にはポートが付かない。
+    // URL 側も、書かれていなければ port は nil なので形が揃う。
+    // ここがずれると「覚えているはずなのに何も出ない」になる
+    static func storageOrigin(for url: URL) -> String {
+        guard let host = url.host(), !host.isEmpty else { return "" }
+        let scheme = (url.scheme ?? "").lowercased()
+        var text = scheme.isEmpty ? host : "\(scheme)://\(host)"
+        if let port = url.port { text += ":\(port)" }
         return text
     }
 

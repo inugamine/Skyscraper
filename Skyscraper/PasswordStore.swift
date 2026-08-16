@@ -242,6 +242,14 @@ final class PasswordNeverList {
         UserDefaults.standard.set(Array(hosts), forKey: storageKey)
     }
 
+    // 一件だけ解く（サイト情報から）。
+    // 「このサイトでは訊かない」を押した後で気が変わった時、
+    // 今までは設定画面で全部忘れるしか道が無かった
+    func remove(_ host: String) {
+        guard hosts.remove(host) != nil else { return }
+        UserDefaults.standard.set(Array(hosts), forKey: storageKey)
+    }
+
     func reset() {
         hosts.removeAll()
         UserDefaults.standard.removeObject(forKey: storageKey)

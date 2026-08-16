@@ -56,9 +56,9 @@ final class HTTPAuthPrompter {
     // MARK: - 出入口
 
     // ここで扱える種類か。
-    // サーバ証明書の検証（ServerTrust）とクライアント証明書は WebKit に任せる。
-    // 前者を自前で通すと「検証を素通しする道」を作ることになるし、
-    // 後者は選ばせる相手（キーチェーンの識別情報）が別の話になる
+    // サーバ証明書（ServerTrust）は別の係が受ける（CertificateTrust.swift）。
+    // クライアント証明書は WebKit に任せる——
+    // 選ばせる相手（キーチェーンの識別情報）が別の話になる
     static func canHandle(_ challenge: URLAuthenticationChallenge) -> Bool {
         switch challenge.protectionSpace.authenticationMethod {
         case NSURLAuthenticationMethodHTTPBasic,

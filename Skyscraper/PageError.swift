@@ -15,7 +15,7 @@ import SwiftUI
 // MARK: - 失敗の中身
 
 struct PageError {
-    enum Kind {
+    enum Kind: Equatable {
         case offline            // こちらが繋がっていない
         case hostNotFound       // 名前を引けない
         case cannotConnect      // 相手に届かない・断られた
@@ -175,7 +175,7 @@ struct PageError {
         case .timedOut:
             return String(localized: "The server took too long. It may be busy.")
         case .insecureConnection:
-            return String(localized: "The certificate could not be verified. Skyscraper offers no way past this, because there is no safe way to tell a misconfigured site from an intercepted one.")
+            return String(localized: "The certificate could not be verified. A server that is merely misconfigured looks exactly like one that someone has stepped in front of, so continue only if you know why this certificate is untrusted.")
         case .signInRequired:
             return String(localized: "The server asked for a user name and password. Choose Try Again to enter them.")
         case .badAddress:
@@ -197,6 +197,9 @@ struct PageError {
 struct ErrorPage: View {
     let error: PageError
     let onRetry: () -> Void
+    // 証明書で止まった時だけ渡される。
+    // 押せば証明書の中身を見せ、その上で押し切られた時だけ先へ通す
+    var onProceed: (() -> Void)? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -239,16 +242,37 @@ struct ErrorPage: View {
                 .lineSpacing(3)
                 .frame(maxWidth: 420)
 
-            Button(action: onRetry) {
-                Text("Try Again")
-                    .font(.system(size: 12, design: .serif))
-                    .tracking(2)
-                    .foregroundColor(Deco.gold)
-                    .padding(.horizontal, 22)
-                    .padding(.vertical, 9)
-                    .overlay(Hexagon(inset: 7).stroke(Deco.faintGold, lineWidth: 1))
+            HStack(spacing: 12) {
+                Button(action: onRetry) {
+                    Text("Try Again")
+                        .font(.system(size: 12, design: .serif))
+                        .tracking(2)
+                        .foregroundColor(Deco.gold)
+                        .padding(.horizontal, 22)
+                        .padding(.vertical, 9)
+                        .overlay(Hexagon(inset: 7).stroke(Deco.faintGold, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+
+                // 証明書で止められた時の抜け道。
+                //
+                // 「もう一度」の隣に並べるが、同じ顔にはしない。
+                // 錆色の枠で、押す前に一拍置くだけの差は付けておく。
+                // 押してもこの場では何も起きない——
+                // 証明書の中身を見せる窓が先に出る
+                if error.kind == .insecureConnection, let onProceed {
+                    Button(action: onProceed) {
+                        Text("Continue Anyway")
+                            .font(.system(size: 12, design: .serif))
+                            .tracking(2)
+                            .foregroundColor(Deco.rust)
+                            .padding(.horizontal, 22)
+                            .padding(.vertical, 9)
+                            .overlay(Hexagon(inset: 7).stroke(Deco.rust.opacity(0.5), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-            .buttonStyle(.plain)
             .padding(.top, 26)
 
             // WebKit の原文。分類が外れていても、ここを見れば追える

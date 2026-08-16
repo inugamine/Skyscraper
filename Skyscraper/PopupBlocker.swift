@@ -53,6 +53,14 @@ final class PopupAllowList {
         UserDefaults.standard.set(Array(hosts), forKey: storageKey)
     }
 
+    // 一件だけ取り消す（サイト情報から）。
+    // 設定画面の reset() は全部忘れるので、一枚のために
+    // 他のサイトの許可まで巻き添えにする理由は無い
+    func revoke(_ host: String) {
+        guard hosts.remove(host) != nil else { return }
+        UserDefaults.standard.set(Array(hosts), forKey: storageKey)
+    }
+
     func reset() {
         hosts.removeAll()
         UserDefaults.standard.removeObject(forKey: storageKey)

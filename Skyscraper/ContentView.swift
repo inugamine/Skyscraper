@@ -9,6 +9,7 @@ import SwiftUI
 import AppKit
 import WebKit
 import Combine
+import Security
 import UniformTypeIdentifiers
 import Translation
 
@@ -23,6 +24,11 @@ enum Deco {
     static let cream     = Color(red: 0xe8/255, green: 0xd9/255, blue: 0xb0/255)
     static let dimGold   = Color(red: 0x8a/255, green: 0x7a/255, blue: 0x52/255)
     static let faintGold = Color(red: 0x5a/255, green: 0x4c/255, blue: 0x2a/255)
+    // 警告に使う錆色。
+    // 信号機の赤をそのまま持ち込むと盤全体の色調が壊れるので、
+    // 金の隣に置いても喧嘩しないテラコッタに寄せてある。
+    // 使い道は鍵の警告表示だけだ（乱発すれば意味が消える）
+    static let rust      = Color(red: 0xb5/255, green: 0x6a/255, blue: 0x3c/255)
 }
 
 // MARK: - 自作シェイプ
@@ -783,6 +789,17 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // 「このページではもう出すな」を覚えるので、こちらもタブごとに一人持つ
     private let jsDialogs = JSDialogPresenter()
 
+    // 差し出されたサーバ証明書の控え（ホストごと）。
+    //
+    // ここにあることは「通した」を意味しない。検証は WebKit に任せたままで、
+    // こちらは提示された一枚を控えておくだけだ。
+    // 鍵の盤で中身を見せる時と、顛末書の「危険を承知で続行」を
+    // 押された時に、見せる材料が無いと話にならない。
+    //
+    // ページ一枚でも画像や CDN の分までチャレンジは飛んでくるので、
+    // ホストを鍵にして引ける形で持つ。次の読み込みが始まったら捨てる
+    private var serverTrusts: [String: SecTrust] = [:]
+
     private static let mediaStateMessageHandlerName = "skyscraperMediaState"
     private static let fullscreenMessageHandlerName = "skyscraperFullscreen"
     private static let mediaPlaybackObserverScript = WKUserScript(
@@ -1470,6 +1487,40 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         return comps.url
     }
 
+    // ── 接続の格（アドレスバーの鍵）──
+
+    // 今このタブが何に繋がっているか。
+    // urlText から見るので、番地が変わればそのまま鍵の色に届く。
+    //
+    // http は相手が localhost でも .insecure のままにしてある。
+    // 実害は無いが「暗号化されていない」のは事実で、
+    // 鍵が場所によって別の意味になる方がたちが悪い
+    var security: SiteSecurity {
+        guard !isHome,
+              let url = URL(string: urlText),
+              let scheme = url.scheme?.lowercased()
+        else { return .none }
+
+        switch scheme {
+        case "file":
+            return .local
+        case "https":
+            guard let host = url.host(), !host.isEmpty else { return .secure }
+            return CertificateExceptionStore.shared.isAllowed(host: host, port: url.port ?? 443)
+                ? .exception
+                : .secure
+        case "http":
+            return .insecure
+        default:
+            return .none
+        }
+    }
+
+    // 控えてある証明書。無ければ nil（鍵の盤がその旨を出す）
+    func serverTrust(for host: String) -> SecTrust? {
+        serverTrusts[host]
+    }
+
     func goBack()    { webView.goBack() }
     func goForward() { webView.goForward() }
 
@@ -1952,8 +2003,14 @@ extension Tab: WKNavigationDelegate {
     func webView(_ webView: WKWebView,
                  didReceive challenge: URLAuthenticationChallenge,
                  completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-        // サーバ証明書の検証とクライアント証明書は WebKit の既定処理のままだ。
-        // ここで引き取ると、検証を素通しする道を自分で作ることになる
+        // サーバ証明書は別の係が受ける（下の handleServerTrust）。
+        // 検証そのものはあちらでも WebKit に任せたままだ
+        if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust {
+            handleServerTrust(challenge, completionHandler: completionHandler)
+            return
+        }
+        // クライアント証明書は WebKit の既定処理のまま。
+        // 選ばせる相手（キーチェーンの識別情報）が別の話になる
         guard HTTPAuthPrompter.canHandle(challenge) else {
             completionHandler(.performDefaultHandling, nil)
             return
@@ -1972,6 +2029,35 @@ extension Tab: WKNavigationDelegate {
         }
     }
 
+    // MARK: サーバ証明書
+
+    // 差し出された証明書を、後で見せられるように控えておく係。
+    //
+    // ここで検証を回し直したりはしない。既定の判断は WebKit に任せたままで、
+    // こちらは提示された一枚を控えるだけだ（後で見せるための材料）。
+    // SecTrustEvaluateWithError をここで回すと、全ての https 接続で
+    // メインスレッドが検証の往復（OCSP 等）を待つことになる。
+    //
+    // 例外に載っている場所だけは、控えた証明書をそのまま資格情報として返す。
+    // 例外は利用者が中身を見た上で自分で作ったもので、
+    // アプリを終えば消える（CertificateTrust.swift）
+    private func handleServerTrust(_ challenge: URLAuthenticationChallenge,
+                                   completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        let space = challenge.protectionSpace
+        guard let trust = space.serverTrust, !space.host.isEmpty else {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+        serverTrusts[space.host] = trust
+
+        let port = space.port == 0 ? 443 : space.port
+        if CertificateExceptionStore.shared.isAllowed(host: space.host, port: port) {
+            completionHandler(.useCredential, URLCredential(trust: trust))
+            return
+        }
+        completionHandler(.performDefaultHandling, nil)
+    }
+
     // MARK: 読み込みの失敗
 
     // 次の読み込みが始まった／中身が届いた。前の顛末書は畳む
@@ -1982,6 +2068,10 @@ extension Tab: WKNavigationDelegate {
         PasswordSuggestionPanel.shared.hide()
         // 断った記憶を仕切り直す（「もう一度」で訊き直せるように）
         httpAuth.noteNavigationStarted()
+        // 前のページの証明書を残さない。
+        // この後ちゃんとチャレンジが飛んでくるので、
+        // 控えはそこで取り直される
+        serverTrusts.removeAll()
         // ダイアログの抑制も前のページ限りだ。ここで解く
         jsDialogs.reset()
     }
@@ -2041,6 +2131,29 @@ extension Tab: WKNavigationDelegate {
     private func clearLoadError() {
         if loadError != nil { loadError = nil }
         failedURL = nil
+    }
+
+    // 顛末書の「危険を承知で続行」。
+    //
+    // 控えてある証明書の中身を見せ、それでも押し切られた時だけ
+    // 例外に加えて開き直す。例外はその場所（ホストとポート）限りで、
+    // アプリを終えば消える。ディスクには何も書かない
+    func proceedPastCertificateError() async {
+        guard let url = failedURL ?? loadError?.url,
+              let host = url.host(), !host.isEmpty
+        else { return }
+
+        let port = url.port ?? 443
+        let store = CertificateExceptionStore.shared
+        guard await store.confirm(host: host,
+                                  trust: serverTrusts[host],
+                                  in: webView.window)
+        else { return }
+
+        store.allow(host: host, port: port)
+        loadError = nil
+        failedURL = nil
+        webView.load(URLRequest(url: url))
     }
 
     // 顛末書の「もう一度」。控えておいた宛先へ行き直す
@@ -4633,28 +4746,7 @@ struct BrowserPane: View {
                 // AppKit 実装が決定論的に行う。編集終了時は打ちかけを捨てて
                 // 現在の URL に戻す（Return 確定時は submitAddress が先に
                 // urlText を更新しているので影響なし）
-                AddressField(
-                    text: $addressText,
-                    tabToken: tab.id,
-                    tabURL: tab.urlText,
-                    focusTrigger: tab.addressBarFocusTrigger,
-                    endEditingTrigger: addressEndEditingTrigger,
-                    onSubmit: submitAddress,
-                    onEditingChanged: { editing in
-                        addressEditing = editing
-                        if !editing {
-                            addressText = tab.urlText
-                            clearSuggestions()
-                        }
-                    },
-                    onMove: moveSelection,
-                    onCancel: dismissSuggestions
-                )
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 7)
-                .background(Hexagon(inset: 6).fill(Deco.field))
-                .overlay(Hexagon(inset: 6).stroke(Deco.faintGold, lineWidth: 1))
+                addressBar
 
                 trailingControls
             }
@@ -4735,7 +4827,13 @@ struct BrowserPane: View {
                         .allowsHitTesting(showsWeb)
                 }
                 if let error = tab.loadError {
-                    ErrorPage(error: error) { tab.retryFailedLoad() }
+                    ErrorPage(
+                        error: error,
+                        onRetry: { tab.retryFailedLoad() },
+                        // 証明書で止まった時だけ札が出る。
+                        // 押した先で中身を見せ、押し切られた時に限って通す
+                        onProceed: { Task { await tab.proceedPastCertificateError() } }
+                    )
                 } else if tab.isHome {
                     NewTabPage(tab: tab)
                 }
@@ -4803,6 +4901,41 @@ struct BrowserPane: View {
             )
             .frame(width: 24, height: 24)
         }
+    }
+
+    // ── アドレスバー本体と、その左に立つ鍵 ──
+    //
+    // 切り出してあるのは下の trailingControls と同じ理由だ。
+    // 鍵と欄を HStack で束ねたのは、六角形の枠を二つに割らないため——
+    // 鍵は欄の外に置かれた別のボタンではなく、同じ一枚の札の上にある
+    private var addressBar: some View {
+        HStack(spacing: 8) {
+            // 接続の格を示す鍵。押すとサイトの調書が垂れる（SiteInfo.swift）
+            SiteSecurityButton(tab: tab)
+
+            AddressField(
+                text: $addressText,
+                tabToken: tab.id,
+                tabURL: tab.urlText,
+                focusTrigger: tab.addressBarFocusTrigger,
+                endEditingTrigger: addressEndEditingTrigger,
+                onSubmit: submitAddress,
+                onEditingChanged: { editing in
+                    addressEditing = editing
+                    if !editing {
+                        addressText = tab.urlText
+                        clearSuggestions()
+                    }
+                },
+                onMove: moveSelection,
+                onCancel: dismissSuggestions
+            )
+            .frame(maxWidth: .infinity)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .background(Hexagon(inset: 6).fill(Deco.field))
+        .overlay(Hexagon(inset: 6).stroke(Deco.faintGold, lineWidth: 1))
     }
 
     // ── アドレスバー右端の道具 ──

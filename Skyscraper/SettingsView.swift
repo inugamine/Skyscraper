@@ -351,6 +351,13 @@ struct SettingsView: View {
                       note: "Pop-ups will be blocked again.") {
                 privacy.resetPopupAllowList()
             }
+
+            // 「危険を承知で続行」で通した証明書の例外。
+            // 元々アプリを終えば消えるので、その旨を記しておく
+            actionRow("Clear Certificate Exceptions",
+                      note: "Also cleared when you quit Skyscraper.") {
+                privacy.resetCertificateExceptions()
+            }
         }
 
         // 完了の一言

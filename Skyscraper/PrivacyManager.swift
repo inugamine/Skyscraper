@@ -103,6 +103,16 @@ final class PrivacyManager: ObservableObject {
         flash(String(localized: "Done. Password prompts have been reset."))
     }
 
+    // 「危険を承知で続行」で通した証明書の例外を今すぐ忘れる。
+    //
+    // 放っておいてもアプリを終えば消える——そういう作りにしてある。
+    // それでも札を出しておくのは、間違えて押した時に
+    // アプリを再起動するしか道が無いと困るからだ
+    func resetCertificateExceptions() {
+        CertificateExceptionStore.shared.reset()
+        flash(String(localized: "Done. Certificate exceptions have been cleared."))
+    }
+
     // 一言表示を出して、数秒で消す
     private func flash(_ message: String) {
         lastClearedMessage = message
