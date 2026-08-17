@@ -645,8 +645,12 @@ private final class WeakScriptMessageHandler: NSObject, WKScriptMessageHandler {
 final class Tab: NSObject, ObservableObject, Identifiable {
     let id = UUID()
     // WKWebView は生成後に configuration を読むとコピーが返るため、
-    // 設定は必ず生成前に済ませる
-    let webView: WKWebView
+    // 設定は必ず生成前に済ませる。
+    //
+    // let ではなく var なのは、しばらく触られていないタブを畳む時に
+    // 一度捨て、戻ってきた時に作り直すためだ。
+    // 差し替えるのはこのファイルの中からだけ（private(set)）
+    private(set) var webView: WKWebView
 
     // WKWebView の器を作る。
     // popup が渡された場合は、WebKit が用意した設定をそのまま使う。
@@ -1209,6 +1213,24 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         webView = Tab.makeWebView(popupConfiguration)
         super.init()
 
+        wire()
+        start(url: url, title: title, deferLoad: deferLoad,
+              interactionState: interactionState,
+              isPopup: popupConfiguration != nil)
+    }
+
+    // このタブぶんの配線を全て済ませる。
+    //
+    // init から切り出してあるのは、タブを畳んで器を捨てた後、
+    // 戻ってきた時に同じ配線をやり直す必要があるからだ。
+    // 経路を二本に割ると、片方にだけ足した仕込みが必ず抜け落ちる。
+    // 新しい注入も見張りも、必ずここに足すこと
+    private func wire() {
+        // 前の器に付けた見張りを畳む。
+        // 初回は空なので素通りする（作り直しの時にだけ効く）
+        observers.forEach { $0.invalidate() }
+        observers.removeAll()
+
         // トラックパッドの2本指スワイプで戻る／進む
         webView.allowsBackForwardNavigationGestures = true
         // Safari の「開発」メニューから Web インスペクタを繋げるようにする。
@@ -1308,7 +1330,16 @@ final class Tab: NSObject, ObservableObject, Identifiable {
             guard let self else { return }
             Task { @MainActor in self.pageTitle = wv.title ?? "" }
         })
-        if popupConfiguration != nil {
+    }
+
+    // 最初に何を映すかを決める。
+    //
+    // 配線（wire）と別にしてあるのは、畳んだタブを起こす時には
+    // 配線だけをやり直し、中身は控えてある interactionState から
+    // 戻すからだ。両方を一つに混ぜると分けられなくなる
+    private func start(url: String?, title: String, deferLoad: Bool,
+                       interactionState: Data?, isPopup: Bool) {
+        if isPopup {
             // window.open() から生まれたタブ。
             // 中身を入れるのは WebKit の仕事なので、こちらからは load しない。
             // ロビーではないので isHome は下ろしておく
