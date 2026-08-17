@@ -475,6 +475,23 @@
         }
       }
     },
+    "Automatic" : {
+      "comment" : "A menu item that lets the translator detect the source language on its own.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatic"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自動判別"
+          }
+        }
+      }
+    },
     "Automatically check for updates" : {
       "localizations" : {
         "en" : {

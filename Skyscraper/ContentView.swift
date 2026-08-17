@@ -5463,10 +5463,20 @@ struct TranslationPanel: View {
 
     private var languageRow: some View {
         HStack(spacing: 8) {
-            Text(verbatim: translator.detectedLanguageName)
-                .font(.system(size: 11, design: .serif))
-                .foregroundColor(Deco.gold)
-                .lineLimit(1)
+            // 原文の言語。判別できなかった時や、判別が外れている時に手で選べる
+            Menu {
+                Button("Automatic") { translator.setSourceLanguage(nil) }
+                Divider()
+                ForEach(translator.availableLanguages, id: \.self) { language in
+                    Button(Translator.displayName(of: language)) {
+                        translator.setSourceLanguage(language)
+                    }
+                }
+            } label: {
+                languageLabel(translator.sourceLanguageName)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
 
             Image(systemName: "arrow.right")
                 .font(.system(size: 9))
@@ -5479,25 +5489,20 @@ struct TranslationPanel: View {
                     }
                 }
             } label: {
-                HStack(spacing: 5) {
-                    Text(verbatim: Translator.displayName(of: translator.targetLanguage))
-                        .font(.system(size: 11, design: .serif))
-                        .foregroundColor(Deco.cream)
-                        .lineLimit(1)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 8))
-                        .foregroundColor(Deco.dimGold)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .overlay(Hexagon(inset: 4).stroke(Deco.faintGold, lineWidth: 1))
+                languageLabel(Translator.displayName(of: translator.targetLanguage))
             }
             .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
             .fixedSize()
 
             Spacer(minLength: 0)
         }
+    }
+
+    private func languageLabel(_ title: String) -> some View {
+        Text(verbatim: title)
+            .font(.system(size: 11, design: .serif))
+            .foregroundColor(Deco.cream)
+            .lineLimit(1)
     }
 
     // ── 訳文（もしくは途中経過）──

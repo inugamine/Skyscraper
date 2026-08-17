@@ -59,6 +59,13 @@ final class Translator: ObservableObject {
     // NaturalLanguage が判定した原文の言語。確信が持てなければ nil
     @Published private(set) var detectedLanguage: Locale.Language?
 
+    // 利用者が手で選んだ原文の言語。nil なら自動判別に任せる。
+    // 判別できなかった時だけでなく、判別が外れている時にも上書きできる。
+    // didSet は使わず setSourceLanguage(_:) を通す。
+    // 新しい選択を受けた時にここを素で戻す必要があり、
+    // didSet だとそのたびに翻訳が走ってしまう
+    @Published private(set) var manualSourceLanguage: Locale.Language?
+
     // 訳先。変えたら即座に訳し直す
     @Published var targetLanguage: Locale.Language {
         didSet {
@@ -118,6 +125,9 @@ final class Translator: ObservableObject {
         }
 
         sourceText = String(trimmed.prefix(characterLimit))
+        // 新しい文になったら、前の手動指定は引き継がない。
+        // 英語の段落のために選んだ設定が、次に選んだ中国語にまで付いて回っては困る
+        manualSourceLanguage = nil
         detectedLanguage = detectLanguage(of: sourceText)
 
         // 原文と訳先が同じなら、訳先を控えの言語へ振り替える。
@@ -171,6 +181,21 @@ final class Translator: ObservableObject {
         requestSession()
     }
 
+    // 原文の言語を手で指定する。nil を渡せば自動判別に戻る
+    func setSourceLanguage(_ language: Locale.Language?) {
+        guard manualSourceLanguage != language else { return }
+        manualSourceLanguage = language
+        guard !sourceText.isEmpty else { return }
+
+        // 指定した原文の言語が訳先とぶつかったら、訳先を逃がす。
+        // targetLanguage の didSet が requestSession を呼ぶので二重に呼ばない
+        if let language, sameLanguage(language, targetLanguage) {
+            targetLanguage = fallbackTarget(avoiding: language)
+            return
+        }
+        requestSession()
+    }
+
     func close() {
         isPresented = false
     }
@@ -189,9 +214,9 @@ final class Translator: ObservableObject {
     private func requestSession() {
         phase = .preparing
 
-        // 判定に自信が無ければ source を nil にして
+        // 手で選ばれていればそれを優先。どちらも無ければ source は nil にして
         // フレームワーク側の判定に任せる（間違った source を渡すより安全）
-        let source = detectedLanguage
+        let source = manualSourceLanguage ?? detectedLanguage
         let target = targetLanguage
 
         if currentSource == source, currentTarget == target, configuration != nil {
@@ -297,9 +322,12 @@ final class Translator: ObservableObject {
         return Locale.current.localizedString(forLanguageCode: code) ?? code
     }
 
-    var detectedLanguageName: String {
-        guard let detectedLanguage else { return String(localized: "Unknown") }
-        return Self.displayName(of: detectedLanguage)
+    // 盤に出す原文の言語名。手動指定 > 自動判別 > 不明
+    var sourceLanguageName: String {
+        guard let language = manualSourceLanguage ?? detectedLanguage else {
+            return String(localized: "Unknown")
+        }
+        return Self.displayName(of: language)
     }
 
     // MARK: - 保存
