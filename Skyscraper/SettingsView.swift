@@ -21,6 +21,7 @@ struct SettingsView: View {
     @AppStorage(TabManager.restoreSessionKey) private var restoresSession = true
     @AppStorage(SleepBlocker.enabledKey) private var preventsSleepDuringVideo = true
     @AppStorage(BookmarkSync.enabledKey) private var syncsBookmarks = true
+    @AppStorage(TabManager.autoUnloadKey) private var autoUnloadMinutes = 30
     @State private var showingPasswords = false
     @State private var showingExtensions = false
     @State private var pane: Pane = .general
@@ -258,6 +259,64 @@ struct SettingsView: View {
             bookmarks.syncSettingChanged()
         }
 
+        // ══ タブ ══
+        sectionHeader("Tabs")
+
+        // ── 未使用タブの解放 ──
+        //
+        // 入り切りではなく選択式なのは、この仕掛けの価値が
+        // 「やるかやらないか」ではなく「どれだけ待つか」にあるからだ。
+        // 短くすればメモリは返るが、書きかけのフォームを失う危険も上がる
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Unload unused tabs")
+                .font(.system(size: 12, design: .serif))
+                .foregroundColor(Deco.cream)
+
+            HStack(alignment: .top, spacing: 12) {
+                Menu {
+                    ForEach(Self.unloadChoices, id: \.self) { minutes in
+                        Button {
+                            autoUnloadMinutes = minutes
+                        } label: {
+                            if minutes == autoUnloadMinutes {
+                                Label {
+                                    Text(Self.unloadLabel(minutes))
+                                } icon: {
+                                    Image(systemName: "checkmark")
+                                }
+                            } else {
+                                Text(Self.unloadLabel(minutes))
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(Self.unloadLabel(autoUnloadMinutes))
+                            .font(.system(size: 11, design: .serif))
+                            .tracking(1)
+                            .foregroundColor(Deco.gold)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 8))
+                            .foregroundColor(Deco.dimGold)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .overlay(Hexagon(inset: 6).stroke(Deco.faintGold, lineWidth: 1))
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+
+                Text("Tabs you have not looked at for a while give up their contents and free the memory they were holding. They load again when you select them, with the scroll position and history intact. Anything typed into a form is lost.")
+                    .font(.system(size: 10, design: .serif))
+                    .foregroundColor(Deco.dimGold)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(.bottom, 22)
+
         // ══ 拡張機能 ══
         sectionHeader("Extensions")
 
@@ -407,6 +466,20 @@ struct SettingsView: View {
         guard !all.isEmpty else { return "No extensions are loaded." }
         let active = all.filter(\.isEnabled).count
         return "\(active) of \(all.count) enabled."
+    }
+
+    // 未使用タブを畳むまでの選択肢（分）。0 は「畳まない」。
+    //
+    // ここに無い値でも defaults 経由で入れば動く（試験用）。
+    // その場合は下の unloadLabel が分数をそのまま出す
+    private static let unloadChoices = [0, 15, 30, 60]
+
+    private static func unloadLabel(_ minutes: Int) -> LocalizedStringKey {
+        switch minutes {
+        case 0:  "Never"
+        case 60: "After 1 hour"
+        default: "After \(minutes) minutes"
+        }
     }
 
     private func sectionHeader(_ title: LocalizedStringKey) -> some View {
