@@ -782,6 +782,29 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // 遅延読み込みと併せる場合はここに控えておく
     private var pendingInteractionState: Data?
 
+    // 畳んでいる間の拡大率の控え。器と一緒に捨てられるので手元に持つ
+    private var savedZoom: CGFloat = 1.0
+
+    // 最後に見られていた時刻。自動で畳む際の物差しに使う。
+    // @Published にしないのは、これが動くたびに盤を描き直す理由が無いからだ
+    private(set) var lastActiveAt = Date()
+
+    func noteActivity() { lastActiveAt = Date() }
+
+    // window.open() から生まれたタブか。
+    // opener の縁は器を作り直すと切れるので、この手のタブは決して畳まない
+    private let isPopupBorn: Bool
+
+    // 器を作り直した回数。
+    // SwiftUI 側はこれを .id に使う。WebView の器は一度組んだら
+    // 中身を付け替えない作り（updateNSView が親子関係に触らない）なので、
+    // 差し替えた WKWebView を映すには器ごと組み直させるしかない
+    @Published private(set) var webViewGeneration: Int = 0
+
+    // 中身を捨てて眠っているか。
+    // サイドバーの色と、二重に畳まないための旗を兼ねる
+    @Published private(set) var isUnloaded: Bool = false
+
     // パスキー（WebAuthn）の橋渡し役。実体は PasskeyManager.swift
     private let passkeyBridge = PasskeyBridge()
 
@@ -1210,6 +1233,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
          deferLoad: Bool = false,
          interactionState: Data? = nil,
          popupConfiguration: WKWebViewConfiguration? = nil) {
+        isPopupBorn = popupConfiguration != nil
         webView = Tab.makeWebView(popupConfiguration)
         super.init()
 
@@ -1351,6 +1375,8 @@ final class Tab: NSObject, ObservableObject, Identifiable {
             urlText = url ?? ""
             if deferLoad {
                 pendingInteractionState = interactionState
+                // 器はあるが中身は無い。畳んだタブと全く同じ状態なので、旗も揃える
+                isUnloaded = true
             } else {
                 restore(interactionState)
             }
@@ -1362,6 +1388,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
                 isHome = false
                 pageTitle = title
                 pendingURL = url
+                isUnloaded = true
             } else {
                 load()
             }
@@ -1374,13 +1401,93 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         if let state = pendingInteractionState {
             pendingInteractionState = nil
             pendingURL = nil
+            isUnloaded = false
             restore(state)
+            webView.pageZoom = savedZoom
             return
         }
         guard let pending = pendingURL else { return }
         pendingURL = nil
+        isUnloaded = false
         urlText = pending
         load()
+        webView.pageZoom = savedZoom
+    }
+
+    // 畳んでよいタブか。
+    //
+    // ・ロビー（捨てる中身が無い）
+    // ・window.open() 生まれ（opener の縁が切れる）
+    // ・音を鳴らしている
+    // ・既に畳んである、またはまだ一度も読んでいない
+    //
+    // 選択中かどうかはここでは見ない——タブは自分が見られているかを
+    // 知らない。それは TabManager の仕事だ。
+    //
+    // ダウンロード進行中の扱いは未検証だ。WKDownload が器の死後も
+    // 生きるなら何も要らないし、死ぬならここに一行足すことになる
+    var canUnload: Bool {
+        !isHome
+            && !isPopupBorn
+            && !isPlayingAudio
+            && !isUnloaded
+            && pendingURL == nil
+            && pendingInteractionState == nil
+    }
+
+    // 履歴の控え。
+    // 畳んでいる間は WKWebView が空なので、手元の控えを返す。
+    // 閉じたタブの復元（⇧⌘T）がここを見る
+    var restorableState: Data? {
+        pendingInteractionState ?? webView.interactionState as? Data
+    }
+
+    // 中身を捨てて、空の器を据え直す。
+    //
+    // WKWebView 一枚につき WebContent プロセスが一つ立つので、
+    // 実メモリを返すには器そのものを捨てるしかない
+    //（about:blank を読ませてもプロセスは残る）。
+    //
+    // 戻る／進むの履歴とスクロール位置は interactionState に控えるが、
+    // フォームの打ちかけは戻らない。ここは割り切る
+    func unload() {
+        guard canUnload else { return }
+
+        pendingInteractionState = webView.interactionState as? Data
+        // 控えが取れなかった場合の保険。番地だけは覚えておく
+        if pendingInteractionState == nil {
+            pendingURL = webView.url?.absoluteString ?? urlText
+        }
+        savedZoom = webView.pageZoom
+
+        // 古い器を黙らせてから縁を切る。
+        // 順番が肝だ——先に手を放すと、鳴っている音が止まらないまま
+        // どこかに掴まれて生き残る余地が出る（closeTab と同じ理屈）
+        let old = webView
+        old.stopLoading()
+        old.pauseAllMediaPlayback(completionHandler: nil)
+        old.closeAllMediaPresentations {}
+        old.configuration.userContentController.removeAllScriptMessageHandlers()
+        old.configuration.userContentController.removeAllUserScripts()
+        old.navigationDelegate = nil
+        old.uiDelegate = nil
+        // これを忘れると一切の意味が無くなる。
+        // WebViewContainer は addSubview で器を強く掴んでいるので、
+        // ここで剥がさない限り、差し替えても古い方が画面に掴まれたまま生き残る
+        old.removeFromSuperview()
+
+        // 空の器を据えて配線し直す。
+        // ここで作り直しておけば、tab.webView を見る箇所
+        //（セッション保存・拡張機能・スリープ抑制）は
+        // Optional を気にせず今まで通り動く
+        webView = Tab.makeWebView(nil)
+        wire()
+
+        isUnloaded = true
+        isLoading = false
+        canGoBack = false
+        canGoForward = false
+        webViewGeneration &+= 1
     }
 
     // 控えておいた履歴（戻る／進むの連なりとスクロール位置）を流し込む。
@@ -2441,6 +2548,11 @@ final class TabManager: NSObject, ObservableObject {
             PasswordSuggestionPanel.shared.hide()
             // 復元されたまま眠っているタブなら、ここで初めて読みに行く
             selectedTab?.activateIfDeferred()
+            // 触られた時刻を控える。去るタブも今のタブも、ここが起点になる。
+            // 去る側を控えないと、選ばれた時刻のままなので
+            // 一日見ていたタブが外した途端に畳まれる
+            tabs.first { $0.id == oldValue }?.noteActivity()
+            selectedTab?.noteActivity()
             // 拡張機能へ「見ているタブが変わった」を知らせる
             WebExtensionManager.shared.tabDidActivate(
                 selectedTab,
@@ -2493,6 +2605,26 @@ final class TabManager: NSObject, ObservableObject {
     private var saveTask: Task<Void, Never>?
     private var terminationObserver: NSObjectProtocol?
 
+    // ── 自動アンロード ──
+    //
+    // 設定の「何分触らなければ畳むか」。0 なら一切畳まない。
+    // 既定を 30 分にしてあるのは、これを短くすると
+    // 書きかけのフォームが黙って消える危険が増えるからだ
+    static let autoUnloadKey = "skyscraper.autoUnloadMinutes"
+    static var autoUnloadMinutes: Int {
+        UserDefaults.standard.object(forKey: autoUnloadKey) as? Int ?? 30
+    }
+
+    // 見回りの間隔。分単位の話なので、一分に一度で事足りる
+    private static let sweepInterval: TimeInterval = 60
+
+    // メモリが足りなくなった時の見逃し幅。
+    // 非常時でも、直前まで見ていたタブを落とすのは乱暴だ
+    private static let pressureGrace: TimeInterval = 60
+
+    private var idleSweeper: Task<Void, Never>?
+    private var memoryPressure: DispatchSourceMemoryPressure?
+
     // 生きている管理人の名簿（弱参照）。
     //
     // 以前は「最初の窓が受け持つ」形にしていたが、それだと
@@ -2527,6 +2659,10 @@ final class TabManager: NSObject, ObservableObject {
     func markClosed() {
         guard !Self.isTerminating else { return }
         isClosed = true
+        idleSweeper?.cancel()
+        idleSweeper = nil
+        memoryPressure?.cancel()
+        memoryPressure = nil
         WebExtensionManager.shared.windowDidClose(self)
         Self.saveAll()
 
@@ -2612,6 +2748,8 @@ final class TabManager: NSObject, ObservableObject {
         Self.registry.append(WeakManager(manager: self))
         restoreSession()
         didRestore = true
+        startIdleSweeper()
+        startMemoryPressureWatch()
         // 選択中の一枚だけは、待たずに読み込みを始める
         selectedTab?.activateIfDeferred()
 
@@ -2988,7 +3126,7 @@ final class TabManager: NSObject, ObservableObject {
         // 履歴（interactionState）を抜くのは、下で about:blank を流し込む前でなければ
         // ならない。後だと白紙ページまで含んだ履歴を掴むことになる
         let restoreURL = tab.isHome ? "" : (tab.webView.url?.absoluteString ?? tab.urlText)
-        let restoreState = tab.isHome ? nil : tab.webView.interactionState as? Data
+        let restoreState = tab.isHome ? nil : tab.restorableState
         recentlyClosed.append(ClosedTab(url: restoreURL,
                                         title: tab.pageTitle,
                                         interactionState: restoreState))
@@ -3021,6 +3159,89 @@ final class TabManager: NSObject, ObservableObject {
     }
 
     func select(_ tab: Tab) { selectedID = tab.id }
+
+    // しばらく使わないタブを畳む。
+    //
+    // 今は右クリックから手で呼ぶだけだ——自動化はこの後。
+    // まずは手で畳んで、起こして、実メモリが返るかを目で確かめる。
+    //
+    // 見ているタブを畳むのは筋が通らないので、ここで弾く
+    func unload(_ tab: Tab) {
+        guard tab.id != selectedID, tab.canUnload else { return }
+        tab.unload()
+        // 器を差し替えたことを BrowserPane に伝える。
+        // Tab の @Published はその Tab を見ている View しか起こさないので、
+        // 一覧を持っている側へはここから告げる（fullscreenWatchers と同じ理屈）
+        objectWillChange.send()
+    }
+
+    // ── 見回り ──
+
+    // 一分に一度、放っておかれているタブを探して畳む。
+    //
+    // Timer ではなく Task にしてあるのは、@MainActor の中を
+    // そのまま歩けるからだ。窓ごとに一人回る
+    private func startIdleSweeper() {
+        idleSweeper = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(Self.sweepInterval))
+                guard !Task.isCancelled else { return }
+                // 窓が閉じられたら見回りも終わりだ
+                guard let self, !self.isClosed else { return }
+                self.sweepIdleTabs()
+            }
+        }
+    }
+
+    private func sweepIdleTabs() {
+        let minutes = Self.autoUnloadMinutes
+        guard minutes > 0 else { return }
+        unloadIdleTabs(olderThan: TimeInterval(minutes) * 60)
+    }
+
+    // 指定した間触られていないタブをまとめて畳む。
+    // 見ている一枚と、canUnload ではねられるタブは見送る
+    @discardableResult
+    private func unloadIdleTabs(olderThan idle: TimeInterval) -> Int {
+        let now = Date()
+        var count = 0
+        for tab in tabs where tab.id != selectedID {
+            guard tab.canUnload,
+                  now.timeIntervalSince(tab.lastActiveAt) >= idle else { continue }
+            tab.unload()
+            count += 1
+        }
+        if count > 0 { objectWillChange.send() }
+        return count
+    }
+
+    // ── メモリが足りなくなった時 ──
+    //
+    // 分単位の見回りを待っていては間に合わない場面がある。
+    // OS が悲鳴を上げたら、その場で空けられるだけ空ける。
+    //
+    // 設定で「畳まない」を選んでいる人の手元では、ここも動かない。
+    // 非常時だからといって、切ってある仕掛けが勝手に動く方がたちが悪い
+    private func startMemoryPressureWatch() {
+        let source = DispatchSource.makeMemoryPressureSource(
+            eventMask: [.warning, .critical],
+            queue: .main
+        )
+        // ソースはこちらが強く持つので、ハンドラは必ず弱く持つこと。
+        // 直に self を掴むと輪になり、窓を閉じても管理人が死なない
+        source.setEventHandler { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, !self.isClosed else { return }
+                guard Self.autoUnloadMinutes > 0 else { return }
+                let freed = self.unloadIdleTabs(olderThan: Self.pressureGrace)
+                if freed > 0 {
+                    print("TabManager: memory pressure, unloaded \(freed) tab(s)")
+                }
+            }
+        }
+        source.resume()
+        memoryPressure = source
+    }
 
     func closeSelected() {
         if let tab = selectedTab { closeTab(tab) }
@@ -3364,7 +3585,8 @@ private struct DraggableTabRow: View {
             isSelected: tab.id == manager.selectedID,
             onSelect: { manager.select(tab) },
             onClose:  { manager.closeTab(tab) },
-            onMoveToNewWindow: { manager.moveTabToNewWindow(tab) }
+            onMoveToNewWindow: { manager.moveTabToNewWindow(tab) },
+            onUnload: { manager.unload(tab) }
         )
         // 高さを測っておく（上下判定に使う）。
         //
@@ -3499,6 +3721,8 @@ struct DecoTabRow: View {
     let onSelect: () -> Void
     let onClose: () -> Void
     let onMoveToNewWindow: () -> Void
+    // 診断用：このタブを手で畳む
+    let onUnload: () -> Void
 
     @State private var hovering = false
     @State private var showingNewGroup = false
@@ -3524,7 +3748,11 @@ struct DecoTabRow: View {
 
             (tab.pageTitle.isEmpty ? Text("New Tab") : Text(verbatim: tab.pageTitle))
                 .font(.system(size: 12, design: .serif))
-                .foregroundColor(isSelected ? Deco.cream : Deco.dimGold)
+                // 畳んでいる間は一段沈める。
+                // 選べないわけではない（押せば起きる）ので、消したりはしない
+                .foregroundColor(tab.isUnloaded
+                                 ? Deco.faintGold
+                                 : (isSelected ? Deco.cream : Deco.dimGold))
                 .lineLimit(1)
                 .truncationMode(.tail)
 
@@ -3555,6 +3783,8 @@ struct DecoTabRow: View {
         .animation(.easeInOut(duration: 0.12), value: hovering)
         .contextMenu {
             Button(tab.isMuted ? "Unmute Tab" : "Mute Tab") { tab.toggleMute() }
+            Button("Unload Tab") { onUnload() }
+                .disabled(!tab.canUnload)
             Menu("Move to Group") {
                 ForEach(groupNames, id: \.self) { name in
                     Button {
@@ -4878,6 +5108,14 @@ struct BrowserPane: View {
                     WebView(webView: t.webView, isInteractive: showsWeb)
                         .opacity(showsWeb ? 1 : 0)
                         .allowsHitTesting(showsWeb)
+                        // 器を作り直したら、こちらの器も組み直させる。
+                        //
+                        // updateNSView は WKWebView の親子関係に一切触らない
+                        //（全画面再生を壊さないための判断。詳しくは WebView の中）。
+                        // だから中身を差し替えても、そこには何も届かない。
+                        // .id を変えて makeNSView からやり直させる——
+                        // 器ごと新しく作るので、付け替えをめぐる上の話とは土俵が違う
+                        .id(t.webViewGeneration)
                 }
                 if let error = tab.loadError {
                     ErrorPage(
