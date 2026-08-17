@@ -5005,6 +5005,12 @@ struct BrowserPane: View {
     @State private var addressEndEditingTrigger = 0
     // アドレスバー行の高さ。候補一覧をその真下へ落とすのに使う
     @State private var addressBarHeight: CGFloat = 0
+    // ブックマークバーを出すか（⌘B）。
+    // 窓ごとの @State ではなく UserDefaults に置くのは、
+    // 帯そのものが窓をまたいで同じ中身だから——片方の窓だけ
+    // 出ている状態は、見た目の統一より混乱の方が大きい。
+    // メニュー側（BrowserCommands）も同じ鍵を見ている
+    @AppStorage("bookmarkBarVisible") private var showsBookmarkBar = true
 
     // 編集中で、かつ出すものがある時だけ垂らす
     private var showsSuggestions: Bool {
@@ -5068,7 +5074,9 @@ struct BrowserPane: View {
             .zIndex(1)
 
             // ── ブックマークバー ──
-            BookmarkBar(tab: tab, manager: manager)
+            if showsBookmarkBar {
+                BookmarkBar(tab: tab, manager: manager)
+            }
 
             // ── ページ内検索バー（⌘F）──
             // タブごとに作り直す。使い回すと、前のタブで編集中だった

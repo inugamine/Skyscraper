@@ -84,6 +84,12 @@ struct BrowserCommands: Commands {
     @FocusedValue(\.tabManager) private var manager: TabManager?
     @FocusedValue(\.translator) private var translator: Translator?
 
+    // ブックマークバーを出すか。
+    // BrowserPane と同じ鍵を見ているだけで、中継ぎは要らない——
+    // UserDefaults の変化は @AppStorage を持つ全員に届くので、
+    // ここで倒せば全ての窓の帯が揃って引っ込む
+    @AppStorage("bookmarkBarVisible") private var showsBookmarkBar = true
+
     var body: some Commands {
         // File メニュー：SwiftUI が用意する New Window（⌘N）の下にタブ操作を並べる。
         // 以前は replacing で New Window ごと潰していた
@@ -158,6 +164,10 @@ struct BrowserCommands: Commands {
         // CommandMenu("View") だと macOS が既に持っている「表示」の隣に
         // 同名のメニューがもう一つ生えるので、既存の方に相乗りする
         CommandGroup(after: .toolbar) {
+            // チェック付きの項目になる（Safari の「お気に入りバーを隠す」と
+            // 同じ場所）。窓が一つも無くても効くので disabled は付けない
+            Toggle("Show Bookmarks Bar", isOn: $showsBookmarkBar)
+                .keyboardShortcut("b", modifiers: .command)
             Divider()
             Button("Zoom In") { manager?.selectedTab?.zoomIn() }
                 .keyboardShortcut("+", modifiers: .command)

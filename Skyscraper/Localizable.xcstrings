@@ -3273,6 +3273,16 @@
         }
       }
     },
+    "Show Bookmarks Bar" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ブックマークを表示"
+          }
+        }
+      }
+    },
     "Show in Finder" : {
       "localizations" : {
         "en" : {
