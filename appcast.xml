@@ -7,6 +7,29 @@
     <language>en</language>
 
     <item>
+      <title>Version 1.15</title>
+      <pubDate>Tue, 18 Aug 2026 09:03:10 +0900</pubDate>
+      <sparkle:version>15</sparkle:version>
+      <sparkle:shortVersionString>1.15</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>Skyscraper 1.15</h2>
+        <ul>
+          <li>設定画面を全体的に作り替えました</li>
+          <li>自己署名などの対応を行いました</li>
+          <li>ブラウザの安全性を表示する鍵マークをアドレスバーに表示する機能を実装しました</li>
+          <li>15分、30分、1時間閲覧していないタブを休ませ(アンロード)てメモリを解放する機能を実験的に実装しました</li>
+          <li>アンロードされたタブのフォームなどに打ちかけだった入力は消えてしまいますのでご注意ください</li>
+          <li>Command+b でブックマークの表示・非表示ができるようになりました</li>
+          <li>Command+Option+T で選択部分を翻訳する際に、翻訳元の言語を選択できるようになりました</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://github.com/inugamine/Skyscraper/releases/download/v1.15/Skyscraper-1.15.zip"
+        sparkle:edSignature="/s3Rwl4nqsx/8OjwstQYKH4AI4XdTPFf0A5I2FEZsjn5FVjM5GCquZUO9AxsskQ9eLM1ffHOm9RJ3KtZ0Ly6BA=="
+        length="12971140"
+        type="application/octet-stream" />
+    </item>    <item>
       <title>Version 1.14</title>
       <pubDate>Sat, 15 Aug 2026 16:43:20 +0900</pubDate>
       <sparkle:version>14</sparkle:version>
