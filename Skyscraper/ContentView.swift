@@ -4465,8 +4465,15 @@ final class ClickSelectTextField: NSTextField {
     // タブ切り替え時の仕切り直し：編集を破棄し、engaged も下ろす。
     // abortEditing は textDidEndEditing を通らないので、編集終了の通知は手動で流す
     func resetForTabSwitch() {
+        // 編集中でなければ abortEditing には触らない。
+        // あの中で AppKit が入力メソッド（別プロセス・Default QoS）とやり取りするので、
+        // メインスレッドが格下の返事を待つ形になり、
+        // Xcode の Thread Performance Checker が優先度の逆転を警告する。
+        // 待ちが起きているのは Apple 側の中なのでこちらからは直せないが、
+        // 用の無い時に踏み込むのはやめられる。
+        // タブ切り替えの大半はアドレスバーを触っていない
         let wasEditing = currentEditor() != nil
-        abortEditing()
+        if wasEditing { abortEditing() }
         engaged = false
         if wasEditing { onEditingChanged?(false) }
     }
