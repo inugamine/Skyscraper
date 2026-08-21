@@ -7,6 +7,23 @@
     <language>en</language>
 
     <item>
+      <title>Version 1.17</title>
+      <pubDate>Fri, 21 Aug 2026 22:30:45 +0900</pubDate>
+      <sparkle:version>17</sparkle:version>
+      <sparkle:shortVersionString>1.17</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>Skyscraper 1.17</h2>
+        <ul>
+          <li>YouTube の再生に関する不具合に対応しました(多分)</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://github.com/inugamine/Skyscraper/releases/download/v1.17/Skyscraper-1.17.zip"
+        sparkle:edSignature="4dqu+AosTjzDg7ACL82tw2HDqK/bpAuocpqwMXE15Z14RBPDHcjWPUotTjFpJvhvZwq4wjGwv3SQTtQ6jvGrAQ=="
+        length="13007433"
+        type="application/octet-stream" />
+    </item>    <item>
       <title>Version 1.16</title>
       <pubDate>Fri, 21 Aug 2026 20:59:31 +0900</pubDate>
       <sparkle:version>16</sparkle:version>
