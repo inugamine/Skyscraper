@@ -20,6 +20,20 @@
 //  前方一致で潰すのは誤爆の危険があるからだろう。
 //  自分専用のブラウザならその割り切りができる——それがここの価値だ。
 //
+//  ── YouTube には手を出さない ──
+//
+//  ここの整形ルールを当てると「広告ブロッカーは利用規約に違反しています」が出て
+//  再生が止まる。css-display-none は WebKit が直に当てるので、
+//  ページ側から getComputedStyle で覗けば「本来あるはずの枠が消えている」が
+//  そのまま見える。JS で隠すより足跡が濃い。
+//
+//  切り分けで確かめた：uBOL を切り、プレイヤー監視（youtubeAdSkipScript）を
+//  抜いた上でも、ここが生きている限り止まった。丸ごと外して初めて再生できた。
+//
+//  一方 uBOL は同じ遮断をしても通る。あちらは検知への対処を続けている。
+//  追いかけっこに個人のブラウザで乗る意味は無いので、YouTube はあちらに任せ、
+//  こちらは exceptDomains で自分から降りる
+//
 //  ── 育て方 ──
 //  普段見るサイトで空枠が残っていたら、Web インスペクタで要素を掴んで
 //  cosmeticRules に一行足す。ドメイン一覧を追いかけるより効果が見える。
@@ -35,7 +49,7 @@ final class AdBlocker {
 
     // ルールを変えたらここの番号を上げる。
     // 識別子が変わると古いコンパイル済みキャッシュを捨てて作り直す
-    private let identifier = "skyscraper.adblock.v5"
+    private let identifier = "skyscraper.adblock.v6"
 
     private var cached: WKContentRuleList?
     private var compileTask: Task<WKContentRuleList?, Never>?
@@ -116,6 +130,10 @@ final class AdBlocker {
     private struct Cosmetic {
         let selector: String
         var domains: [String]? = nil
+        // 効かせない場所。YouTube のように、枠を隠すこと自体を
+        // 見咎めてくるサイトを汎用ルールから外すために使う。
+        // domains と同時には指定できない（下の組み立てを見ろ）
+        var exceptDomains: [String]? = nil
     }
 
     private static let cosmeticRules: [Cosmetic] = [
@@ -123,26 +141,16 @@ final class AdBlocker {
         //
         // AdSense の枠と、Google Ad Manager（GPT）のスロット。
         // GPT は div の id が div-gpt-ad-<数字> で固定なので前方一致で拾える。
-        // min-height が直書きされていることが多く、隠さないと空白が残る
+        // min-height が直書きされていることが多く、隠さないと空白が残る。
+        //
+        // YouTube だけ外す。理由は冒頭に書いた——ここを当てると
+        // 動画の再生そのものが止まる。あちらの広告は uBOL に任せる
         Cosmetic(selector: """
             ins.adsbygoogle, \
             div[id^='div-gpt-ad'], \
             iframe[id^='google_ads_iframe']
-            """),
-
-        // ── YouTube ──
-        // ページ内の広告枠（フィード内・マストヘッド・プレイヤー横）。
-        // 動画広告自体は通信では止められないので、Tab 側の
-        // youtubeAdSkipScript（プレイヤー監視）が受け持つ
-        Cosmetic(selector: """
-            ytd-display-ad-renderer, \
-            ytd-ad-slot-renderer, \
-            ytd-in-feed-ad-layout-renderer, \
-            ytd-banner-promo-renderer, \
-            #masthead-ad, \
-            #player-ads
             """,
-            domains: ["*youtube.com"]),
+            exceptDomains: ["*youtube.com"]),
 
         // ── livedoor ──
         // 右カラムの 300×250 と、記事一覧の下に並ぶ枠。
@@ -169,8 +177,12 @@ final class AdBlocker {
         // 空枠の掃除
         for rule in cosmeticRules {
             var trigger: [String: Any] = ["url-filter": ".*"]
+            // if-domain と unless-domain は同居できない（WebKit が
+            // ルールごと弾く）。片方だけを入れる
             if let domains = rule.domains {
                 trigger["if-domain"] = domains
+            } else if let except = rule.exceptDomains {
+                trigger["unless-domain"] = except
             }
             rules.append([
                 "trigger": trigger,

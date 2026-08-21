@@ -1267,12 +1267,15 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         // 広告の空枠を隠す。
         // 通信の遮断自体は拡張機能（uBOL）が受け持つので、
         // こちらは遮られた後に残る国内サイト固有の枠を掃除する。
+        // YouTube には当てない（当てると再生が止まる）。
         // 詳しい分担は AdBlocker.swift の冒頭に書いた
         AdBlocker.shared.apply(to: webView)
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.configuration.userContentController.addUserScript(Self.mediaPlaybackObserverScript)
-        webView.configuration.userContentController.addUserScript(Self.youtubeAdSkipScript)
+        // youtubeAdSkipScript は刺さない。定義は上に残してあるが、
+        // 当てると YouTube の検知に引っかかって再生が止まる。
+        // 広告の処理は丸ごと uBOL に任せる（AdBlocker.swift の冒頭参照）
         webView.configuration.userContentController.add(
             WeakScriptMessageHandler(delegate: self),
             name: Self.mediaStateMessageHandlerName
