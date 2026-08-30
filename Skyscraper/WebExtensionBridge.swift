@@ -53,6 +53,14 @@ extension Tab: WKWebExtensionTab {
         isMuted
     }
 
+    // ピン留め。chrome.tabs.query({ pinned: true }) がここを見る。
+    //
+    // 引数無しの isPinned は手元に持っている旗の方に解釈される（再帰しない）。
+    // 上の isMuted と全く同じ形だ
+    func isPinned(for context: WKWebExtensionContext) -> Bool {
+        isPinned
+    }
+
     // リーダーモードの有無。既に自前で持っているので素直に渡す
     func isReaderModeAvailable(for context: WKWebExtensionContext) -> Bool {
         isReaderAvailable
@@ -114,6 +122,14 @@ extension Tab: WKWebExtensionTab {
         if isMuted != muted { toggleMute() }
         completionHandler(nil)
     }
+
+    // 並び順の面倒があるので、旗を直に倒さず管理人を通す
+    func setPinned(_ pinned: Bool,
+                   for context: WKWebExtensionContext,
+                   completionHandler: @escaping ((any Error)?) -> Void) {
+        TabManager.owner(of: id)?.manager.setPinned(self, pinned)
+        completionHandler(nil)
+    }
 }
 
 // MARK: - 窓
@@ -127,6 +143,17 @@ extension TabManager: WKWebExtensionWindow {
 
     func activeTab(for context: WKWebExtensionContext) -> (any WKWebExtensionTab)? {
         selectedTab
+    }
+
+    // プライベートウィンドウか。
+    //
+    // 黙っていると WebKit は普通の窓と見なし、拡張側に
+    // incognito: false として渡す——中身は非永続ストアなのにだ。
+    // 拡張が自分で判断して振る舞いを変えられるように、正直に答える。
+    //
+    // 引数無しの isPrivate は TabManager の旗の方に解釈される
+    func isPrivate(for context: WKWebExtensionContext) -> Bool {
+        isPrivate
     }
 
     // 実体の NSWindow。タブの WebView が載っている窓を借りる。

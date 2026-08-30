@@ -35,6 +35,23 @@ extension FocusedValues {
     }
 }
 
+// Tabs メニューのピン留めの一行。
+//
+// Commands の中身は View でも良いので、ここだけを
+// @ObservedObject を持つ View に切り出す。
+// こうすれば tabs が差し替わるたびに描き直され、
+// 札の文言が実態とずれない
+private struct PinTabCommand: View {
+    @ObservedObject var manager: TabManager
+
+    var body: some View {
+        Button(manager.selectedTab?.isPinned == true ? "Unpin Tab" : "Pin Tab") {
+            if let tab = manager.selectedTab { manager.togglePin(tab) }
+        }
+        .disabled(manager.selectedTab == nil)
+    }
+}
+
 @main
 struct SkyscraperApp: App {
     // ブックマークと更新確認は窓をまたいで共通。
@@ -94,6 +111,11 @@ struct BrowserCommands: Commands {
         // File メニュー：SwiftUI が用意する New Window（⌘N）の下にタブ操作を並べる。
         // 以前は replacing で New Window ごと潰していた
         CommandGroup(after: .newItem) {
+            // 普通の窓（⌘N）の直下に置く。
+            // 窓を開くのは View の仕事なので、管理人に合図を送らせる
+            Button("New Private Window") { manager?.openPrivateWindow() }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
+                .disabled(manager == nil)
             Button("New Tab") { manager?.addTab() }
                 .keyboardShortcut("t", modifiers: .command)
                 .disabled(manager == nil)
@@ -203,6 +225,23 @@ struct BrowserCommands: Commands {
             Button("Show Previous Tab") { manager?.selectAdjacentTab(offset: -1) }
                 .keyboardShortcut(.tab, modifiers: [.control, .shift])
                 .disabled(manager == nil)
+            Divider()
+            // 全ての窓のタブを串刺しで探す。
+            // ⌘A（全選択）とは別物なので ⇧⌘A——Safari と同じ位置だ
+            Button("Search Tabs…") { manager?.showTabSearch() }
+                .keyboardShortcut("a", modifiers: [.command, .shift])
+                .disabled(manager == nil)
+            Divider()
+            // ピン留め。札の文言が今の状態で変わるので、
+            // 管理人を見張る View（PinTabCommand）に包んである。
+            // @FocusedValue は値を渡すだけで、中身の変化を見張らない——
+            // ここで直に三項演算子を書くと、留めた後も
+            // 「Pin Tab」のまま古びる
+            if let manager {
+                PinTabCommand(manager: manager)
+            } else {
+                Button("Pin Tab") {}.disabled(true)
+            }
             Divider()
             Button("Move Tab to New Window") { manager?.moveSelectedTabToNewWindow() }
                 .disabled(manager == nil)

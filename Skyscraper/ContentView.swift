@@ -656,8 +656,17 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // popup が渡された場合は、WebKit が用意した設定をそのまま使う。
     // 自前の設定で作り直すと window.opener の関係が結ばれず、
     // 「開いた窓が親に結果を返す」流れ（OAuth など）が成立しない
-    private static func makeWebView(_ popup: WKWebViewConfiguration?) -> WKWebView {
+    private static func makeWebView(_ popup: WKWebViewConfiguration?,
+                                    dataStore: WKWebsiteDataStore?) -> WKWebView {
         let configuration = popup ?? WKWebViewConfiguration()
+        // プライベートウィンドウの非永続ストア。
+        //
+        // popup には触らない。あれは開いた側の複製で、
+        // 既に同じ置き場を指している——差し替えれば
+        // クッキーの共有も window.opener の縁も壊れる
+        if popup == nil, let dataStore {
+            configuration.websiteDataStore = dataStore
+        }
         // window.open() から渡される configuration は開いた側の複製だが、
         // userContentController だけは参照ごと共有されている（同じ実体）。
         // そのまま同じ名前のハンドラを足すと
@@ -709,6 +718,13 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     @Published var isPlayingAudio: Bool = false
     // ミュート中か
     @Published var isMuted: Bool = false
+    // ピン留めしてあるか。
+    // 帯の一番上に固まり、⌘W では閉じられない（Safari と同じ）。
+    // 並び順の面倒は TabManager が見る——タブは自分が何番目かを知らない。
+    //
+    // TabGrouper にも pinned という名前があるが、あちらは
+    // 「自動グループ化で上書きしない」印で、こことは別物だ
+    @Published var isPinned: Bool = false
     // 疑似大画面（シアター）中か。サイドバーやバー類の隠しに使う
     @Published var isVideoFullscreen: Bool = false
     // リーダーモードが使えるページか（Readability の判定器による）
@@ -794,6 +810,14 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // window.open() から生まれたタブか。
     // opener の縁は器を作り直すと切れるので、この手のタブは決して畳まない
     private let isPopupBorn: Bool
+
+    // プライベートウィンドウのタブか。
+    // パスワードを預かるかどうかの判断に使う
+    let isPrivate: Bool
+
+    // このタブが使うデータの置き場。nil なら既定（永続）。
+    // 畳んだタブを起こす時に同じ置き場で器を作り直すため、手元に持つ
+    private let dataStore: WKWebsiteDataStore?
 
     // 器を作り直した回数。
     // SwiftUI 側はこれを .id に使う。WebView の器は一度組んだら
@@ -1232,9 +1256,14 @@ final class Tab: NSObject, ObservableObject, Identifiable {
          title: String = "",
          deferLoad: Bool = false,
          interactionState: Data? = nil,
-         popupConfiguration: WKWebViewConfiguration? = nil) {
+         popupConfiguration: WKWebViewConfiguration? = nil,
+         dataStore: WKWebsiteDataStore? = nil,
+         isPrivate: Bool = false) {
         isPopupBorn = popupConfiguration != nil
-        webView = Tab.makeWebView(popupConfiguration)
+        self.isPrivate = isPrivate
+        // popup 生まれなら、開いた側が使っている置き場をそのまま引き継ぐ
+        self.dataStore = dataStore ?? popupConfiguration?.websiteDataStore
+        webView = Tab.makeWebView(popupConfiguration, dataStore: dataStore)
         super.init()
 
         wire()
@@ -1483,7 +1512,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         // ここで作り直しておけば、tab.webView を見る箇所
         //（セッション保存・拡張機能・スリープ抑制）は
         // Optional を気にせず今まで通り動く
-        webView = Tab.makeWebView(nil)
+        webView = Tab.makeWebView(nil, dataStore: dataStore)
         wire()
 
         isUnloaded = true
@@ -1990,6 +2019,11 @@ extension Tab {
 
     private func holdCandidate(host: String, scheme: String, port: Int,
                                username: String, password: String) {
+        // プライベートウィンドウでは何も預からない。
+        // ここで控えておくだけなら実害は無いが、
+        // 後で「保存しますか」と訊くこと自体が筋違いだ——
+        // 跡を残さないと言って開いた窓なのだから
+        guard !isPrivate else { return }
         guard !password.isEmpty, !PasswordNeverList.shared.contains(host) else { return }
 
         passwordCandidate = PasswordCandidate(host: host, scheme: scheme, port: port,
@@ -2527,6 +2561,14 @@ extension Tab: WKUIDelegate {
 private struct SessionTab: Codable {
     var url: String     // 空文字はロビー
     var title: String   // 復元直後にサイドバーへ出す仮の題名
+    // ピン留めされていたか。
+    //
+    // Optional にしてあるのは Bookmark.folder と全く同じ理由だ。
+    // 自動生成の Codable は、非 Optional の項目の鍵が無いと
+    // 既定値に落ちず keyNotFound を投げる。restoreSession は
+    // try? で受けているので、ここを Bool にすると
+    // 前回のタブ構成が丸ごと飛ぶ
+    var pinned: Bool? = nil
 }
 
 private struct SessionState: Codable {
@@ -2569,9 +2611,60 @@ final class TabManager: NSObject, ObservableObject {
         }
     }
 
+    // ── プライベートウィンドウ ──
+    //
+    // 窓ごとの旗。生まれた瞬間に決まり、後から変わらない。
+    //
+    // SwiftUI が @StateObject を自分で作る（TabManager() を直に呼ぶ）ので、
+    // 引数では渡せない。次に生まれる管理人への預かり所を静的に置く——
+    // タブを新しい窓へ渡す pendingAdoption と同じ手だ
+    private static var pendingPrivate = false
+
+    let isPrivate: Bool
+
+    // プライベートウィンドウのデータの置き場。普通の窓では nil。
+    // 強く持つのはこちらで、PrivateBrowsing は見張っているだけだ
+    private let privateStore: WKWebsiteDataStore?
+
+    // その置き場を今も使っている人数に入れてもらっているか。
+    // onAppear / onDisappear は誤発火しうるので、二重に数えない
+    private var holdsPrivateStore = false
+
     // タブの自動グループ化（Apple Intelligence）。
     // 使えない環境では何もせず、従来のフラット表示のまま動く
     let grouper = TabGrouper()
+
+    // タブ検索の盤（⇧⌘A）を出しているか。
+    // 盤は窓に一つなので、タブではなくここが持つ
+    @Published var isTabSearchVisible = false
+    // 打ち込み欄へ焦点を移す合図（⇧⌘A のたびに増える）。
+    // 既に出ている時にもう一度押されたら、全選択し直す
+    @Published private(set) var tabSearchFocusTrigger = 0
+
+    func showTabSearch() {
+        isTabSearchVisible = true
+        tabSearchFocusTrigger &+= 1
+    }
+
+    // タブID だけを鍵に、そのタブを目の前に出す。
+    // 別の窓に居たなら、その窓ごと前へ持ってくる
+    static func reveal(tabID: UUID) {
+        guard let (manager, tab) = owner(of: tabID) else { return }
+        manager.select(tab)
+        manager.focusHostWindow()
+    }
+
+    // この管理人の窓を前に出す。
+    //
+    // TabManager 自身は NSWindow を持っていない（持ち主は SwiftUI）ので、
+    // タブの WebView が載っている窓を借りる。
+    // 全タブは ZStack に常時マウントされているので、
+    // 畳んだタブでも器自体は窓に居る
+    func focusHostWindow() {
+        let window = selectedTab?.webView.window
+            ?? tabs.compactMap { $0.webView.window }.first
+        window?.makeKeyAndOrderFront(nil)
+    }
     // 各タブのタイトル確定を見張る購読（タブIDごと）
     private var titleWatchers: [UUID: AnyCancellable] = [:]
     // 各タブの URL 変化を見張る購読（セッション保存の合図）
@@ -2654,6 +2747,12 @@ final class TabManager: NSObject, ObservableObject {
 
     func markOpen() {
         isClosed = false
+        // onDisappear の誤発火で数から抜けていたら戻す。
+        // 置き場そのものはこちらが強く持っているので死んでいない
+        if isPrivate, !holdsPrivateStore {
+            holdsPrivateStore = true
+            _ = PrivateBrowsing.acquire()
+        }
         // 万が一 onDisappear の誤発火で片付けられていた場合の保険
         if tabs.isEmpty { addTab() }
         WebExtensionManager.shared.windowDidOpen(self)
@@ -2662,6 +2761,15 @@ final class TabManager: NSObject, ObservableObject {
     func markClosed() {
         guard !Self.isTerminating else { return }
         isClosed = true
+        // プライベートウィンドウの後始末。
+        // 最後の一枚なら、置き場の中身ごと捨てられる。
+        // 閉じたタブの控え（⇧⌘T）もここで消す——
+        // 窓を閉じた後も URL と履歴が手元に残るのは筋が通らない
+        if isPrivate, holdsPrivateStore {
+            holdsPrivateStore = false
+            recentlyClosed.removeAll()
+            PrivateBrowsing.release(privateStore)
+        }
         idleSweeper?.cancel()
         idleSweeper = nil
         memoryPressure?.cancel()
@@ -2737,7 +2845,11 @@ final class TabManager: NSObject, ObservableObject {
         }
         registry.removeAll { $0.manager == nil }
         let states = registry.compactMap { box -> SessionState? in
-            guard let manager = box.manager, !manager.isClosed else { return nil }
+            // プライベートウィンドウは控えない。
+            // 次の起動で開き直されたら、跡を残さない契約が台無しになる
+            guard let manager = box.manager,
+                  !manager.isClosed,
+                  !manager.isPrivate else { return nil }
             return manager.currentState()
         }
         guard !states.isEmpty,
@@ -2746,7 +2858,13 @@ final class TabManager: NSObject, ObservableObject {
     }
 
     override init() {
+        // 預かり所を受け取って即座に空にする。
+        // 残しておくと、次に開いた普通の窓までプライベートになる
+        isPrivate = Self.pendingPrivate
+        Self.pendingPrivate = false
+        privateStore = isPrivate ? PrivateBrowsing.acquire() : nil
         super.init()
+        holdsPrivateStore = isPrivate
         // 名簿に載る順＝窓が生まれた順。保存もこの順で並ぶ
         Self.registry.append(WeakManager(manager: self))
         restoreSession()
@@ -2804,6 +2922,13 @@ final class TabManager: NSObject, ObservableObject {
             adopt(handed)
             return
         }
+        // プライベートウィンドウは前回の続きから始めない。
+        // 保存もしないので、復元の待ち行列にも手を付けない——
+        // ここで一つ取ってしまうと、本来開くはずの普通の窓の分が消える
+        guard !isPrivate else {
+            addTab()
+            return
+        }
         // 設定で切られていれば、保存済みのものも読まずに捨てる
         guard Self.restoresSession else {
             Self.forgetSavedSession()
@@ -2821,9 +2946,14 @@ final class TabManager: NSObject, ObservableObject {
             let tab = makeTab(url: entry.url.isEmpty ? nil : entry.url,
                               title: entry.title,
                               deferLoad: true)
+            tab.isPinned = entry.pinned == true
             tabs.append(tab)
         }
         selectedID = tabs[safe: state.selectedIndex]?.id ?? tabs.first?.id
+        // 保存時点で既にピンが先頭に寄っているはずだが、
+        // 壊れた保存を読んだ場合の保険だけ掛けておく。
+        // selectedID は ID で持っているので、並べ直しても選択はずれない
+        normalizePinnedOrder()
     }
 
     // 保存は少し待ってからまとめて行う。SPA（X・YouTube など）は
@@ -2848,7 +2978,11 @@ final class TabManager: NSObject, ObservableObject {
             var url = tab.isHome ? "" : (tab.webView.url?.absoluteString ?? tab.urlText)
             // 閉じ際に流し込む about:blank は復元しない（ロビー扱いに倒す）
             if url == "about:blank" { url = "" }
-            return SessionTab(url: url, title: tab.pageTitle)
+            // ピン留めしていないタブには鍵ごと書かない。
+            // 古い保存と同じ形のままになるので、戻した時にも困らない
+            return SessionTab(url: url,
+                              title: tab.pageTitle,
+                              pinned: tab.isPinned ? true : nil)
         }
         let index = tabs.firstIndex { $0.id == selectedID } ?? 0
         return SessionState(tabs: entries, selectedIndex: index)
@@ -2904,10 +3038,16 @@ final class TabManager: NSObject, ObservableObject {
     // TabSection がこのファイル内の private 型なので fileprivate にする。
     // 見るのは同じファイルの VerticalTabStrip と displayOrder だけだ
     fileprivate var sections: [TabSection] {
+        // ピン留めはグループ化の外に置く。
+        // 「自分で上に固定したもの」をモデルの都合で
+        // 下の方へ流されては、固定した意味が無い
+        var pinnedTabs: [Tab] = []
         var grouped: [(name: String, tabs: [Tab])] = []
         var ungrouped: [Tab] = []
         for tab in tabs {
-            if let name = grouper.assignments[tab.id] {
+            if tab.isPinned {
+                pinnedTabs.append(tab)
+            } else if let name = grouper.assignments[tab.id] {
                 if let idx = grouped.firstIndex(where: { $0.name == name }) {
                     grouped[idx].tabs.append(tab)
                 } else {
@@ -2917,7 +3057,12 @@ final class TabManager: NSObject, ObservableObject {
                 ungrouped.append(tab)
             }
         }
-        var result = grouped.map {
+        var result: [TabSection] = []
+        if !pinnedTabs.isEmpty {
+            result.append(TabSection(id: "__pinned__", name: nil,
+                                     tabs: pinnedTabs, isPinned: true))
+        }
+        result += grouped.map {
             TabSection(id: "group:" + $0.name, name: $0.name, tabs: $0.tabs)
         }
         if !ungrouped.isEmpty {
@@ -2940,7 +3085,9 @@ final class TabManager: NSObject, ObservableObject {
                       title: title,
                       deferLoad: deferLoad,
                       interactionState: interactionState,
-                      popupConfiguration: popupConfiguration)
+                      popupConfiguration: popupConfiguration,
+                      dataStore: privateStore,
+                      isPrivate: isPrivate)
         wire(tab)
         return tab
     }
@@ -3028,9 +3175,16 @@ final class TabManager: NSObject, ObservableObject {
     }
 
     // このタブを別の窓へ渡す。
-    // 元の窓の最後の一枚だった場合は、detach の中でロビーが一枚補充される
+    // 元の窓の最後の一枚だった場合は、detach の中でロビーが一枚補充される。
+    //
+    // 普通の窓とプライベートウィンドウの間では動かせない。
+    // WKWebView は生成時の websiteDataStore を抱えたままなので、
+    // 運んだ先でも元の置き場を使い続ける——
+    // 見た目はプライベートなのに中身は永続、またはその逆になる。
+    // これは黙って起きてはいけない種類の食い違いだ
     func moveTab(_ tab: Tab, to other: TabManager, at index: Int? = nil) {
-        guard other !== self, let detached = detach(tab) else { return }
+        guard other !== self, other.isPrivate == isPrivate,
+              let detached = detach(tab) else { return }
         other.adopt(detached, at: index)
     }
 
@@ -3054,35 +3208,51 @@ final class TabManager: NSObject, ObservableObject {
     func acceptDrop(draggedID idString: String, target: Tab, after: Bool) {
         guard let id = UUID(uuidString: idString) else { return }
 
-        // 自分の窓の中の話なら、従来通り並べ替える
-        if tabs.contains(where: { $0.id == id }) {
+        // 自分の窓の中の話なら、従来通り並べ替える。
+        // ただし、落とした先に合わせてピン留めを切り替える——
+        // 上の欄へ放り込めば留まり、下へ戻せば解ける。
+        // 境目そのものを操作にするのは Safari も Chrome も同じ流儀だ
+        if let dragged = tabs.first(where: { $0.id == id }) {
+            // 旗を先に立てる。逆だと normalizePinnedOrder が
+            // 落とした位置ごと引っくり返す
+            setPinned(dragged, target.isPinned)
             moveTab(draggedID: idString, target: target, after: after)
             return
         }
 
-        // 他の窓から来た。持ち主を引いて、落とされた位置に挿す
+        // 他の窓から来た。持ち主を引いて、落とされた位置に挿す。
+        // 普通の窓とプライベートの間では受け取らない（moveTab 参照）
         guard let (source, tab) = Self.owner(of: id), source !== self,
+              source.isPrivate == isPrivate,
               let targetIdx = tabs.firstIndex(where: { $0.id == target.id })
         else { return }
         source.moveTab(tab, to: self, at: after ? targetIdx + 1 : targetIdx)
+        // 引き取った後で揃える。こちらは挿した位置が既に
+        // 正しい側なので、寄せ直しても場所は動かない
+        setPinned(tab, target.isPinned)
     }
 
     // サイドバーの余白に落とされた時。末尾へ回す
     func acceptDropAtEnd(draggedID idString: String) {
         guard let id = UUID(uuidString: idString) else { return }
 
-        // 自分の窓のタブなら、末尾へ動かす
-        if let idx = tabs.firstIndex(where: { $0.id == id }) {
-            guard idx != tabs.count - 1 else { return }
-            let tab = tabs.remove(at: idx)
-            tabs.append(tab)
+        // 自分の窓のタブなら、末尾へ動かす。
+        // 余白は必ずピン欄の外なので、留めてあれば先に解く
+        if let tab = tabs.first(where: { $0.id == id }) {
+            setPinned(tab, false)
+            guard let idx = tabs.firstIndex(where: { $0.id == id }),
+                  idx != tabs.count - 1 else { return }
+            let moved = tabs.remove(at: idx)
+            tabs.append(moved)
             grouper.scheduleRegroup(for: tabs)
             return
         }
 
         // 他の窓から来た。index を渡さなければ末尾に付く
-        guard let (source, tab) = Self.owner(of: id), source !== self else { return }
+        guard let (source, tab) = Self.owner(of: id), source !== self,
+              source.isPrivate == isPrivate else { return }
         source.moveTab(tab, to: self)
+        setPinned(tab, false)
     }
 
     // 開いている窓の管理人一覧（名簿順＝窓が生まれた順）。
@@ -3119,6 +3289,14 @@ final class TabManager: NSObject, ObservableObject {
         // 最後の一枚を出しても、元の窓にロビーが一枚残るだけで意味がない
         guard tabs.count > 1, let detached = detach(tab) else { return }
         Self.pendingAdoption = detached
+        newWindowRequests += 1
+    }
+
+    // 新しいプライベートウィンドウを開く（⇧⌘N）。
+    // 窓を開くのは View の仕事なので、旗を立てて合図を送るだけだ。
+    // 旗は次に生まれる管理人が init で取り上げる
+    func openPrivateWindow() {
+        Self.pendingPrivate = true
         newWindowRequests += 1
     }
 
@@ -3162,6 +3340,42 @@ final class TabManager: NSObject, ObservableObject {
     }
 
     func select(_ tab: Tab) { selectedID = tab.id }
+
+    // ── ピン留め ──
+    //
+    // 並び順は表示層だけの話にしない。tabs 配列そのもので持つ。
+    // ⌘１〜⌘９ も ⌃Tab も tabs / displayOrder を歩くので、
+    // 配列の頭にピンを寄せておけば全部が勝手に揃う
+
+    func togglePin(_ tab: Tab) {
+        setPinned(tab, !tab.isPinned)
+    }
+
+    func setPinned(_ tab: Tab, _ pinned: Bool) {
+        guard tabs.contains(where: { $0.id == tab.id }), tab.isPinned != pinned else { return }
+        tab.isPinned = pinned
+        if pinned {
+            // 自動グループ化の手から外す。
+            // assignManually(nil) は「グループ無しで手動確定」なので、
+            // 次の組み直しでも拾われない
+            grouper.assignManually(tab.id, to: nil)
+        } else {
+            // 解いたら自動の輪に戻す
+            grouper.forget(tab.id)
+            grouper.scheduleRegroup(for: tabs)
+        }
+        normalizePinnedOrder()
+    }
+
+    // ピン留めを配列の先頭側へ寄せる。
+    // 安定な仕分けなので、それぞれの中の並びは崩れない。
+    //
+    // 中身が同じでも代入し直すのは、didSet を通して
+    // サイドバー（manager を見ている）に描き直させるためだ。
+    // Tab の @Published はその Tab を見ている行しか起こさない
+    func normalizePinnedOrder() {
+        tabs = tabs.filter(\.isPinned) + tabs.filter { !$0.isPinned }
+    }
 
     // しばらく使わないタブを畳む。
     //
@@ -3247,7 +3461,16 @@ final class TabManager: NSObject, ObservableObject {
     }
 
     func closeSelected() {
-        if let tab = selectedTab { closeTab(tab) }
+        guard let tab = selectedTab else { return }
+        // ピン留めしたタブは ⌘W では閉じない（Safari と同じ）。
+        // 「うっかり閉じない」がピン留めの目的だからだ。
+        // 閉じたければ先に留めを外す。
+        //
+        // closeTab の方には関を設けない——
+        // window.close() や窓を閉じる際の片付けは通してやる必要がある。
+        // 行の × ボタンはピン留め中はそもそも出ない
+        guard !tab.isPinned else { return }
+        closeTab(tab)
     }
 
     // 直近に閉じたタブを開き直す。
@@ -3283,8 +3506,9 @@ final class TabManager: NSObject, ObservableObject {
         } else {
             tabs.append(moved)
         }
-        // グループが一つも無い（従来表示）なら並び順だけ変える
-        if !grouper.assignments.isEmpty {
+        // グループが一つも無い（従来表示）なら並び順だけ変える。
+        // ピン留めしたタブはグループの外に居るので巻き込まない
+        if !grouper.assignments.isEmpty, !moved.isPinned {
             grouper.assignManually(moved.id, to: grouper.assignments[target.id])
         }
     }
@@ -3392,6 +3616,9 @@ private struct TabSection: Identifiable {
     let id: String
     let name: String?
     let tabs: [Tab]
+    // ピン留めのまとまりか。
+    // 見出しは出さず、下にジグザグ罫を引いて区切る
+    var isPinned: Bool = false
 }
 
 // グループ見出し。細い罫の間にダイヤとグループ名を挟むアール・デコ調
@@ -3435,10 +3662,61 @@ struct VerticalTabStrip: View {
         sections.compactMap { $0.name }
     }
 
+    // 見出し付きのグループが一つでもあるか。
+    // 無ければ「グループ無し」を区切る細罫も要らない。
+    //
+    // 以前は sections.count > 1 で見ていたが、ピンの欄が
+    // 増えた今はそれだと 「ピン + 普通のタブ」だけの盤でも
+    // 真だと答えてしまい、ジグザグの真下に細罫が二重に引かれる
+    private var hasGroups: Bool {
+        sections.contains { $0.name != nil }
+    }
+
+    // セクション一つぶん。
+    //
+    // body から切り出してあるのは型検査を軽くするためだ。
+    // ViewBuilder は分岐が一つ増えるごとに型を入れ子に積むので、
+    // 見出し・細罫・行・ジグザグを一つの式に積むと膨らむ
+    @ViewBuilder
+    private func sectionView(_ section: TabSection) -> some View {
+        if let name = section.name {
+            TabGroupHeader(name: name)
+        } else if !section.isPinned, hasGroups {
+            // グループ無しのまとまりとの区切り（見出しは無し）
+            Rectangle().fill(Deco.faintGold)
+                .frame(height: 0.7)
+                .padding(.top, 8)
+                .padding(.horizontal, 6)
+        }
+
+        ForEach(section.tabs) { tab in
+            DraggableTabRow(
+                manager: manager,
+                grouper: grouper,
+                indicatorModel: dropModel,
+                tab: tab,
+                groupNames: groupNames
+            )
+        }
+
+        // ピンの欄に見出しは付けない——行の頭のダイヤが
+        // 既に「留めてある」と言っている。
+        // 代わりに下にジグザグを引いて境目をはっきり見せる。
+        // この線の上か下かが、そのまま落とし先の目安になる
+        if section.isPinned {
+            Zigzag(teeth: 12)
+                .stroke(Deco.faintGold, lineWidth: 1)
+                .frame(height: 4)
+                .padding(.horizontal, 6)
+                .padding(.top, 4)
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                Image(systemName: "diamond")
+                // プライベートウィンドウでは菱形を塗り潰して区別する
+                Image(systemName: manager.isPrivate ? "diamond.inset.filled" : "diamond")
                     .font(.system(size: 13))
                     .foregroundColor(Deco.gold)
                 Text("SKYSCRAPER")
@@ -3462,29 +3740,27 @@ struct VerticalTabStrip: View {
                 )
                 .frame(height: 34)
                 .padding(.horizontal, 14)
-                .padding(.bottom, 12)
+                .padding(.bottom, manager.isPrivate ? 8 : 12)
+
+            // プライベートウィンドウの札。
+            // 普通の窓と見間違えたまま使われるのが一番まずいので、
+            // 帯の一番目に入る場所に置く
+            if manager.isPrivate {
+                Text("PRIVATE")
+                    .font(.system(size: 9, design: .serif))
+                    .tracking(4)
+                    .foregroundColor(Deco.cream)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 4)
+                    .overlay(Hexagon(inset: 6).stroke(Deco.gold, lineWidth: 1))
+                    .frame(maxWidth: .infinity)
+                    .padding(.bottom, 12)
+            }
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 7) {
                     ForEach(sections) { section in
-                        if let name = section.name {
-                            TabGroupHeader(name: name)
-                        } else if sections.count > 1 {
-                            // グループ無しのまとまりとの区切り（見出しは無し）
-                            Rectangle().fill(Deco.faintGold)
-                                .frame(height: 0.7)
-                                .padding(.top, 8)
-                                .padding(.horizontal, 6)
-                        }
-                        ForEach(section.tabs) { tab in
-                            DraggableTabRow(
-                                manager: manager,
-                                grouper: grouper,
-                                indicatorModel: dropModel,
-                                tab: tab,
-                                groupNames: groupNames
-                            )
-                        }
+                        sectionView(section)
                     }
                 }
                 .padding(.horizontal, 10)
@@ -3565,10 +3841,12 @@ private struct DraggableTabRow: View {
 
     @State private var rowHeight: CGFloat = 1
 
-    // 自分以外の窓。名簿順（窓が生まれた順）で並ぶ
+    // 自分以外の窓。名簿順（窓が生まれた順）で並ぶ。
+    // 普通の窓とプライベートの間ではタブを動かせないので、
+    // 選べない先を並べても仕方がない
     private var moveTargets: [TabMoveTarget] {
         TabManager.openWindows
-            .filter { $0 !== manager }
+            .filter { $0 !== manager && $0.isPrivate == manager.isPrivate }
             .map { other in
                 TabMoveTarget(id: ObjectIdentifier(other), label: other.windowLabel) {
                     manager.moveTab(tab, to: other)
@@ -3589,7 +3867,8 @@ private struct DraggableTabRow: View {
             onSelect: { manager.select(tab) },
             onClose:  { manager.closeTab(tab) },
             onMoveToNewWindow: { manager.moveTabToNewWindow(tab) },
-            onUnload: { manager.unload(tab) }
+            onUnload: { manager.unload(tab) },
+            onTogglePin: { manager.togglePin(tab) }
         )
         // 高さを測っておく（上下判定に使う）。
         //
@@ -3726,6 +4005,8 @@ struct DecoTabRow: View {
     let onMoveToNewWindow: () -> Void
     // 診断用：このタブを手で畳む
     let onUnload: () -> Void
+    // ピン留めの切り替え
+    let onTogglePin: () -> Void
 
     @State private var hovering = false
     @State private var showingNewGroup = false
@@ -3734,6 +4015,21 @@ struct DecoTabRow: View {
 
     var body: some View {
         HStack(spacing: 6) {
+            // ピン留めの印。行の頭に金のダイヤを一粒。
+            // ピン留め中は × が出ないので、ここがその代わりになる——
+            // 押せば留めが外れ、その場で × が戻ってくる
+            if tab.isPinned {
+                Button(action: onTogglePin) {
+                    Image(systemName: "diamond.fill")
+                        .font(.system(size: 7))
+                        .foregroundColor(Deco.gold)
+                        .frame(width: 14, height: 18)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Unpin Tab")
+            }
+
             // 音を鳴らしている／ミュート中のインジケータ
             if tab.isMuted || tab.isPlayingAudio {
                 Button {
@@ -3761,7 +4057,10 @@ struct DecoTabRow: View {
 
             Spacer(minLength: 2)
 
-            if hovering || isSelected {
+            // ピン留め中は × を出さない。
+            // ⌘W を封じておいて、行には一発で閉じる札が残っている
+            // というのは筋が通らない。閉じたければ先に留めを外す
+            if !tab.isPinned, hovering || isSelected {
                 Button(action: onClose) {
                     Image(systemName: "xmark")
                         .font(.system(size: 9))
@@ -3785,6 +4084,8 @@ struct DecoTabRow: View {
         .onHover { hovering = $0 }
         .animation(.easeInOut(duration: 0.12), value: hovering)
         .contextMenu {
+            Button(tab.isPinned ? "Unpin Tab" : "Pin Tab") { onTogglePin() }
+            Divider()
             Button(tab.isMuted ? "Unmute Tab" : "Mute Tab") { tab.toggleMute() }
             Button("Unload Tab") { onUnload() }
                 .disabled(!tab.canUnload)
@@ -3804,6 +4105,9 @@ struct DecoTabRow: View {
                 Button("New Group…") { showingNewGroup = true }
                 Button("No Group") { grouper.assignManually(tab.id, to: nil) }
             }
+            // ピン留めしたタブはグループ化の外に居る。
+            // 選べてしまうと、入れたつもりなのに上の欄から動かない
+            .disabled(tab.isPinned)
             Menu("Move to Window") {
                 Button("New Window") { onMoveToNewWindow() }
                 if !moveTargets.isEmpty { Divider() }
@@ -5151,7 +5455,7 @@ struct BrowserPane: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .navigationTitle(tab.pageTitle.isEmpty ? "Skyscraper" : tab.pageTitle)
+        .navigationTitle(windowTitle)
         .onAppear {
             addressText = tab.urlText
         }
@@ -5176,6 +5480,13 @@ struct BrowserPane: View {
             // ここでは表示文字列を現在の URL に揃えるだけ
             addressText = tab.urlText
         }
+    }
+
+    // 窓の題名。プライベートウィンドウはタイトルバーでも分かるようにする。
+    // Mission Control や Dock の窓一覧に出るのはこれだ
+    private var windowTitle: String {
+        let base = tab.pageTitle.isEmpty ? "Skyscraper" : tab.pageTitle
+        return manager.isPrivate ? String(localized: "\(base) \u{2014} Private") : base
     }
 
     // ── 戻る／進む ──
@@ -5640,6 +5951,13 @@ struct ContentView: View {
         .animation(.easeOut(duration: 0.18), value: translator.isPresented)
         .frame(minWidth: 900, minHeight: 600)
         .background(Deco.ink)
+        // タブ検索の盤（⇧⌘A）。
+        // 盤は全ての窓のタブを並べるが、出すのは押された窓だけだ
+        .overlay {
+            if manager.isTabSearchVisible {
+                TabSearchPanel(manager: manager)
+            }
+        }
         .environmentObject(bookmarks)
         .preferredColorScheme(.dark)
         // この窓が手前に来たら、自分の管理人と翻訳役をメニューに差し出す

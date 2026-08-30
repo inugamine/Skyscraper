@@ -210,6 +210,21 @@ final class WebExtensionManager: NSObject, ObservableObject {
                 context.setPermissionStatus(.grantedExplicitly, for: pattern)
             }
 
+            // ── プライベートウィンドウでも働かせる ──
+            //
+            // これが既定の false のままだと、拡張にはプライベートの窓も
+            // その中のタブも一切見えない。エラーは一つも出ないまま
+            // uBOL の遮断だけが黙って効かなくなる——プライベートにした途端
+            // 広告が戻るのは、使う側から見れば壊れているのと同じだ。
+            //
+            // 引き換えに、拡張のバックグラウンドはプライベートのタブの
+            // URL を知る。読み込むのは自分で同梱したものと、
+            // 利用者が自分で置いたものだけなので、ここでは通している。
+            // Safari は拡張ごとに許可を訊く——一覧に切り替えを置くならここを見る。
+            //
+            // load の前に立てること。載せた後で触ると反映に読み直しが要る
+            context.hasAccessToPrivateData = true
+
             // 切られていなければ controller に載せる。
             // 切られていても一覧には出すので、context 自体は作って手元に持つ
             let enabled = !Self.disabledIDs.contains(name)
