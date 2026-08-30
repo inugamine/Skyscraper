@@ -742,6 +742,14 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // ブロックしたポップアップ（知らせバーに出す）
     @Published var blockedPopups: [BlockedPopup] = []
 
+    // このタブの絵札（ファビコン）。
+    // 器とは別にこちらが持つので、タブを畳んでも絵は消えない
+    @Published var favicon: NSImage?
+
+    // 今の絵札がどのホストのものか。
+    // 遷移したのに前のサイトの絵を出し続けないための目印
+    private var faviconHost: String?
+
     // 拡張機能のボタンを描き直す合図。
     // アイコンやバッジは WKWebExtension.Action が持っていて、
     // 変わったことはデリゲート（didUpdate action:）でしか分からない。
@@ -806,6 +814,93 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     private(set) var lastActiveAt = Date()
 
     func noteActivity() { lastActiveAt = Date() }
+
+    // MARK: - 絵札（ファビコン）
+
+    // 今映しているページのホスト。
+    // ロビーや file:// では nil（絵札の取りようがない）
+    private var faviconTargetHost: String? {
+        let text = webView.url?.absoluteString ?? urlText
+        guard let url = URL(string: text),
+              url.scheme == "http" || url.scheme == "https",
+              let host = url.host(), !host.isEmpty else { return nil }
+        return host
+    }
+
+    // 手元にあるものだけで絵札を決める。通信はしない。
+    //
+    // セッション復元の直後はここが効く——まだ何も読んでいないタブでも
+    // 番地は持っているので、帯には最初から絵が並ぶ
+    private func applyCachedFavicon() {
+        let host = faviconTargetHost
+        guard host != faviconHost else { return }
+        faviconHost = host
+        favicon = host.flatMap { FaviconStore.shared.cached(for: $0) }
+    }
+
+    // 読み込みが済んだところで、手元に無ければ取りに行く
+    private func refreshFavicon() {
+        guard let host = faviconTargetHost else {
+            faviconHost = nil
+            favicon = nil
+            return
+        }
+
+        // 手元にあっても古びていれば取り直す。
+        // 出ている絵はそのままだ——差し替わるのは新しいのが届いてからで、
+        // 待っている間に一瞬空欄になることは無い
+        var revalidating = false
+        if let image = FaviconStore.shared.cached(for: host) {
+            faviconHost = host
+            favicon = image
+            guard FaviconStore.shared.claimRevalidation(host) else { return }
+            revalidating = true
+        }
+
+        webView.evaluateJavaScript(Self.faviconLinkScript) { [weak self] result, _ in
+            // Task に入る前に let へ落とす。
+            // weak のまま跨ぐと Swift 6 に叱られる（wire の見張りと同じ理屈）
+            guard let self else { return }
+            let links = (result as? [String])?.compactMap { URL(string: $0) } ?? []
+            Task { @MainActor in
+                // プライベートウィンドウではディスクに焼き付けない。
+                // 絵札がディスクに残るのは、訪れたホスト名が
+                // ディスクに残るということだ
+                let image = await FaviconStore.shared.icon(for: host,
+                                                           candidates: links,
+                                                           allowDiskWrite: !self.isPrivate,
+                                                           ignoringCache: revalidating)
+                // 待っている間に別のページへ移っていたら捨てる
+                guard let image, self.faviconTargetHost == host else { return }
+                self.faviconHost = host
+                self.favicon = image
+            }
+        }
+    }
+
+    // ページから <link rel="icon"> の宛先を拾う。
+    //
+    // 拾うのは在り処だけだ。画像の実体をここで fetch すると
+    // CORS で死ぬので、取りに行くのはアプリ側だ（FaviconStore.swift の冒頭参照）
+    private static let faviconLinkScript = """
+    (() => {
+        const out = [];
+        const seen = new Set();
+        const selectors = [
+            'link[rel~="icon" i]',
+            'link[rel="shortcut icon" i]',
+            'link[rel="apple-touch-icon" i]',
+            'link[rel="apple-touch-icon-precomposed" i]'
+        ];
+        for (const selector of selectors) {
+            for (const link of document.querySelectorAll(selector)) {
+                const href = link.href;
+                if (href && !seen.has(href)) { seen.add(href); out.push(href); }
+            }
+        }
+        return out;
+    })();
+    """
 
     // window.open() から生まれたタブか。
     // opener の縁は器を作り直すと切れるので、この手のタブは決して畳まない
@@ -1270,6 +1365,9 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         start(url: url, title: title, deferLoad: deferLoad,
               interactionState: interactionState,
               isPopup: popupConfiguration != nil)
+        // 復元されたタブは、まだ何も読んでいなくても番地を持っている。
+        // 手元に絵札があるなら、読み込むより先に出しておく
+        applyCachedFavicon()
     }
 
     // このタブぶんの配線を全て済ませる。
@@ -1348,6 +1446,9 @@ final class Tab: NSObject, ObservableObject, Identifiable {
                 guard let urlText = wv.url?.absoluteString,
                       self.urlText != urlText else { return }
                 self.urlText = urlText
+                // 行き先が別のサイトなら、手元にある絵札に差し替える。
+                // ここでは取りに行かない——読み込みが済んだ後でやる
+                self.applyCachedFavicon()
             }
         })
         observers.append(webView.observe(\.canGoBack, options: [.new]) { [weak self] wv, _ in
@@ -1375,6 +1476,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
                     if self.isReaderAvailable { self.isReaderAvailable = false }
                 } else {
                     self.detectReaderAvailability()
+                    self.refreshFavicon()
                 }
                 // ページ遷移後もミュートを貼り直す（スクリプトはページごとに入れ直るため）
                 if !wv.isLoading, self.isMuted {
@@ -4015,20 +4117,13 @@ struct DecoTabRow: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            // ピン留めの印。行の頭に金のダイヤを一粒。
-            // ピン留め中は × が出ないので、ここがその代わりになる——
-            // 押せば留めが外れ、その場で × が戻ってくる
-            if tab.isPinned {
-                Button(action: onTogglePin) {
-                    Image(systemName: "diamond.fill")
-                        .font(.system(size: 7))
-                        .foregroundColor(Deco.gold)
-                        .frame(width: 14, height: 18)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Unpin Tab")
-            }
+            // 絵札（ファビコン）。
+            // 枠の色がピン留めを兼ねる——金なら留めてある。
+            //
+            // 以前はここに金の菱形を置いて、押すと留めが外れる作りだった。
+            // 絵札と並べると頭が混むので菱形はやめた。
+            // 留めの入切は右クリックか Tabs メニューからやる
+            FaviconBadge(image: tab.favicon, isPinned: tab.isPinned)
 
             // 音を鳴らしている／ミュート中のインジケータ
             if tab.isMuted || tab.isPlayingAudio {

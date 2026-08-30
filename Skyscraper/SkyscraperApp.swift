@@ -67,6 +67,11 @@ struct SkyscraperApp: App {
         // 最初のタブより後になる可能性があるが、controller 自体は
         // 既に全 WKWebView に刺さっているので、後から拡張を足しても届く
         Task { await WebExtensionManager.shared.loadAll() }
+
+        // 絵札（ファビコン）の間引き。
+        // 古びた分を捨て、枚数を上限に収める。
+        // 中身は別スレッドへ逃げているので、起動は待たされない
+        FaviconStore.shared.pruneOnLaunch()
     }
 
     var body: some Scene {

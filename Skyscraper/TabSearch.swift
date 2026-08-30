@@ -28,6 +28,10 @@ struct TabSearchMatch: Identifiable {
     let url: String
     let host: String
     let isPinned: Bool
+    // 絵札。タブが既に持っているものをそのまま借りる——
+    // ここから取りに行かせると、一覧を開いただけで
+    // 全タブ分の通信が飛ぶ
+    let favicon: NSImage?
     // 今いる窓のタブか。真なら一覧の上の方に並び、窓の名前も出さない
     let isCurrentWindow: Bool
     let windowLabel: String
@@ -76,6 +80,7 @@ enum TabSearch {
                     url: url,
                     host: URL(string: url)?.host() ?? "",
                     isPinned: tab.isPinned,
+                    favicon: tab.favicon,
                     isCurrentWindow: isCurrent,
                     windowLabel: label
                 )
@@ -295,10 +300,8 @@ struct TabSearchPanel: View {
     private func row(_ index: Int, _ match: TabSearchMatch) -> some View {
         let isSelected = index == selection
         return HStack(spacing: 10) {
-            Image(systemName: match.isPinned ? "diamond.fill" : "diamond")
-                .font(.system(size: match.isPinned ? 7 : 9))
-                .foregroundColor(isSelected ? Deco.gold : Deco.faintGold)
-                .frame(width: 16)
+            // 帯と同じ絵札。枠が金ならピン留め
+            FaviconBadge(image: match.favicon, isPinned: match.isPinned, side: 18)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(verbatim: match.title)
