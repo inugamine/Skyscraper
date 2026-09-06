@@ -54,6 +54,10 @@ private struct PinTabCommand: View {
 
 @main
 struct SkyscraperApp: App {
+    // AppKit の代理人。他のアプリから投げられた URL を受けるためだけに居る。
+    // SwiftUI の .onOpenURL を使わない理由は IncomingURL.swift の冒頭に書いた
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
     // ブックマークと更新確認は窓をまたいで共通。
     // タブの管理人だけが窓ごとになる（ContentView が自分で持つ）
     @StateObject private var bookmarks = BookmarkStore()
