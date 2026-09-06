@@ -7,6 +7,27 @@
     <language>en</language>
 
     <item>
+      <title>Version 1.18</title>
+      <pubDate>Sun, 06 Sep 2026 21:35:03 +0900</pubDate>
+      <sparkle:version>18</sparkle:version>
+      <sparkle:shortVersionString>1.18</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>Skyscraper 1.18</h2>
+        <ul>
+          <li>タブがピン留めできるようになりました</li>
+          <li>タブ検索ができるようになりました</li>
+          <li>プライベートウィンドウが使えるようになりました</li>
+          <li>ファビコンが表示されるようになりました</li>
+          <li>ダウンロードのレジューム機能が使えるようになりました</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://github.com/inugamine/Skyscraper/releases/download/v1.18/Skyscraper-1.18.zip"
+        sparkle:edSignature="4vl2w1Iphwfjbi9BwwOAE9RaWYePmayVmhNPhhV56NLp5UyFnImBvZLTJzul76RLXkNTZ3KAZpGtksG8EgnpDA=="
+        length="13117293"
+        type="application/octet-stream" />
+    </item>    <item>
       <title>Version 1.17</title>
       <pubDate>Fri, 21 Aug 2026 22:30:45 +0900</pubDate>
       <sparkle:version>17</sparkle:version>
