@@ -22,6 +22,7 @@ struct SettingsView: View {
     @AppStorage(SleepBlocker.enabledKey) private var preventsSleepDuringVideo = true
     @AppStorage(BookmarkSync.enabledKey) private var syncsBookmarks = true
     @AppStorage(TabManager.autoUnloadKey) private var autoUnloadMinutes = 30
+    @AppStorage(HTTPSFirstStore.enabledKey) private var prefersHTTPS = true
     @State private var showingPasswords = false
     @State private var showingExtensions = false
     @State private var pane: Pane = .general
@@ -358,6 +359,28 @@ struct SettingsView: View {
             if !enabled { TabManager.forgetSavedSession() }
         }
 
+        // ══ 接続 ══
+        sectionHeader("Connection")
+
+        // ── https 優先 ──
+        //
+        // 切られる道を残してあるのは、手元の機械や古い機器の盤を
+        // 叩く人が居るからだ。除外は入れてあるが、拾い切れない
+        Toggle(isOn: $prefersHTTPS) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Try https first")
+                    .font(.system(size: 12, design: .serif))
+                    .foregroundColor(Deco.cream)
+                Text("Addresses written as http are tried over https first. If the server does not answer securely, Skyscraper asks before falling back. Servers on your own machine and local network are left alone.")
+                    .font(.system(size: 10, design: .serif))
+                    .foregroundColor(Deco.dimGold)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .toggleStyle(.switch)
+        .tint(Deco.gold)
+        .padding(.bottom, 22)
+
         // ══ 閲覧データ ══
         sectionHeader("Browsing Data")
 
@@ -416,6 +439,12 @@ struct SettingsView: View {
             actionRow("Clear Certificate Exceptions",
                       note: "Also cleared when you quit Skyscraper.") {
                 privacy.resetCertificateExceptions()
+            }
+
+            // https で繋がらず平文に落とした場所を忘れる
+            actionRow("Clear Plain http Exceptions",
+                      note: "Servers will be tried over https again.") {
+                privacy.resetHTTPSFallbacks()
             }
         }
 

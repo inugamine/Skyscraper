@@ -113,6 +113,15 @@ final class PrivacyManager: ObservableObject {
         flash(String(localized: "Done. Certificate exceptions have been cleared."))
     }
 
+    // https で繋がらなかったので平文に落とした場所を忘れる。
+    //
+    // こちらもアプリを終えば消える。札を出しておくのは、
+    // 向こうが https を立てた後でも平文のままになってしまうからだ
+    func resetHTTPSFallbacks() {
+        HTTPSFirstStore.shared.reset()
+        flash(String(localized: "Done. Sites allowed to use plain http have been cleared."))
+    }
+
     // 一言表示を出して、数秒で消す
     private func flash(_ message: String) {
         lastClearedMessage = message

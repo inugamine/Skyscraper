@@ -946,6 +946,24 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // ホストを鍵にして引ける形で持つ。次の読み込みが始まったら捨てる
     private var serverTrusts: [String: SecTrust] = [:]
 
+    // https 優先で持ち上げた読み込みの控え。実体は HTTPSUpgrade.swift。
+    //
+    // plain は利用者が本来向かっていた http の宛先、secure は
+    // こちらが差し替えた https の宛先だ。commit すれば捨て、
+    // 転べば plain に落とすかを訊く材料になる。
+    // これが入っている間は「持ち上げた読み込みが宙に浮いている」状態
+    private var pendingUpgrade: (plain: URL, secure: URL)?
+
+    // 持ち上げた先が黙り込んだ時の見切り役。
+    //
+    // 443 が閉じているだけなら即座に拒否が返るが、
+    // 応答せずパケットを捨てる作りだと URLRequest の既定（60秒）まで
+    // 白紙で待たされる。それは道具として使い物にならない
+    private var upgradeWatchdog: Task<Void, Never>?
+
+    // 持ち上げた先の返事を待つ猶予（秒）
+    private static let upgradeGrace: Double = 5
+
     private static let mediaStateMessageHandlerName = "skyscraperMediaState"
     private static let fullscreenMessageHandlerName = "skyscraperFullscreen"
     private static let mediaPlaybackObserverScript = WKUserScript(
@@ -1597,6 +1615,11 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         // 古い器を黙らせてから縁を切る。
         // 順番が肝だ——先に手を放すと、鳴っている音が止まらないまま
         // どこかに掴まれて生き残る余地が出る（closeTab と同じ理屈）
+        //
+        // 宙に浮いている持ち上げもここで畳む。
+        // 見切り役を残したまま器を差し替えると、新しい器を止めに来る
+        finishUpgrade()
+
         let old = webView
         old.stopLoading()
         old.pauseAllMediaPlayback(completionHandler: nil)
@@ -1644,6 +1667,9 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     func load() {
         guard let url = Tab.resolveURL(from: urlText) else { return }
         isHome = false
+        // 別の行き先へ向かう。前の持ち上げの控えを連れて行かない
+        //（残しておくと、見切り役がこの読み込みを止めに来る）
+        finishUpgrade()
         // file:// は load(URLRequest:) だと、同じ階層の CSS や画像すら読めない
         //（WebKit がそのファイル一枚ぶんしかサンドボックス拡張を下ろさないため）。
         // 読み取り許可を親ディレクトリまで広げて渡す loadFileURL を使う
@@ -2220,7 +2246,85 @@ extension Tab: WKNavigationDelegate {
             Task { @MainActor in self.openInNewTab?(url) }
             return
         }
+
+        // ── https 優先 ──
+        //
+        // 主フレームの GET だけを見る。
+        // 副フレーム（埋め込みの iframe）まで差し替えると、http でしか
+        // 出さない埋め込みが軒並み消える。POST を差し替えないのは、
+        // ここで .cancel して load し直すと本文が落ちるからだ
+        //（打ち込んだフォームが黙って空になる）
+        if let target = action.request.url,
+           action.targetFrame?.isMainFrame == true,
+           (action.request.httpMethod ?? "GET").uppercased() == "GET" {
+
+            // 持ち上げた先が http へ跳ね返してきた。
+            // もう一度持ち上げれば同じ所を延々と往復することになる。
+            // このサーバは平文で喋ると言っているので、落とすかを訊く
+            if let pending = pendingUpgrade, target.scheme?.lowercased() == "http" {
+                decisionHandler(.cancel)
+                finishUpgrade()
+                print("Tab: https-first bounced back to http "
+                      + "secure=\(pending.secure.absoluteString) plain=\(target.absoluteString)")
+                Task { @MainActor in await self.fallBackToPlain(target) }
+                return
+            }
+
+            if HTTPSFirstStore.shared.shouldUpgrade(target),
+               let secure = HTTPSFirstStore.upgraded(target) {
+                decisionHandler(.cancel)
+                beginUpgrade(plain: target, secure: secure)
+                webView.load(URLRequest(url: secure))
+                return
+            }
+        }
+
         decisionHandler(.allow)
+    }
+
+    // MARK: https 優先の段取り
+
+    // 持ち上げた読み込みを始める。控えを取り、見切り役を仕掛ける
+    private func beginUpgrade(plain: URL, secure: URL) {
+        pendingUpgrade = (plain, secure)
+        upgradeWatchdog?.cancel()
+        upgradeWatchdog = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(Tab.upgradeGrace))
+            guard !Task.isCancelled, let self else { return }
+            // 待っている間に別の読み込みが始まっていたら手を出さない。
+            // 宛先まで見比べるのは、控えが差し替わっただけの場合に
+            // 新しい方を巻き添えで止めないためだ
+            guard let pending = self.pendingUpgrade,
+                  pending.secure == secure
+            else { return }
+
+            print("Tab: https-first timed out secure=\(secure.absoluteString)")
+            // stopLoading の取り消しは PageError が日常の失敗として
+            // 見送るので、顛末書は出ない
+            self.webView.stopLoading()
+            self.finishUpgrade()
+            await self.fallBackToPlain(pending.plain)
+        }
+    }
+
+    // 控えと見切り役を畳む。持ち上げが決着した時は必ずここを通す
+    private func finishUpgrade() {
+        upgradeWatchdog?.cancel()
+        upgradeWatchdog = nil
+        pendingUpgrade = nil
+    }
+
+    // https で駄目だった。平文で行くかを訊き、通れば http のまま開き直す。
+    //
+    // 断られた場合は何もしない——decidePolicyFor で断った読み込みも、
+    // 見切りで止めた読み込みも、前のページを画面に残したままだ。
+    // 「戻る」と言われたのだから、そこに留まるのが素直だ
+    private func fallBackToPlain(_ plain: URL) async {
+        guard await HTTPSFirstStore.shared.confirmFallback(to: plain, in: webView.window) else {
+            return
+        }
+        HTTPSFirstStore.shared.allowPlain(plain)
+        webView.load(URLRequest(url: plain))
     }
 
     // ブラウザが表示できない応答（PDF以外のファイルなど）はダウンロードに回す
@@ -2357,6 +2461,9 @@ extension Tab: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         clearLoadError()
+        // 中身が届いた。持ち上げていたならそれは成功だ——
+        // 控えと見切り役をここで畳む
+        finishUpgrade()
         // 送信の後で画面が変わった。ログインが通ったとみて、
         // 控えてあった中身の保存を訊きに行く
         flushPasswordCandidate()
@@ -2375,6 +2482,38 @@ extension Tab: WKNavigationDelegate {
     func webView(_ webView: WKWebView,
                  didFailProvisionalNavigation navigation: WKNavigation!,
                  withError error: Error) {
+        // 持ち上げた先で転んだなら、顛末書より先に落とすかを訊く。
+        //
+        // ここを先に見るのが要だ。証明書で止められた場合も同じ経路で来るが、
+        // そのまま report に流すと「危険を承知で続行」（証明書の例外）が
+        // 出る。利用者は https を頼んでいない——こちらが勝手に持ち上げて
+        // 勝手に転んだだけなのに、例外を作らせるのは筋が通らない
+        //
+        // 見分けに PageError.make を使うのは、直前の .cancel 自体が
+        // ここへ WebKitErrorDomain 102 として届くからだ。
+        // 単に -999 を除けるだけだと、持ち上げを始めたその瞬間に
+        // 自分の取り消しを「転んだ」と誤読して、https を一度も
+        // 叩かないまま平文の確認を出すことになる。
+        // 日常の失敗を見送る規則はあちらに集めてある（PageError.swift）
+        if let pending = pendingUpgrade,
+           PageError.make(from: error, fallback: nil) != nil {
+            finishUpgrade()
+            let nsError = error as NSError
+            print("Tab: https-first failed secure=\(pending.secure.absoluteString) "
+                  + "domain=\(nsError.domain) code=\(nsError.code)")
+            Task { @MainActor in
+                guard await HTTPSFirstStore.shared.confirmFallback(to: pending.plain,
+                                                                   in: webView.window)
+                else {
+                    // 戻ると言われた。https で転んだ事実をそのまま見せる
+                    self.report(error, on: webView)
+                    return
+                }
+                HTTPSFirstStore.shared.allowPlain(pending.plain)
+                webView.load(URLRequest(url: pending.plain))
+            }
+            return
+        }
         report(error, on: webView)
     }
 
