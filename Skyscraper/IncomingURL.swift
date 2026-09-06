@@ -16,6 +16,14 @@
 //  AppKit の application(_:open:) はアプリに一度だけ届くのが保証されているので、
 //  受け口はそちらに寄せて、行き先はこちらで決める。
 //
+//  ── なぜ HTML 書類の型まで名乗るのか ──
+//  Info.plist の CFBundleDocumentTypes に public.html が入っているのは、
+//  Finder で .html を開くためだけではない。
+//  システム設定の「デフォルトの Web ブラウザ」一覧は、http / https を扱えるだけでは
+//  載せてくれず、HTML 書類を開けると名乗っているアプリに絞っている（macOS 11 以降）。
+//  一度外したら一覧から消えた。既定には設定できるのに一覧に出ない、という
+//  半端な状態になる。外すな。
+//
 //  ── 窓が一枚も無い時 ──
 //  アプリを終了した状態でリンクを押されると、URL が先に届いて窓がまだ無い。
 //  openWindow は View の環境にしか居ないのでここからは呼べない。
@@ -41,19 +49,19 @@ enum IncomingURL {
     // MARK: - 受け口
 
     static func receive(_ urls: [URL]) {
-        for url in urls where isWeb(url) {
+        for url in urls where isOpenable(url) {
             deliver(url)
         }
     }
 
-    // http / https だけを引き受ける。
+    // http / https と、手元の HTML 書類を引き受ける。
     //
-    // file:// は弾く。Info.plist で書類の型を名乗っていないので
-    // そもそも渡されないし、仮に渡されても WKWebView は
-    // load(URLRequest:) では地元のファイルを開けない
-    //（loadFileURL(_:allowingReadAccessTo:) が要る）。
-    // 開けないものを受け取ったふりをするのが一番たちが悪い
-    private static func isWeb(_ url: URL) -> Bool {
+    // file:// は Info.plist で public.html を名乗った分だけ届く（Finder のダブルクリック、
+    // 「このアプリケーションで開く」）。拡張子の照合はここではしない——
+    // 何を渡すかは LaunchServices が宣言を見て決めている。
+    // 開くのは Tab.load() で、あちらが loadFileURL で親ディレクトリまで読み取りを許す
+    private static func isOpenable(_ url: URL) -> Bool {
+        if url.isFileURL { return true }
         let scheme = url.scheme?.lowercased()
         return scheme == "http" || scheme == "https"
     }
