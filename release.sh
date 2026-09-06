@@ -344,6 +344,34 @@ ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$ZIP_PATH"
 echo "  $ZIP_PATH"
 
 # ─────────────────────────────────────────
+# 1.5 前回の残骸を片付ける
+# ─────────────────────────────────────────
+
+# create-dmg は作業用のディスクを /Volumes/dmg.XXXXXX に据えて、
+# Finder に並べさせてから外す。Finder が掴んだままだと外し損ねて残る。
+# 次の create-dmg が同じ volume 名（Skyscraper）と鉢合わせすると
+# 変な dmg ができるので、先に見て回る。
+#
+# 手で dmg を開いて入れた時の /Volumes/Skyscraper も同じ扱いだ。
+# 中の app を LaunchServices が「もう一つの Skyscraper」として数えるので、
+# 既定のブラウザ周りの判定が狂う元になる（実際に狂った）
+#
+# なお、外した後も LaunchServices の登録簿にはその番地が残る。
+# これは dmg で配るアプリ全てに起きることで害は無い。消す手も無い。気にするな
+echo ""
+echo "▸ 前回の残骸を確認..."
+STALE_FOUND=false
+for vol in /Volumes/dmg.* /Volumes/Skyscraper; do
+    [ -d "$vol" ] || continue
+    STALE_FOUND=true
+    echo "  外す: $vol"
+    hdiutil detach "$vol" -quiet 2>/dev/null \
+        || hdiutil detach "$vol" -force -quiet 2>/dev/null \
+        || { echo "エラー: $vol を外せない。手で外してからやり直すこと"; exit 1; }
+done
+[ "$STALE_FOUND" = true ] || echo "  なし"
+
+# ─────────────────────────────────────────
 # 2. dmg を作る
 # ─────────────────────────────────────────
 
@@ -442,4 +470,9 @@ echo ""
 echo "  ・ビルド番号（${APP_BUILD}）は dist/build-${VERSION}.txt に控えてあるので"
 echo "    publish.sh に手で渡す必要はない"
 echo "  ・GitHub Release・appcast.xml 更新・push・サーバー配置まで一括で行われる"
+echo ""
+echo "手元に入れるなら dmg を開かず、書き出した app をそのまま置く:"
+echo "  ditto \"${APP_PATH}\" /Applications/Skyscraper.app"
+echo "  （dmg を開くと、中の app を LaunchServices が別物として記録する。"
+echo "    既定のブラウザの判定がそれで狂う）"
 echo ""
