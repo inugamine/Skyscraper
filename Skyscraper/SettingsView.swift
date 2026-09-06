@@ -27,6 +27,13 @@ struct SettingsView: View {
     @State private var showingExtensions = false
     @State private var pane: Pane = .general
 
+    // ── 既定のブラウザ ──
+    // 見張る仕組みが無い（LaunchServices は変化を知らせてこない）ので、
+    // 盤を開いた時と申し出た後に自分で見に行く
+    @State private var isDefaultBrowser = false
+    @State private var currentBrowserName: String?
+    @State private var defaultBrowserError: String?
+
     // ── 頁 ──
     //
     // SwiftUI に Section という型が既に居るので、そちらとぶつからない名前にする
@@ -143,6 +150,85 @@ struct SettingsView: View {
     }
 
     // ══════════════════════════════════════════════
+    //  既定のブラウザ
+    // ══════════════════════════════════════════════
+
+    // 他のアプリからのリンクをこちらで受けるかの申し出。
+    //
+    // 外から NSWorkspace を叩いても macOS は通さない——
+    // アプリ自身が申し出て、利用者が確認ダイアログで承諾する形しか無い。
+    // だからこの口は盤の中に置く必要がある
+    private var defaultBrowserSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sectionHeader("Default Browser")
+
+            VStack(alignment: .leading, spacing: 3) {
+                if isDefaultBrowser {
+                    Text("Skyscraper is your default browser.")
+                        .font(.system(size: 12, design: .serif))
+                        .foregroundColor(Deco.cream)
+                } else {
+                    Text("Open links from other apps in Skyscraper")
+                        .font(.system(size: 12, design: .serif))
+                        .foregroundColor(Deco.cream)
+                    if let name = currentBrowserName {
+                        Text("Links currently open in \(name).")
+                            .font(.system(size: 10, design: .serif))
+                            .foregroundColor(Deco.dimGold)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                // 断られた場合もここに出る。
+                // 利用者の判断なので失敗では無いが、
+                // 押して何も起きないよりは理由が見えた方がいい
+                if let defaultBrowserError {
+                    Text(verbatim: defaultBrowserError)
+                        .font(.system(size: 10, design: .serif))
+                        .foregroundColor(Deco.rust)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 2)
+                }
+            }
+
+            if !isDefaultBrowser {
+                Button {
+                    Task { await requestDefaultBrowser() }
+                } label: {
+                    Text("Make Default")
+                        .font(.system(size: 11, design: .serif))
+                        .tracking(1)
+                        .foregroundColor(Deco.gold)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 5)
+                        .overlay(Hexagon(inset: 5).stroke(Deco.faintGold, lineWidth: 1))
+                        .contentShape(Hexagon(inset: 5))
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 10)
+            }
+        }
+        .padding(.bottom, 22)
+        .task { refreshDefaultBrowser() }
+    }
+
+    private func refreshDefaultBrowser() {
+        isDefaultBrowser = DefaultBrowser.isCurrent
+        currentBrowserName = isDefaultBrowser ? nil : DefaultBrowser.currentName
+    }
+
+    private func requestDefaultBrowser() async {
+        defaultBrowserError = nil
+        if let error = await DefaultBrowser.request() {
+            // 画面には読める一行だけを出し、
+            // 下に埋まっている本当の理由は控えへ回す
+            defaultBrowserError = error.localizedDescription
+            print("Default browser request failed: \(error)")
+        }
+        refreshDefaultBrowser()
+    }
+
+    // ══════════════════════════════════════════════
     //  足元（版数と権利表示）
     // ══════════════════════════════════════════════
 
@@ -175,6 +261,9 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var generalPane: some View {
+
+        // ══ 既定のブラウザ ══
+        defaultBrowserSection
 
         // ══ アップデート ══
         sectionHeader("Updates")

@@ -3563,6 +3563,22 @@ final class TabManager: NSObject, ObservableObject {
         }
     }
 
+    // 他のアプリから渡された URL の行き先（IncomingURL.swift から見る）。
+    //
+    // プライベートウィンドウは避ける。外から来たリンクが
+    // 跡を残さない窓に落ちると、閉じた瞬間に履歴ごと消える——
+    // 利用者はそんな選択をしていないのにだ。
+    //
+    // 名簿の後ろから探すのは、新しく開いた窓ほど手前にある可能性が高いからだ。
+    // 本当の手前（key window）を引くには NSWindow と管理人を
+    // 紐付ける仕組みが要るが、そこまでの精度は今は要らない
+    static var externalURLTarget: TabManager? {
+        openWindows.last { !$0.isPrivate }
+    }
+
+    // この窓が外からの URL を引き取れるか
+    var acceptsExternalURL: Bool { !isPrivate }
+
     // 移動先の一覧に出す見出し。
     // 窓に名前が無いので、選択中のタブの題名で代用する（Safari も同じ）
     var windowLabel: String {
@@ -6268,6 +6284,14 @@ struct ContentView: View {
         }
         .onAppear {
             manager.markOpen()
+            // 他のアプリから URL が来た時、窓が一枚も無ければ開かせる。
+            // openWindow は環境の値なので、ここで渡すしか無い
+            IncomingURL.registerWindowOpener { openWindow(id: "browser") }
+            // 窓が無い間に積まれた分を引き取る。
+            // プライベートウィンドウは受け取らない（選ばれていない契約だ）
+            if manager.acceptsExternalURL {
+                IncomingURL.drain(into: manager)
+            }
             // 復元待ちがまだ残っていれば、次の窓を開く。
             // 開いた先も同じことをするので、必要な枚数まで数珠つなぎに続く。
             // この窓の分は既に manager の初期化で取り出されている

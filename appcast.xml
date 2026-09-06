@@ -7,6 +7,74 @@
     <language>en</language>
 
     <item>
+      <title>Version 1.22</title>
+      <pubDate>Sun, 06 Sep 2026 23:49:09 +0900</pubDate>
+      <sparkle:version>22</sparkle:version>
+      <sparkle:shortVersionString>1.22</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>Skyscraper 1.22</h2>
+        <ul>
+          <li>パスキー準備用テストリリース4</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://github.com/inugamine/Skyscraper/releases/download/v1.22/Skyscraper-1.22.zip"
+        sparkle:edSignature="4u2mm5Rr/bezMRof3YCLGTZNn/WLsgZwhwQ2iWywtIdwknA4SOpFa8rIa4q/BYVS+BPtNSU13M1uMaEzFPz7Dw=="
+        length="13131115"
+        type="application/octet-stream" />
+    </item>    <item>
+      <title>Version 1.21</title>
+      <pubDate>Sun, 06 Sep 2026 23:31:46 +0900</pubDate>
+      <sparkle:version>21</sparkle:version>
+      <sparkle:shortVersionString>1.21</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>Skyscraper 1.21</h2>
+        <ul>
+          <li>パスキー準備用テストリリース3</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://github.com/inugamine/Skyscraper/releases/download/v1.21/Skyscraper-1.21.zip"
+        sparkle:edSignature="sSFaASrblErqHQVWMdaLCBKu1bGCQfsjR8f+77b0aBnUZiTXNbB00nDHkOnMPw6DFW/Gpf9mIVoA6S91Jg9xBA=="
+        length="13130790"
+        type="application/octet-stream" />
+    </item>    <item>
+      <title>Version 1.20</title>
+      <pubDate>Sun, 06 Sep 2026 23:26:11 +0900</pubDate>
+      <sparkle:version>20</sparkle:version>
+      <sparkle:shortVersionString>1.20</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>Skyscraper 1.20</h2>
+        <ul>
+          <li>パスキー準備用テストリリース2</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://github.com/inugamine/Skyscraper/releases/download/v1.20/Skyscraper-1.20.zip"
+        sparkle:edSignature="9tRNGv50NcIW0G/wsVWa0nYX4JBDaI8Da8HX6yNSMZ3pbLjntFtY0AgmuFDLeDdLSBGeTytgSAc8UtBCZdaLDA=="
+        length="13130698"
+        type="application/octet-stream" />
+    </item>    <item>
+      <title>Version 1.19</title>
+      <pubDate>Sun, 06 Sep 2026 22:22:17 +0900</pubDate>
+      <sparkle:version>19</sparkle:version>
+      <sparkle:shortVersionString>1.19</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>Skyscraper 1.19</h2>
+        <ul>
+          <li>パスキー準備用テストリリース</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://github.com/inugamine/Skyscraper/releases/download/v1.19/Skyscraper-1.19.zip"
+        sparkle:edSignature="mqPpKAav+qWr8ATUHw3DHlqZi4azvrF3tyiOrMHWFE54QuWn989njlckMlYnyniYl3wtM0LlNzZX4IalJNDnAQ=="
+        length="13120651"
+        type="application/octet-stream" />
+    </item>    <item>
       <title>Version 1.18</title>
       <pubDate>Sun, 06 Sep 2026 21:35:03 +0900</pubDate>
       <sparkle:version>18</sparkle:version>
