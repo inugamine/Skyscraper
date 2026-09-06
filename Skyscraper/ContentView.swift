@@ -742,6 +742,16 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // ブロックしたポップアップ（知らせバーに出す）
     @Published var blockedPopups: [BlockedPopup] = []
 
+    // 今マウスが乗っているリンクの飛び先。nil なら帯を出さない。
+    //
+    // URL そのものではなく、切り分けた後の形で持つ。
+    // どこを明るく出し、どこを警告色にするかは見せ方の話なので、
+    // 組み立ては LinkHover.swift に置いてある
+    @Published var hoveredLink: LinkHoverDisplay?
+
+    // 帯の下敷きになる辺りにリンクが居る。帯を右下へ逃がす合図
+    @Published var hoverFlipped: Bool = false
+
     // このタブの絵札（ファビコン）。
     // 器とは別にこちらが持つので、タブを畳んでも絵は消えない
     @Published var favicon: NSImage?
@@ -1429,6 +1439,14 @@ final class Tab: NSObject, ObservableObject, Identifiable {
             WeakScriptMessageHandler(delegate: self),
             name: Self.fullscreenMessageHandlerName
         )
+        // リンクの上に乗った時、左下に飛び先を出す帯。
+        // 実用の道具であると同時に、表示された文字と実際の飛び先が
+        // 違うリンクを見破る防具でもある。見せ方の作法は LinkHover.swift の冒頭に書いた
+        webView.configuration.userContentController.addUserScript(LinkHover.userScript)
+        webView.configuration.userContentController.add(
+            WeakScriptMessageHandler(delegate: self),
+            name: LinkHover.messageHandlerName
+        )
         // 動画の再生中はスクリーンセーバーと画面のスリープを止める。
         // 受け口はアプリ共通の一人（SleepBlocker.shared）なので、
         // タブが消えても困らない＝弱参照の包みは要らない。詳しくは SleepBlocker.swift
@@ -2031,9 +2049,46 @@ extension Tab: WKScriptMessageHandler {
             self.isPlayingAudio = boolBody
         case Self.fullscreenMessageHandlerName:
             setVideoFullscreen(boolBody)
+        case LinkHover.messageHandlerName:
+            // これだけは真偽ではなく辞書が飛んでくるので、body をそのまま渡す
+            applyLinkHover(message.body)
         default:
             break
         }
+    }
+}
+
+// MARK: - リンクの飛び先の帯
+
+extension Tab {
+    // ページからの知らせを受けて帯の中身を決める。
+    //
+    // 出所の照合はしない。ここで扱うのは「今目の前に何があるか」だけで、
+    // 入れ子の枠から届いた知らせも同じだけ重みがある——
+    // 枠の中のリンクだって押せば同じように飛ぶ
+    fileprivate func applyLinkHover(_ body: Any) {
+        guard let report = LinkHover.parse(body) else { return }
+        guard let href = report.href else {
+            clearLinkHover()
+            return
+        }
+        let display = LinkHoverDisplay.make(from: href)
+        guard !display.isEmpty else {
+            clearLinkHover()
+            return
+        }
+        // 同じ中身で盤を描き直さない。
+        // mouseover は子の要素をまたぐたびに飛んでくる
+        if hoveredLink != display { hoveredLink = display }
+        if hoverFlipped != report.nearBar { hoverFlipped = report.nearBar }
+    }
+
+    // 帯を畳む。遷移の始まりでも呼ぶ——
+    // 前のページで乗っていたリンクを、新しいページの上に出し続けない
+    func clearLinkHover() {
+        guard hoveredLink != nil || hoverFlipped else { return }
+        hoveredLink = nil
+        hoverFlipped = false
     }
 }
 
@@ -2446,6 +2501,9 @@ extension Tab: WKNavigationDelegate {
     // 次の読み込みが始まった／中身が届いた。前の顛末書は畳む
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         clearLoadError()
+        // 前のページで乗っていたリンクを持ち越さない。
+        // 新しいページの上に古い飛び先が出ているのは、単に古いだけではなく危い
+        clearLinkHover()
         // 出しっぱなしの一覧を連れて行かない。
         // 小窓は窓の子なので、ページが変わっても自分では消えない
         PasswordSuggestionPanel.shared.hide()
@@ -5688,6 +5746,11 @@ struct BrowserPane: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // ── リンクの飛び先 ──
+            //
+            // 帯は選ばれている一枚ぶんだけだ。裏タブごとに持たせると、
+            // 見えない帯が焦点の移動で更新され続けるだけで何の役にも立たない
+            .linkHoverBar(tab.hoveredLink, flipped: tab.hoverFlipped)
         }
         .navigationTitle(windowTitle)
         .onAppear {
