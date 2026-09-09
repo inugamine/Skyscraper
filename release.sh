@@ -160,6 +160,10 @@ fi
 
 # iCloud（CloudKit）を使うようになった時点で、この app は
 # 「プロファイルが埋まっていないと動かない」代物になった。
+# パスキーの権限も同じくプロファイル制だ。ただし壊れ方が違う。
+# こちらは起動こそするが、権限が乗っていないと要求が 1004 で落ち、
+# ページには NotAllowedError が返る。ログインができないだけで
+# 見た目は何も壊れていないので、さらに気づきにくい。
 #
 # 埋め忘れが恐ろしいのは、こちらの手元では気づけないことだ。
 # Xcode から走らせる分には Development の署名で動いてしまうし、
@@ -177,7 +181,7 @@ PROFILE="$APP_PATH/Contents/embedded.provisionprofile"
 if [ ! -f "$PROFILE" ]; then
     echo "エラー: $PROFILE がない。"
     echo ""
-    echo "       この app は iCloud の権限を持っているので、"
+    echo "       この app は iCloud とパスキーの権限を持っているので、"
     echo "       プロファイルが埋まっていないと配った先で起動しない。"
     echo ""
     echo "       Xcode の Archive → Distribute App からやり直すこと。"
@@ -242,7 +246,8 @@ fi
 
 for key in \
     com.apple.developer.icloud-services \
-    com.apple.developer.icloud-container-identifiers
+    com.apple.developer.icloud-container-identifiers \
+    com.apple.developer.web-browser.public-key-credential
 do
     if ! echo "$ECHO_ENT" | grep -q "$key"; then
         echo "エラー: 署名に $key が乗っていない"
@@ -251,7 +256,7 @@ do
         exit 1
     fi
 done
-echo "  iCloud の権限 OK"
+echo "  iCloud・パスキーの権限 OK"
 
 # ── 見に行く先が本番かどうか ──
 #
