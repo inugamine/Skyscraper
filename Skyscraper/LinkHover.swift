@@ -448,6 +448,24 @@ struct LinkHoverBar: View {
         display.warning == .punycode ? Deco.rust : Deco.cream
     }
 
+    // 各段に色を付けて一本に綴じる。
+    // 別々の Text を HStack で並べると、詰まった時に切れる場所を選べない。
+    // 一本にしておけば truncationMode(.tail) が後ろから削ってくれる
+    private var styled: AttributedString {
+        var out = AttributedString()
+        out += segment(display.scheme, Deco.dimGold)
+        out += segment(display.credentials, Deco.rust)
+        out += segment(display.host, hostColor)
+        out += segment(display.trail, Deco.dimGold)
+        return out
+    }
+
+    private func segment(_ text: String, _ color: Color) -> AttributedString {
+        var piece = AttributedString(text)
+        piece.foregroundColor = color
+        return piece
+    }
+
     var body: some View {
         HStack(spacing: 5) {
             if let warning = display.warning {
@@ -456,17 +474,10 @@ struct LinkHoverBar: View {
                     .frame(width: 9, height: 8)
             }
 
-            // 各段を別の Text にして + で繋ぐ。
-            // HStack で並べると、詰まった時に切れる場所を選べない
-            (
-                Text(display.scheme).foregroundColor(Deco.dimGold)
-                + Text(display.credentials).foregroundColor(Deco.rust)
-                + Text(display.host).foregroundColor(hostColor)
-                + Text(display.trail).foregroundColor(Deco.dimGold)
-            )
-            .font(.system(size: 11, design: .serif))
-            .lineLimit(1)
-            .truncationMode(.tail)
+            Text(styled)
+                .font(.system(size: 11, design: .serif))
+                .lineLimit(1)
+                .truncationMode(.tail)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 4)
