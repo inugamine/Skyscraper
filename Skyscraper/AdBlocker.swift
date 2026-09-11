@@ -5,7 +5,7 @@
 //  拡張機能（uBlock Origin Lite）が構造上できない後始末をする。
 //
 //  ── 分担 ──
-//  通信の遮断は全部 uBOL の仕事だ。
+//  通信の遮断は全部 uBOL の仕事。
 //  EasyList / EasyPrivacy / Peter Lowe's に加え、設定画面から
 //  AdGuard Japanese（jpn-1）を有効にしてあるので、
 //  国内のアドネットワークも含めてこちらが手を出す必要はない。
