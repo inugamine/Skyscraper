@@ -936,6 +936,12 @@ final class Tab: NSObject, ObservableObject, Identifiable {
 
     // パスキー（WebAuthn）の橋渡し役。実体は PasskeyManager.swift
     private let passkeyBridge = PasskeyBridge()
+    // 位置情報の取次ぎ。タブごとに一人（CLLocationManager を抱える）。
+    //
+    // passkeyBridge と違って fileprivate なのは、タブを捨てる側（TabManager）から
+    // 待たせている依頼を畳みたいからだ。放っておいても dealloc で止まるが、
+    // それまでメニューバーの位置情報の矢印が点いたままになる
+    fileprivate let geolocation = GeolocationProvider()
 
     // HTTP の認証チャレンジ（Basic / Digest / NTLM）の受け手。実体は HTTPAuth.swift。
     // 一度答えたら同じ場所には訊き直さないので、タブごとに一人持つ
@@ -1472,6 +1478,19 @@ final class Tab: NSObject, ObservableObject, Identifiable {
             contentWorld: PasswordFill.world,
             name: PasswordFill.messageHandlerName
         )
+        // 位置情報：navigator.geolocation の差し替えと、依頼の受け口。
+        // 横取り対象はページ本来の世界に居るので .page（既定）に仕込む。
+        // WebKit 素の実装は公開の許可口を持たず即拒否するだけなので、
+        // 丸ごとこちらで受ける。詳しくは Geolocation.swift の冒頭に書いた
+        geolocation.webView = webView
+        webView.configuration.userContentController.addUserScript(GeolocationProvider.userScript)
+        // 門番は別の世界に、全フレームへ。
+        // こちらはページ側の JS から見えない（見えたら門番にならない）
+        webView.configuration.userContentController.addUserScript(GeolocationGuard.userScript)
+        webView.configuration.userContentController.add(
+            WeakScriptMessageHandler(delegate: self),
+            name: GeolocationProvider.messageHandlerName
+        )
         // KVO の通知は nonisolated な場（KVO が発火したスレッド）で届く。
         // [weak self] は仕組み上 `weak var self` なので、そのまま Task の中で
         // self? を触ると「並行実行のコードが var を跨いで参照している」扱いになり、
@@ -1642,6 +1661,11 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         old.stopLoading()
         old.pauseAllMediaPlayback(completionHandler: nil)
         old.closeAllMediaPresentations {}
+        // 待たせている位置情報の依頼を先に畳む。
+        // 下で受け口を剥すが、こちらの行列はそれでは消えない。
+        // この道は器を作り直す道で Tab 自体は生き残るので、
+        // 放っておくと古い器へ向けて現在地を押し続ける
+        geolocation.teardown()
         old.configuration.userContentController.removeAllScriptMessageHandlers()
         old.configuration.userContentController.removeAllUserScripts()
         old.navigationDelegate = nil
@@ -2036,6 +2060,11 @@ extension Tab: WKScriptMessageHandler {
         // ログイン欄からの知らせは辞書で届く。真偽値への変換より先に捌く
         if message.name == PasswordFill.messageHandlerName {
             handlePasswordMessage(message)
+            return
+        }
+        // 位置情報の依頼も辞書で届く。こちらも真偽値への変換より先に抜く
+        if message.name == GeolocationProvider.messageHandlerName {
+            geolocation.handle(message)
             return
         }
 
@@ -3106,6 +3135,7 @@ final class TabManager: NSObject, ObservableObject {
             tab.webView.pauseAllMediaPlayback(completionHandler: nil)
             tab.webView.closeAllMediaPresentations {}
             tab.webView.load(URLRequest(url: URL(string: "about:blank")!))
+            tab.geolocation.teardown()
             tab.webView.configuration.userContentController.removeAllScriptMessageHandlers()
             tab.webView.configuration.userContentController.removeAllUserScripts()
             grouper.forget(tab.id)
@@ -3639,6 +3669,7 @@ final class TabManager: NSObject, ObservableObject {
         tab.webView.load(URLRequest(url: URL(string: "about:blank")!))
         // スクリプトメッセージハンドラとユーザースクリプトを外す。
         // configuration はタブごとに独立なので、他のタブには影響しない
+        tab.geolocation.teardown()
         tab.webView.configuration.userContentController.removeAllScriptMessageHandlers()
         tab.webView.configuration.userContentController.removeAllUserScripts()
         tabs.remove(at: idx)

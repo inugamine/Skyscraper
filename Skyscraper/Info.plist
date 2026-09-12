@@ -12,6 +12,8 @@
 	<string>Skyscraper needs camera access so that websites you allow can use the camera.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Skyscraper needs microphone access so that websites you allow can use the microphone.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Skyscraper needs your location so that websites you allow can use it.</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

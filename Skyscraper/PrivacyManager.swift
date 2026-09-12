@@ -83,6 +83,13 @@ final class PrivacyManager: ObservableObject {
         flash(String(localized: "Done. Camera and microphone permissions have been reset."))
     }
 
+    // 現在地のサイト別許可を全部忘れる。
+    // 上のトグル自体には手を触れない（切るのと忘れるのは別の話だ）
+    func resetLocationPermissions() {
+        GeolocationStore.shared.reset()
+        flash(String(localized: "Done. Location permissions have been reset."))
+    }
+
     // 外部アプリで開く／開かないの「今後訊かない」を全部忘れる。
     // 一度「開かない」で覚えさせると、これが無い限り二度と開けなくなる
     func resetExternalSchemes() {

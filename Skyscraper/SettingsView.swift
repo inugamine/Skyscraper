@@ -23,6 +23,7 @@ struct SettingsView: View {
     @AppStorage(BookmarkSync.enabledKey) private var syncsBookmarks = true
     @AppStorage(TabManager.autoUnloadKey) private var autoUnloadMinutes = 30
     @AppStorage(HTTPSFirstStore.enabledKey) private var prefersHTTPS = true
+    @AppStorage(GeolocationStore.enabledKey) private var allowsLocation = true
     @State private var showingPasswords = false
     @State private var showingExtensions = false
     @State private var pane: Pane = .general
@@ -470,6 +471,31 @@ struct SettingsView: View {
         .tint(Deco.gold)
         .padding(.bottom, 22)
 
+        // ══ 位置情報 ══
+        sectionHeader("Location")
+
+        // ── 現在地を許すか ──
+        //
+        // これは非常停止装置だ。普段はサイトごとに訊くので、
+        // ここを切る必要は無い——切った場合は一律で断る。
+        // 既定を入にしてあるのは、切った状態を既定にすると
+        // 「壊れてるのか仕様なのか」が利用者から見分けられないからだ。
+        // カメラ・マイクも同じ作法で取り扱っている
+        Toggle(isOn: $allowsLocation) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Let sites ask for your location")
+                    .font(.system(size: 12, design: .serif))
+                    .foregroundColor(Deco.cream)
+                Text("Skyscraper asks you before any site is told where you are, and remembers your answer for that site. Turning this off refuses every site without asking. Your location never leaves your Mac unless you allow it.")
+                    .font(.system(size: 10, design: .serif))
+                    .foregroundColor(Deco.dimGold)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .toggleStyle(.switch)
+        .tint(Deco.gold)
+        .padding(.bottom, 22)
+
         // ══ 閲覧データ ══
         sectionHeader("Browsing Data")
 
@@ -509,6 +535,12 @@ struct SettingsView: View {
             actionRow("Reset Camera & Microphone Permissions",
                       note: "Sites will be asked about again.") {
                 privacy.resetMediaPermissions()
+            }
+
+            // 現在地のサイト別許可を忘れる
+            actionRow("Reset Location Permissions",
+                      note: "Sites will be asked about again.") {
+                privacy.resetLocationPermissions()
             }
 
             // 外部アプリで開く／開かないの記憶を忘れる
