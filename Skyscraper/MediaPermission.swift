@@ -42,6 +42,15 @@ final class MediaPermissionStore {
         sessionDecisions.removeAll()
     }
 
+    // あるプロファイルの分を丸ごと忘れる（プロファイルを消す時）
+    func forgetProfile(_ id: UUID) {
+        let prefix = DataScope.prefix(for: id)
+        let before = decisions.count
+        decisions = decisions.filter { !$0.key.hasPrefix(prefix) }
+        guard decisions.count != before else { return }
+        UserDefaults.standard.set(decisions, forKey: storageKey)
+    }
+
     // MARK: - サイト一件ぶんの出し入れ（アドレスバーのサイト情報から）
 
     // その場所について覚えていること。nil なら未設定（次に訊く）。

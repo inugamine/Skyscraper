@@ -256,4 +256,13 @@ final class PasswordNeverList {
         hosts.removeAll()
         UserDefaults.standard.removeObject(forKey: storageKey)
     }
+
+    // あるプロファイルの分を丸ごと忘れる（プロファイルを消す時）
+    func forgetProfile(_ id: UUID) {
+        let prefix = DataScope.prefix(for: id)
+        let before = hosts.count
+        hosts = hosts.filter { !$0.hasPrefix(prefix) }
+        guard hosts.count != before else { return }
+        UserDefaults.standard.set(Array(hosts), forKey: storageKey)
+    }
 }

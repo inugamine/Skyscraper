@@ -64,6 +64,10 @@ struct SkyscraperApp: App {
     @StateObject private var updater = Updater()
 
     init() {
+        // 前回消し残したプロファイルの置き場を片付ける。
+        // WebView が一つも生まれる前なら、誰も掴んでいない（Profile.swift）
+        Task { await ProfileStore.shared.purgePendingRemovals() }
+
         // 拡張機能を読み込む。
         // 置き場所は ~/Library/Application Support/Skyscraper/Extensions/。
         //

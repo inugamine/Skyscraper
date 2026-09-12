@@ -279,6 +279,12 @@ final class CertificateExceptionStore: ObservableObject {
         allowed.removeAll()
     }
 
+    // あるプロファイルの分を丸ごと忘れる（プロファイルを消す時）
+    func forgetProfile(_ id: UUID) {
+        let prefix = DataScope.prefix(for: id)
+        allowed = allowed.filter { !$0.key.hasPrefix(prefix) }
+    }
+
     // MARK: 押し切られるまでの手順
 
     // 証明書の中身を見せ、それでも進むかを訊く。

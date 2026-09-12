@@ -3052,6 +3052,8 @@ final class TabManager: NSObject, ObservableObject {
         var url: String        // 空文字はロビー
         var title: String
         var interactionState: Data?
+        // どのプロファイルのタブだったか。開き直した時に同じ置き場へ戻す
+        var profile: UUID?
     }
 
     // 閉じたタブの復元用スタック（⇧⌘T）
@@ -3722,7 +3724,8 @@ final class TabManager: NSObject, ObservableObject {
         let restoreState = tab.isHome ? nil : tab.restorableState
         recentlyClosed.append(ClosedTab(url: restoreURL,
                                         title: tab.pageTitle,
-                                        interactionState: restoreState))
+                                        interactionState: restoreState,
+                                        profile: tab.profileID))
         if recentlyClosed.count > 20 { recentlyClosed.removeFirst() }
         // 動画・音声の再生を確実に止めてから退去させる。
         // about:blank の読み込みだけでは非同期で、WebView がどこかに
@@ -3894,11 +3897,32 @@ final class TabManager: NSObject, ObservableObject {
             addTab()
             return
         }
+        // 閉じた後でプロファイルが消されていたら既定へ倒す（restoreSession と同じ理屈）
+        let profile = closed.profile.flatMap { ProfileStore.shared.contains($0) ? $0 : nil }
         let tab = makeTab(url: closed.url.isEmpty ? nil : closed.url,
                           title: closed.title,
-                          interactionState: closed.interactionState)
+                          interactionState: closed.interactionState,
+                          profile: profile)
         tabs.append(tab)
         selectedID = tab.id
+    }
+
+    // ── プロファイルの削除 ──
+
+    // この窓にあるそのプロファイルのタブを全部閉じる。
+    // 閉じたタブの控えからも抑える——置き場ごと消すのに、開き直す道を残すのは筋が通らない
+    func closeTabs(inProfile id: UUID) {
+        for tab in tabs where tab.profileID == id {
+            closeTab(tab)
+        }
+        recentlyClosed.removeAll { $0.profile == id }
+    }
+
+    // 全ての窓で同じことをする（ProfileStore.remove から呼ぶ）
+    static func closeTabsEverywhere(inProfile id: UUID) {
+        for manager in openWindows {
+            manager.closeTabs(inProfile: id)
+        }
     }
 
     // 番号でタブを選ぶ（0始まり）
@@ -4445,7 +4469,8 @@ struct DecoTabRow: View {
             // 以前はここに金の菱形を置いて、押すと留めが外れる作りだった。
             // 絵札と並べると頭が混むので菱形はやめた。
             // 留めの入切は右クリックか Tabs メニューからやる
-            FaviconBadge(image: tab.favicon, isPinned: tab.isPinned)
+            FaviconBadge(image: tab.favicon, isPinned: tab.isPinned,
+                         profileName: profiles.first { $0.id == tab.profileID }?.name)
 
             // 音を鳴らしている／ミュート中のインジケータ
             if tab.isMuted || tab.isPlayingAudio {

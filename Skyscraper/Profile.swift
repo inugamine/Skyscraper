@@ -149,9 +149,112 @@ final class ProfileStore: ObservableObject {
         profiles[index].name = trimmed
     }
 
-    // 削除は二段目で入れる。
-    // WKWebsiteDataStore.remove(forIdentifier:) は使用中だと失敗するので、
-    // そのプロファイルのタブを全窓から閉じてから呼ぶ手順が要る
+    // ── 消す ──
+
+    // 消し残した置き場の控え。次の起動で片付ける
+    private let pendingKey = "skyscraper.profiles.pendingRemoval.v1"
+
+    private var pendingRemovals: [UUID] {
+        get {
+            (UserDefaults.standard.stringArray(forKey: pendingKey) ?? [])
+                .compactMap(UUID.init(uuidString:))
+        }
+        set {
+            if newValue.isEmpty {
+                UserDefaults.standard.removeObject(forKey: pendingKey)
+            } else {
+                UserDefaults.standard.set(newValue.map(\.uuidString), forKey: pendingKey)
+            }
+        }
+    }
+
+    // プロファイルを消す。成功すれば nil、転べば読める一行を返す。
+    //
+    // 中身はその場で空にするが、ディスクの領域そのものは次の起動で消す。
+    //
+    // WKWebsiteDataStore.remove(forIdentifier:) は「使用中」だと断る。
+    // タブを閉じた直後は UI 側の実体がしばらく解けず、それが解けても
+    // 今度はネットワークプロセスがセッションを抱えたままになる（実測：
+    // "Data store is in use" → "(by network process)" と変わったまま四秒粘っても通らない）。
+    // そこに粘るのは筋が悪い。removeData は使用中でも通るので、中身はここで空にする。
+    // 利用者から見ればそれで終わりだ。空の箱は次の起動、WebView が生まれる前に消す。
+    // Safari も置き場の後始末は起動時にやっている
+    func remove(_ id: UUID) async -> String? {
+        guard contains(id) else { return nil }
+
+        // 1. 全窓からそのプロファイルのタブを閉じる
+        TabManager.closeTabsEverywhere(inProfile: id)
+
+        // 2. 各ストアの記憶（鍵に印の付いた分）を捨てる
+        GeolocationStore.shared.forgetProfile(id)
+        MediaPermissionStore.shared.forgetProfile(id)
+        HTTPSFirstStore.shared.forgetProfile(id)
+        CertificateExceptionStore.shared.forgetProfile(id)
+        PopupAllowList.shared.forgetProfile(id)
+        PasswordNeverList.shared.forgetProfile(id)
+
+        // 3. 中身を空にする。Cookie もストレージもキャッシュも、この時点で消える
+        let store = dataStore(for: id)
+        await store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(),
+                               modifiedSince: .distantPast)
+        stores[id] = nil
+
+        // 4. 名簿から消す。後は空の箱の話だから、利用者を待たせない
+        profiles.removeAll { $0.id == id }
+
+        // 5. 箱も消せるなら消す。駄目なら控えて、次の起動に回す
+        if await tryRemoveDirectory(id, attempts: 3) {
+            print("ProfileStore: removed data store \(id)")
+        } else {
+            var pending = pendingRemovals
+            if !pending.contains(id) { pending.append(id) }
+            pendingRemovals = pending
+            print("ProfileStore: data store \(id) still in use; will remove on next launch")
+        }
+        return nil
+    }
+
+    // ディスクの領域を消す。間を置いて何度か叩き、通ったら true
+    private func tryRemoveDirectory(_ id: UUID, attempts: Int) async -> Bool {
+        for attempt in 1...max(attempts, 1) {
+            try? await Task.sleep(for: .milliseconds(500))
+            do {
+                try await WKWebsiteDataStore.remove(forIdentifier: id)
+                return true
+            } catch {
+                print("ProfileStore: remove attempt \(attempt) for \(id) failed: \(error)")
+            }
+        }
+        return false
+    }
+
+    // 前回消し残した箱を片付ける。起動直後に呼ぶ（SkyscraperApp.init）。
+    //
+    // 控えにあるものだけでなく、WebKit に識別子付きの置き場を全部出させて、
+    // 名簿に居ないものは全部消す。控えを残す前に転んだ孤児（作りかけで落ちた、
+    // 古い版が控えずにあきらめた）もこれで拾える。
+    //
+    // この時点では名簿に無い識別子を使うタブは一つも無い（復元も既定へ倒す）ので、
+    // 使用中で断られる理由が無い。それでも転んだら控えに残して、次でまた試す
+    func purgePendingRemovals() async {
+        let known = Set(profiles.map(\.id))
+        let onDisk = (try? await WKWebsiteDataStore.allDataStoreIdentifiers) ?? []
+        let orphans = onDisk.filter { !known.contains($0) }
+        let targets = Array(Set(pendingRemovals + orphans))
+        guard !targets.isEmpty else { return }
+
+        var remaining: [UUID] = []
+        for id in targets {
+            do {
+                try await WKWebsiteDataStore.remove(forIdentifier: id)
+                print("ProfileStore: purged leftover data store \(id)")
+            } catch {
+                print("ProfileStore: could not purge \(id): \(error)")
+                remaining.append(id)
+            }
+        }
+        pendingRemovals = remaining
+    }
 }
 
 // MARK: - 設定の欄
@@ -166,6 +269,10 @@ struct ProfileSettingsSection: View {
     // 改名中のプロファイル。nil なら何も開いていない
     @State private var renaming: BrowserProfile?
     @State private var renameText = ""
+    // 削除を確かめているプロファイル
+    @State private var deleting: BrowserProfile?
+    @State private var isDeleting = false
+    @State private var deleteError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -198,8 +305,26 @@ struct ProfileSettingsSection: View {
                                 .overlay(Hexagon(inset: 4).stroke(Deco.faintGold, lineWidth: 1))
                         }
                         .buttonStyle(.plain)
+                        Button {
+                            deleting = profile
+                        } label: {
+                            Image(systemName: "trash")
+                                .font(.system(size: 10))
+                                .foregroundColor(Deco.dimGold)
+                                .frame(width: 20, height: 20)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isDeleting)
                     }
                 }
+            }
+
+            if let deleteError {
+                Text(verbatim: deleteError)
+                    .font(.system(size: 10, design: .serif))
+                    .foregroundColor(Deco.rust)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Button {
@@ -234,6 +359,29 @@ struct ProfileSettingsSection: View {
                 if let renaming { store.rename(renaming.id, to: renameText) }
             }
             Button("Cancel", role: .cancel) {}
+        }
+        // 削除の確認。タブもデータも消えるので、一度は訊く
+        .confirmationDialog(
+            deleting.map { Text("Delete the profile “\($0.name)”?") } ?? Text(""),
+            isPresented: Binding(
+                get: { deleting != nil },
+                set: { if !$0 { deleting = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let target = deleting {
+                Button("Delete Profile", role: .destructive) {
+                    isDeleting = true
+                    deleteError = nil
+                    Task { @MainActor in
+                        deleteError = await store.remove(target.id)
+                        isDeleting = false
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            }
+        } message: {
+            Text("Its tabs will be closed, and its cookies, site data and permissions will be erased. Bookmarks and saved passwords are shared, so they stay.")
         }
     }
 }

@@ -132,6 +132,12 @@ final class HTTPSFirstStore: ObservableObject {
         plainAllowed.removeAll()
     }
 
+    // あるプロファイルの分を丸ごと忘れる（プロファイルを消す時）
+    func forgetProfile(_ id: UUID) {
+        let prefix = DataScope.prefix(for: id)
+        plainAllowed = plainAllowed.filter { !$0.hasPrefix(prefix) }
+    }
+
     // MARK: - 落とす前の確認
 
     // https で駄目だった。平文のまま続けるかを訊く。
