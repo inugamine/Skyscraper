@@ -7,6 +7,24 @@
     <language>en</language>
 
     <item>
+      <title>Version 1.25</title>
+      <pubDate>Sat, 12 Sep 2026 16:28:11 +0900</pubDate>
+      <sparkle:version>25</sparkle:version>
+      <sparkle:shortVersionString>1.25</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>Skyscraper 1.25</h2>
+        <ul>
+          <li>位置情報が扱えるようになりました</li>
+          <li>拡張機能の権限やインポート周りの調整を行いました</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://github.com/inugamine/Skyscraper/releases/download/v1.25/Skyscraper-1.25.zip"
+        sparkle:edSignature="/AaDx9+IunzqodTU9v3Y1QPaBs8ZrK0HdLfyPsoGF7h6GU1y/GMy4BWch5CgrMLj4IdlG3IeU+4sl8LgXbLmAQ=="
+        length="13278770"
+        type="application/octet-stream" />
+    </item>    <item>
       <title>Version 1.24</title>
       <pubDate>Wed, 09 Sep 2026 22:51:37 +0900</pubDate>
       <sparkle:version>24</sparkle:version>
