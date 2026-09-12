@@ -21,6 +21,10 @@ final class MediaPermissionStore {
     // "https://example.com|camera" → 許可したか
     private var decisions: [String: Bool]
 
+    // プライベートウィンドウでの記憶。メモリだけで、最後の一枚を閉じた時に捨てる。
+    // 読むのは上の decisions からも読む、書くのはこちらだけ（Geolocation と同じ作法）
+    private var sessionDecisions: [String: Bool] = [:]
+
     private init() {
         decisions = UserDefaults.standard.dictionary(forKey: storageKey) as? [String: Bool] ?? [:]
     }
@@ -31,6 +35,11 @@ final class MediaPermissionStore {
     func reset() {
         decisions.removeAll()
         UserDefaults.standard.removeObject(forKey: storageKey)
+    }
+
+    // プライベートの記憶を捨てる。最後のプライベートウィンドウが閉じた時に呼ばれる
+    func forgetSession() {
+        sessionDecisions.removeAll()
     }
 
     // MARK: - サイト一件ぶんの出し入れ（アドレスバーのサイト情報から）
@@ -57,16 +66,22 @@ final class MediaPermissionStore {
 
     // MARK: - 判断
 
-    // origin は保存用のキー（scheme://host:port）、host は画面に出す名前
+    // origin は保存用のキー（scheme://host:port）、host は画面に出す名前。
+    // persistent が false ならプライベートウィンドウ。記憶はメモリにしか書かない
     func decide(origin: String,
                 host: String,
                 type: WKMediaCaptureType,
-                in window: NSWindow?) async -> WKPermissionDecision {
+                in window: NSWindow?,
+                persistent: Bool = true) async -> WKPermissionDecision {
         let keys = Self.deviceKeys(for: type).map { "\(origin)|\($0)" }
 
         // カメラとマイクを両方要求された場合、片方でも拒否済みなら訊かずに断る。
-        // 両方とも記憶済みならその通りにする
-        let saved = keys.compactMap { decisions[$0] }
+        // 両方とも記憶済みならその通りにする。
+        // プライベートではセッションの記憶を先に見て、無ければ永続の方を見る
+        let saved = keys.compactMap { key -> Bool? in
+            if !persistent, let s = sessionDecisions[key] { return s }
+            return decisions[key]
+        }
         if saved.contains(false) {
             return .deny
         }
@@ -74,10 +89,14 @@ final class MediaPermissionStore {
             return .grant
         }
 
-        let (allowed, remember) = await ask(host: host, type: type, in: window)
+        let (allowed, remember) = await ask(host: host, type: type, in: window, persistent: persistent)
         if remember {
-            for key in keys { decisions[key] = allowed }
-            UserDefaults.standard.set(decisions, forKey: storageKey)
+            if persistent {
+                for key in keys { decisions[key] = allowed }
+                UserDefaults.standard.set(decisions, forKey: storageKey)
+            } else {
+                for key in keys { sessionDecisions[key] = allowed }
+            }
         }
         return allowed ? .grant : .deny
     }
@@ -86,7 +105,8 @@ final class MediaPermissionStore {
 
     private func ask(host: String,
                      type: WKMediaCaptureType,
-                     in window: NSWindow?) async -> (allowed: Bool, remember: Bool) {
+                     in window: NSWindow?,
+                     persistent: Bool) async -> (allowed: Bool, remember: Bool) {
         let alert = NSAlert()
         alert.alertStyle = .informational
         alert.messageText = Self.question(host: host, type: type)
@@ -99,7 +119,9 @@ final class MediaPermissionStore {
         deny.keyEquivalent = "\r"
 
         alert.showsSuppressionButton = true
-        alert.suppressionButton?.title = String(localized: "Remember my choice for this site")
+        alert.suppressionButton?.title = persistent
+            ? String(localized: "Remember my choice for this site")
+            : String(localized: "Remember until all private windows are closed")
 
         let response: NSApplication.ModalResponse
         if let window {

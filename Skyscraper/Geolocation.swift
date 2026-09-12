@@ -49,6 +49,12 @@ final class GeolocationStore: ObservableObject {
     // "https://example.com" → 許可したか
     private var decisions: [String: Bool]
 
+    // プライベートウィンドウでの記憶。メモリだけで、最後の一枚を閉じた時に捨てる。
+    //
+    // 読むのは上の decisions からも読む（通常で許したサイトはプライベートでも許す。
+    // Safari も Chrome もそうしている）。書くのはこちらだけ——痕跡を残さない
+    private var sessionDecisions: [String: Bool] = [:]
+
     private init() {
         decisions = UserDefaults.standard.dictionary(forKey: storageKey) as? [String: Bool] ?? [:]
     }
@@ -73,23 +79,41 @@ final class GeolocationStore: ObservableObject {
         decisions[origin]
     }
 
+    // 同じだが、プライベートウィンドウならセッションの記憶も見る。
+    // permissions.query の答えに使う——あれはダイアログを出さずに「今どうか」だけを返す
+    func decision(origin: String, persistent: Bool) -> Bool? {
+        if !persistent, let saved = sessionDecisions[origin] { return saved }
+        return decisions[origin]
+    }
+
     // その場所の記憶だけを忘れる。他のサイトには手を触れない
     func forget(origin: String) {
         guard decisions.removeValue(forKey: origin) != nil else { return }
         UserDefaults.standard.set(decisions, forKey: storageKey)
     }
 
+    // プライベートの記憶を捨てる。最後のプライベートウィンドウが閉じた時に呼ばれる
+    func forgetSession() {
+        sessionDecisions.removeAll()
+    }
+
     // MARK: - 判断
 
-    func decide(origin: String, host: String, in window: NSWindow?) async -> Bool {
+    // persistent が false ならプライベートウィンドウ。記憶はメモリにしか書かない
+    func decide(origin: String, host: String, in window: NSWindow?, persistent: Bool = true) async -> Bool {
         guard isEnabled else { return false }
 
+        if !persistent, let saved = sessionDecisions[origin] { return saved }
         if let saved = decisions[origin] { return saved }
 
-        let (allowed, remember) = await ask(host: host, in: window)
+        let (allowed, remember) = await ask(host: host, in: window, persistent: persistent)
         if remember {
-            decisions[origin] = allowed
-            UserDefaults.standard.set(decisions, forKey: storageKey)
+            if persistent {
+                decisions[origin] = allowed
+                UserDefaults.standard.set(decisions, forKey: storageKey)
+            } else {
+                sessionDecisions[origin] = allowed
+            }
         }
         return allowed
     }
@@ -98,7 +122,7 @@ final class GeolocationStore: ObservableObject {
 
     // 作法は MediaPermission と揃える。
     // 既定のボタンは「許可しない」——Return を叩いただけで現在地は出さない
-    private func ask(host: String, in window: NSWindow?) async -> (allowed: Bool, remember: Bool) {
+    private func ask(host: String, in window: NSWindow?, persistent: Bool) async -> (allowed: Bool, remember: Bool) {
         let site = host.isEmpty ? String(localized: "This site") : host
 
         let alert = NSAlert()
@@ -112,7 +136,10 @@ final class GeolocationStore: ObservableObject {
         deny.keyEquivalent = "\r"
 
         alert.showsSuppressionButton = true
-        alert.suppressionButton?.title = String(localized: "Remember my choice for this site")
+        // プライベートでは「記憶する」の射程が違う。永続に見える文言は使わない
+        alert.suppressionButton?.title = persistent
+            ? String(localized: "Remember my choice for this site")
+            : String(localized: "Remember until all private windows are closed")
 
         let response: NSApplication.ModalResponse
         if let window {
@@ -173,8 +200,15 @@ final class GeolocationStore: ObservableObject {
         if scheme == "https" || scheme == "file" { return true }
         guard scheme == "http" else { return false }
         let host = host.lowercased()
-        return host == "localhost" || host.hasSuffix(".localhost")
-            || host == "127.0.0.1" || host == "::1" || host == "[::1]"
+        if host == "localhost" || host.hasSuffix(".localhost") { return true }
+        if host == "::1" || host == "[::1]" { return true }
+
+        // 127.0.0.0/8 は全域がループバック。
+        // 綴りで比べると 127.0.0.1 しか拾えない（HTTPSFirstStore.isExempt と同じ帯判定）
+        let parts = host.split(separator: ".", omittingEmptySubsequences: false)
+        return parts.count == 4
+            && Int(parts[0]) == 127
+            && parts.dropFirst().allSatisfy { Int($0) != nil }
     }
 }
 
@@ -208,6 +242,113 @@ final class GeolocationProvider: NSObject {
     // 一枚目の答えが出るまで後続は待たせる
     private var askingOrigins: Set<String> = []
 
+    // ── Permissions-Policy ヘッダの控え ──
+    //
+    // 応答の URL（フラグメントを除く）→ その文書が geolocation を誰に許しているか。
+    // サーバが自分の文書に対して「位置情報は使わせない」と宣言できる。
+    // これを見ないと、サイトの意思に反して許可を訊いてしまう。
+    //
+    // 引く鍵は frame.request.url——WebKit が握っている値で、ページ側から偽装できない
+    private var headerPolicies: [String: HeaderPolicy] = [:]
+
+    enum HeaderPolicy {
+        case none               // geolocation=()　誰にも許さない
+        case all                // geolocation=*
+        case list([String])     // 列挙。"self" はそのままの綴りで入る
+    }
+
+    // 応答が届いた。geolocation の指定があれば控える。
+    //
+    // 主フレームの応答なら前のページの分は捨てる。
+    // タブを使い続けても控えが肥えないように
+    func recordPolicy(from response: HTTPURLResponse, isMainFrame: Bool) {
+        if isMainFrame { headerPolicies.removeAll() }
+        guard let url = response.url,
+              let raw = response.value(forHTTPHeaderField: "Permissions-Policy"),
+              let policy = Self.parseGeolocationPolicy(raw)
+        else { return }
+        headerPolicies[Self.documentKey(url)] = policy
+    }
+
+    // この文書は、自分のヘッダで geolocation を自分に許しているか。
+    // ヘッダが無ければ既定値（self）で許される
+    private func headerAllows(documentURL: URL?) -> Bool {
+        guard let documentURL,
+              let policy = headerPolicies[Self.documentKey(documentURL)]
+        else { return true }
+
+        switch policy {
+        case .none: return false
+        case .all:  return true
+        case .list(let entries):
+            let own = GeolocationStore.storageOrigin(for: documentURL)
+            return entries.contains { $0 == "self" || (!own.isEmpty && $0 == own) }
+        }
+    }
+
+    private static func documentKey(_ url: URL) -> String {
+        var comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        comps?.fragment = nil
+        return comps?.url?.absoluteString ?? url.absoluteString
+    }
+
+    // この文書のヘッダは、childOrigin の枠へ geolocation を委ねることを許しているか。
+    //
+    // 仕様の「継承されるポリシー」の一段。親がヘッダで geolocation を宣言していれば、
+    // その許可リストに子のオリジンが無い限り、allow 属性で何を書いても子は通らない。
+    // 宣言していなければこの段は飛ばされる（allow 属性と既定値だけで決まる）
+    func headerAllowsDelegation(from documentURL: URL?, to childOrigin: String) -> Bool {
+        guard let documentURL,
+              let policy = headerPolicies[Self.documentKey(documentURL)]
+        else { return true }
+
+        switch policy {
+        case .none: return false
+        case .all:  return true
+        case .list(let entries):
+            let own = GeolocationStore.storageOrigin(for: documentURL)
+            return entries.contains { entry in
+                (entry == "self" && !own.isEmpty && childOrigin == own) || entry == childOrigin
+            }
+        }
+    }
+
+    // ヘッダの値から geolocation の分だけを読む。指定が無ければ nil。
+    //
+    // 形は Structured Fields の辞書だ:
+    //   geolocation=(self "https://a.example"), camera=()
+    //   geolocation=*
+    // 厳密な構文解析はしない。読めないものは「誰にも許さない」に倒す——
+    // サーバが制限を書こうとしたことだけは確かなので、緩める方には倒さない
+    static func parseGeolocationPolicy(_ header: String) -> HeaderPolicy? {
+        for member in header.split(separator: ",") {
+            let text = member.trimmingCharacters(in: .whitespaces)
+            guard let eq = text.firstIndex(of: "=") else { continue }
+            let name = text[..<eq].trimmingCharacters(in: .whitespaces).lowercased()
+            guard name == "geolocation" else { continue }
+
+            let value = text[text.index(after: eq)...].trimmingCharacters(in: .whitespaces)
+            if value == "*" { return .all }
+            guard value.hasPrefix("("), value.hasSuffix(")") else { return HeaderPolicy.none }
+
+            let inner = value.dropFirst().dropLast()
+            let tokens = inner.split(whereSeparator: { $0 == " " || $0 == "\t" })
+                .map { String($0).trimmingCharacters(in: CharacterSet(charactersIn: "\"")) }
+                .filter { !$0.isEmpty }
+            if tokens.isEmpty { return HeaderPolicy.none }
+            if tokens.contains("*") { return .all }
+            // 列挙された URL はオリジンの形に揃えておく（比較は storageOrigin 同士）
+            let normalized = tokens.map { token -> String in
+                if token == "self" { return token }
+                guard let u = URL(string: token) else { return token }
+                let o = GeolocationStore.storageOrigin(for: u)
+                return o.isEmpty ? token : o
+            }
+            return .list(normalized)
+        }
+        return nil
+    }
+
     override init() {
         super.init()
         manager.delegate = self
@@ -229,6 +370,9 @@ final class GeolocationProvider: NSObject {
             return
         }
 
+        // permissions.query からの問い。ダイアログは出さず、今の状態だけを返す
+        let isQuery = kind == "query"
+
         let highAccuracy = body["highAccuracy"] as? Bool ?? false
 
         // 出所はページの申告ではなく WebKit が握っている frameInfo から取る。
@@ -237,6 +381,7 @@ final class GeolocationProvider: NSObject {
 
         // 最上位の行き先。記憶もダイアログもこちらに付ける
         guard let topURL = webView?.url else {
+            if isQuery { pushQuery(id: id, to: frame, state: "denied"); return }
             deliverError(id: id, to: frame, code: 2,
                          message: "Could not determine your location.")
             return
@@ -246,6 +391,7 @@ final class GeolocationProvider: NSObject {
         guard GeolocationStore.isSecure(frameOrigin),
               GeolocationStore.isSecure(for: topURL)
         else {
+            if isQuery { pushQuery(id: id, to: frame, state: "denied"); return }
             deliverError(id: id, to: frame, code: 1,
                          message: "Geolocation requires a secure connection.")
             return
@@ -269,8 +415,28 @@ final class GeolocationProvider: NSObject {
             // 「枠の中だけ静かに死ぬ」形になって気づけない。
             // 全部通しておけば、壊れた時は即座に分かる
             guard await isAllowed(in: frame) else {
+                if isQuery { pushQuery(id: id, to: frame, state: "denied"); return }
                 deliverError(id: id, to: frame, code: 1,
                              message: "Geolocation is not allowed in this frame.")
+                return
+            }
+
+            // プライベートウィンドウかどうかは置き場で見る。
+            // 非永続のストアを使っているのがその印だ（PrivateBrowsing.swift）
+            let persistent = webView?.configuration.websiteDataStore.isPersistent ?? true
+
+            // 問いならここで答えて終わる。記憶が無ければ prompt——
+            // 「訊けばダイアログが出る」という意味で、仕様通りだ
+            if isQuery {
+                let state: String
+                if !GeolocationStore.shared.isEnabled {
+                    state = "denied"
+                } else if let saved = GeolocationStore.shared.decision(origin: key, persistent: persistent) {
+                    state = saved ? "granted" : "denied"
+                } else {
+                    state = "prompt"
+                }
+                pushQuery(id: id, to: frame, state: state)
                 return
             }
 
@@ -282,7 +448,7 @@ final class GeolocationProvider: NSObject {
             let known = GeolocationStore.shared.decision(origin: key) != nil
             if !known { askingOrigins.insert(key) }
             let allowed = await GeolocationStore.shared.decide(
-                origin: key, host: host, in: webView?.window
+                origin: key, host: host, in: webView?.window, persistent: persistent
             )
             askingOrigins.remove(key)
 
@@ -303,6 +469,13 @@ final class GeolocationProvider: NSObject {
     // 位置情報は漏れたら取り返しがつかないので、迷ったら断る側に倒す
     private func isAllowed(in frame: WKFrameInfo) async -> Bool {
         guard let webView else { return false }
+
+        // 先にヘッダ。要求元の文書と最上位の文書、どちらかが自分を禁じていれば断る。
+        // 連鎖の途中の文書のヘッダは見ていない（門番の各段で native に訊く口が要る。別件）
+        guard headerAllows(documentURL: frame.request.url),
+              headerAllows(documentURL: webView.url)
+        else { return false }
+
         do {
             let result = try await webView.callAsyncJavaScript(
                 GeolocationGuard.checkExpression,
@@ -394,6 +567,13 @@ final class GeolocationProvider: NSObject {
         push(id: id, to: frame, payload: "{\"code\":\(code),\"message\":\"\(escaped)\"}", ok: false)
     }
 
+    // permissions.query の答え。state は granted / denied / prompt のどれか
+    private func pushQuery(id: Int, to frame: WKFrameInfo, state: String) {
+        guard let webView else { return }
+        let js = "window.__skyGeo && window.__skyGeo.deliverQuery(\(id), \"\(state)\");"
+        webView.evaluateJavaScript(js, in: frame, in: .page) { _ in }
+    }
+
     // ページ側の受け口へ押し返す。
     //
     // 届け先のフレームを明示するのが要点だ。省くと主フレームへ飛ぶ。
@@ -416,6 +596,7 @@ final class GeolocationProvider: NSObject {
         oneShots.removeAll()
         watches.removeAll()
         askingOrigins.removeAll()
+        headerPolicies.removeAll()
         webView = nil
     }
 }
@@ -459,6 +640,24 @@ extension GeolocationProvider: CLLocationManagerDelegate {
     }
 }
 
+// MARK: - 門番からの問い（隔離ワールド、返信付き）
+
+// 門番が子の問い合わせに答える時、自分の文書のヘッダが子のオリジンを許しているかをここに訊く。
+//
+// この口は門番ワールドにしか登録しないので、ページ側の JS からは叩けない。
+// どの文書からの問いかは frameInfo から分かるので、門番に自分の URL を名乗らせない——
+// 送ってくるのは子のオリジンだけで、それは門番が event.origin から取った値だ
+extension GeolocationProvider: WKScriptMessageHandlerWithReply {
+    func userContentController(_ userContentController: WKUserContentController,
+                               didReceive message: WKScriptMessage) async -> (Any?, String?) {
+        guard let body = message.body as? [String: Any],
+              let childOrigin = body["origin"] as? String
+        else { return (false, nil) }
+        let allowed = headerAllowsDelegation(from: message.frameInfo.request.url, to: childOrigin)
+        return (allowed, nil)
+    }
+}
+
 // MARK: - 門番（隔離ワールド）
 
 // その枠が現在地を訊いてよいかを見る係。
@@ -481,6 +680,9 @@ enum GeolocationGuard {
     // 専用の世界。名前付きの world は同じ名なら同じ実体が返るので、
     // 注入する側と叩く側でここを参照しておけば必ず揃う
     static let world = WKContentWorld.world(name: "SkyscraperGeolocationGuard")
+
+    // 門番が native に訊く口の名前。この世界にしか登録しない
+    static let messageHandlerName = "skyscraperGeolocationGuard"
 
     // 全フレームに仕込む。枠の中に居ないと門番にならない
     static let userScript = WKUserScript(
@@ -569,6 +771,21 @@ enum GeolocationGuard {
             return false;
         };
 
+        // ──── 自分の文書のヘッダ ────
+
+        // 自分の文書が Permissions-Policy ヘッダで、このオリジンの子へ委ねることを許しているか。
+        // ヘッダは JS から読めないので native に訊く。この口はこの世界にしか無い。
+        // 届かなければ断る
+        const headerPermits = async (childOrigin) => {
+            try {
+                const reply = await window.webkit.messageHandlers.skyscraperGeolocationGuard
+                    .postMessage({ origin: childOrigin });
+                return reply === true;
+            } catch (e) {
+                return false;
+            }
+        };
+
         // ──── 親への問い合わせ ────
 
         const askParent = () => new Promise((resolve) => {
@@ -607,8 +824,9 @@ enum GeolocationGuard {
                     // 不透明なオリジン（sandbox で allow-same-origin 無し）は
                     // event.origin が "null" という文字列で届く。照合しようが無いので断る
                     if (event.origin && event.origin !== 'null'
-                        && allowsChild(frame, event.origin)) {
-                        // この枠の allow は通している。
+                        && allowsChild(frame, event.origin)
+                        && await headerPermits(event.origin)) {
+                        // allow 属性も自分のヘッダも通している。
                         // だが自分自身が許可されていなければ、奥も通せない
                         allowed = await check();
                     }
@@ -712,8 +930,18 @@ extension GeolocationProvider {
             }
         };
 
+        // permissions.query の答えを待っている係り。id → resolve
+        const queries = new Map();
+
+        const deliverQuery = (id, state) => {
+            const resolve = queries.get(id);
+            if (!resolve) { return; }
+            queries.delete(id);
+            resolve(state);
+        };
+
         Object.defineProperty(window, '__skyGeo', {
-            value: { deliver: deliver }, enumerable: false, configurable: true
+            value: { deliver: deliver, deliverQuery: deliverQuery }, enumerable: false, configurable: true
         });
 
         // 期限は呼び出し側の都合なので、こちら側で数える。
@@ -772,6 +1000,36 @@ extension GeolocationProvider {
         Object.defineProperty(navigator, 'geolocation', {
             value: Object.freeze(geolocation), enumerable: true, configurable: true
         });
+
+        // ──── navigator.permissions.query ────
+        //
+        // サイトはこれで「訊く前に今どうか」を見る。素の WebKit は常に prompt を返すので、
+        // 拒否済みでも「位置情報を許可してください」の案内が出続ける。
+        // geolocation だけを横取りして、他は素通しにする
+        const perms = navigator.permissions;
+        if (perms && typeof perms.query === 'function') {
+            const original = perms.query.bind(perms);
+
+            // PermissionStatus らしい形。onchange は鳴らさない（変化の通知は未対応）
+            const makeStatus = (state) => {
+                const target = new EventTarget();
+                Object.defineProperty(target, 'state', { value: state, enumerable: true });
+                Object.defineProperty(target, 'name', { value: 'geolocation', enumerable: true });
+                target.onchange = null;
+                return target;
+            };
+
+            const query = (desc) => {
+                if (!desc || desc.name !== 'geolocation') { return original(desc); }
+                return new Promise((resolve) => {
+                    const id = nextId++;
+                    queries.set(id, (state) => resolve(makeStatus(state)));
+                    post('query', id, null);
+                });
+            };
+
+            Object.defineProperty(perms, 'query', { value: query, configurable: true, writable: true });
+        }
     })();
     """
 }

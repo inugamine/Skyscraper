@@ -43,6 +43,12 @@ enum PrivateBrowsing {
     static func release(_ store: WKWebsiteDataStore?) {
         users = max(0, users - 1)
         guard users == 0, let store else { return }
+
+        // ページのデータとは別に、こちらがメモリで持っていた許可の記憶も捨てる。
+        // 「プライベートで許した」が次のプライベートセッションに持ち越されては困る
+        GeolocationStore.shared.forgetSession()
+        MediaPermissionStore.shared.forgetSession()
+
         // 呼ぶ側（窓）はもう死んでいるので、完了は待たない
         store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(),
                          modifiedSince: .distantPast) {

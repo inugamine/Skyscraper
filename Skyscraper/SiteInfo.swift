@@ -336,6 +336,23 @@ struct SiteInfoPopover: View {
             }
         }
 
+        // ── 現在地 ──
+        //
+        // 鍵の形はカメラと同じ（scheme://host[:port]）。
+        // プライベートでの一時的な記憶はここには出ない——
+        // カメラも同じで、あれは窓を閉じれば消えるので一件ずつ消す口は要らない
+        let geoOrigin = GeolocationStore.storageOrigin(for: url)
+        if !geoOrigin.isEmpty,
+           let allowed = GeolocationStore.shared.decision(origin: geoOrigin) {
+            list.append(SitePermission(
+                id: "geolocation",
+                label: "Location",
+                state: allowed ? "Allowed" : "Blocked",
+                clearTitle: "Forget",
+                clear: { GeolocationStore.shared.forget(origin: geoOrigin) }
+            ))
+        }
+
         // ── ポップアップ ──
         //
         // こちらは file: にも鍵がある。PopupAllowList が、host を

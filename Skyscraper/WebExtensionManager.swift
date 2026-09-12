@@ -30,10 +30,15 @@ import AppKit
 import Combine
 import Foundation
 import WebKit
+import os
 
 @MainActor
 final class WebExtensionManager: NSObject, ObservableObject {
     static let shared = WebExtensionManager()
+
+    // 記録の出し先。print は配った先で誰も見ていない（BookmarkSync と同じ理由）
+    private static let log = Logger(subsystem: "net.live-on.inugamine.Skyscraper",
+                                    category: "WebExtension")
 
     // 拡張の出所
     enum Source {
@@ -177,13 +182,13 @@ final class WebExtensionManager: NSObject, ObservableObject {
         for url in bundledFolders {
             let name = url.lastPathComponent
             guard !loaded.contains(where: { $0.id == name }) else {
-                print("WebExtension[\(name)]: bundled copy skipped (overridden by user)")
+                Self.log.info("[\(name, privacy: .public)] bundled copy skipped (overridden by user)")
                 continue
             }
             await load(at: url, source: .bundled)
         }
 
-        print("WebExtensionManager: loaded \(loaded.count) extension(s)")
+        Self.log.info("loaded \(self.loaded.count) extension(s)")
     }
 
     // 下に manifest.json を持つフォルダだけを拾う
@@ -213,7 +218,7 @@ final class WebExtensionManager: NSObject, ObservableObject {
             // manifest の解釈で拾った不備。致命でなくても出しておく
             // （権限名の綴り違いなどは黙って無視されるので、これが唯一の手がかりになる）
             for error in ext.errors {
-                print("WebExtension[\(name)]: manifest warning: \(error)")
+                Self.log.warning("[\(name, privacy: .public)] manifest warning: \(error, privacy: .public)")
             }
 
             let context = WKWebExtensionContext(for: ext)
@@ -268,9 +273,9 @@ final class WebExtensionManager: NSObject, ObservableObject {
             case .denied:   state = ", denied"
             case .approved: state = enabled ? "" : ", disabled"
             }
-            print("WebExtension[\(name)]: loaded (\(ext.displayName ?? "?") \(ext.displayVersion ?? "?"), \(origin)\(state))")
+            Self.log.info("[\(name, privacy: .public)] loaded (\(ext.displayName ?? "?", privacy: .public) \(ext.displayVersion ?? "?", privacy: .public), \(origin, privacy: .public)\(state, privacy: .public))")
         } catch {
-            print("WebExtension[\(name)]: load FAILED: \(error)")
+            Self.log.error("[\(name, privacy: .public)] load FAILED: \(error, privacy: .public)")
         }
     }
 
@@ -332,7 +337,7 @@ final class WebExtensionManager: NSObject, ObservableObject {
         do {
             try controller.load(entry.context)
         } catch {
-            print("WebExtension[\(id)]: approve FAILED: \(error)")
+            Self.log.error("[\(id, privacy: .public)] approve FAILED: \(error, privacy: .public)")
             return
         }
 
@@ -342,7 +347,7 @@ final class WebExtensionManager: NSObject, ObservableObject {
 
         loaded[index].review = .approved
         loaded[index].isEnabled = true
-        print("WebExtension[\(id)]: approved (private data: \(allowsPrivateData))")
+        Self.log.info("[\(id, privacy: .public)] approved (private data: \(allowsPrivateData))")
     }
 
     // 保留中の拡張を断る。
@@ -360,7 +365,7 @@ final class WebExtensionManager: NSObject, ObservableObject {
         ExtensionPermissionStore.record(id: id, allowed: false, privateData: false)
         loaded[index].review = .denied
         loaded[index].isEnabled = false
-        print("WebExtension[\(id)]: denied")
+        Self.log.info("[\(id, privacy: .public)] denied")
     }
 
     // MARK: - 切り替え
@@ -385,7 +390,7 @@ final class WebExtensionManager: NSObject, ObservableObject {
                 try controller.unload(context)
             }
         } catch {
-            print("WebExtension[\(id)]: \(enabled ? "enable" : "disable") FAILED: \(error)")
+            Self.log.error("[\(id, privacy: .public)] \(enabled ? "enable" : "disable", privacy: .public) FAILED: \(error, privacy: .public)")
             return
         }
 
@@ -399,7 +404,7 @@ final class WebExtensionManager: NSObject, ObservableObject {
         }
         Self.disabledIDs = disabled
 
-        print("WebExtension[\(id)]: \(enabled ? "enabled" : "disabled")")
+        Self.log.info("[\(id, privacy: .public)] \(enabled ? "enabled" : "disabled", privacy: .public)")
     }
 
     // ツールバーにボタンを出すかどうかだけを切り替える。
@@ -423,7 +428,7 @@ final class WebExtensionManager: NSObject, ObservableObject {
         }
         Self.hiddenActionIDs = hidden
 
-        print("WebExtension[\(id)]: action \(shows ? "shown" : "hidden")")
+        Self.log.info("[\(id, privacy: .public)] action \(shows ? "shown" : "hidden", privacy: .public)")
     }
 
     // 利用者の拡張フォルダを Finder で開く。
@@ -543,7 +548,7 @@ final class WebExtensionManager: NSObject, ObservableObject {
         Self.hiddenActionIDs = hidden
 
         loaded.remove(at: index)
-        print("WebExtension[\(id)]: removed")
+        Self.log.info("[\(id, privacy: .public)] removed")
 
         // 同じ名前の同梱版があれば、そちらを戻す。
         // 利用者版で上書きしていた場合、消したら同梱版が復活するのが自然だ
@@ -654,5 +659,49 @@ extension WebExtensionManager: WKWebExtensionControllerDelegate {
                 userInfo: [NSLocalizedDescriptionKey: "The options page could not be opened."]
             ))
         }
+    }
+
+    // 拡張が新しいタブを開きたい（chrome.tabs.create）。
+    //
+    // これが無いと tabs.create() は "not implemented" で弾かれる。
+    // uBOL は使わないが、リンクを新しいタブで開く類の拡張は大抵ここを通る。
+    //
+    // index は見ない。ピン留めの並びの面倒を TabManager が見ているので、
+    // 位置を外から指定されるとそこを壊す。末尾に足して、ピン留めは後から付ける
+    func webExtensionController(_ controller: WKWebExtensionController,
+                                openNewTabUsing configuration: WKWebExtension.TabConfiguration,
+                                for context: WKWebExtensionContext,
+                                completionHandler: @escaping ((any WKWebExtensionTab)?, (any Error)?) -> Void) {
+        // 行き先の窓。指定が無ければ手前の窓、それも無ければ名簿の先頭
+        let windows = TabManager.openWindows
+        let manager = (configuration.window as? TabManager)
+            ?? windows.first { $0.selectedTab?.webView.window?.isKeyWindow == true }
+            ?? windows.first
+
+        guard let manager else {
+            completionHandler(nil, NSError(
+                domain: "net.live-on.inugamine.Skyscraper",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "There is no window to open a tab in."]
+            ))
+            return
+        }
+
+        let url = configuration.url?.absoluteString
+        let tab: Tab
+        if configuration.shouldBeActive {
+            tab = manager.addTab(url: url)
+        } else if let url {
+            tab = manager.addTabInBackground(url: url)
+        } else {
+            // 行き先無しで裏に開く形は無い。手前に出す
+            tab = manager.addTab(url: nil)
+        }
+
+        if configuration.shouldBePinned {
+            manager.setPinned(tab, true)
+        }
+
+        completionHandler(tab, nil)
     }
 }

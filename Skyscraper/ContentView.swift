@@ -1487,6 +1487,14 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         // 門番は別の世界に、全フレームへ。
         // こちらはページ側の JS から見えない（見えたら門番にならない）
         webView.configuration.userContentController.addUserScript(GeolocationGuard.userScript)
+        // 門番が native にヘッダを訊く口。門番ワールドにしか登録しない（ページからは叩けない）。
+        // 受け手はタブごとの provider 自身。強参照で持たれるが、
+        // removeAllScriptMessageHandlers で外れるので passkeyBridge と同じ扱いだ
+        webView.configuration.userContentController.addScriptMessageHandler(
+            geolocation,
+            contentWorld: GeolocationGuard.world,
+            name: GeolocationGuard.messageHandlerName
+        )
         webView.configuration.userContentController.add(
             WeakScriptMessageHandler(delegate: self),
             name: GeolocationProvider.messageHandlerName
@@ -2415,6 +2423,13 @@ extension Tab: WKNavigationDelegate {
     func webView(_ webView: WKWebView,
                  decidePolicyFor response: WKNavigationResponse,
                  decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        // Permissions-Policy ヘッダを控える。下の判断には関与しない。
+        // 枠（iframe）の応答もここを通る（isForMainFrame が false）ので、
+        // 門番（Geolocation.swift）が枠ごとのヘッダを引ける
+        if let http = response.response as? HTTPURLResponse {
+            geolocation.recordPolicy(from: http, isMainFrame: response.isForMainFrame)
+        }
+
         if response.canShowMIMEType {
             decisionHandler(.allow)
             return
@@ -2794,12 +2809,15 @@ extension Tab: WKUIDelegate {
         // WKSecurityOrigin は持ち回さず、ここで必要な文字列だけ抜いておく
         let originKey = MediaPermissionStore.storageOrigin(origin)
         let host = origin.host
+        // プライベートウィンドウなら記憶はメモリだけにする（MediaPermission.swift）
+        let persistent = webView.configuration.websiteDataStore.isPersistent
         Task { @MainActor in
             let decision = await MediaPermissionStore.shared.decide(
                 origin: originKey,
                 host: host,
                 type: type,
-                in: webView.window
+                in: webView.window,
+                persistent: persistent
             )
             decisionHandler(decision)
         }
@@ -3321,16 +3339,21 @@ final class TabManager: NSObject, ObservableObject {
         tabs.first { $0.id == selectedID }
     }
 
-    func addTab(url: String? = nil) {
+    // 作ったタブを返すのは拡張機能（tabs.create）のため。他の呼び元は捨てていい
+    @discardableResult
+    func addTab(url: String? = nil) -> Tab {
         let tab = makeTab(url: url)
         tabs.append(tab)
         selectedID = tab.id
+        return tab
     }
 
     // ⌘クリック用：裏で開いて、今のタブに留まる
-    func addTabInBackground(url: String) {
+    @discardableResult
+    func addTabInBackground(url: String) -> Tab {
         let tab = makeTab(url: url)
         tabs.append(tab)
+        return tab
     }
 
     // window.open() 用：WebKit が用意した設定で器を起こし、その WKWebView を返す。
