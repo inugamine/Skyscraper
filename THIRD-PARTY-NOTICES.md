@@ -188,7 +188,7 @@ Apache License 2.0 の全文は、本リポジトリの [LICENSE](LICENSE) を�
 
 - 用途: 広告・トラッカーの遮断（拡張機能として同梱）
 - 配布元: https://github.com/gorhill/uBlock
-- 同梱しているバージョン: タグ `1.73.0`
+- 同梱しているバージョン: タグ `1.74.0`
 - ライセンス: GNU General Public License, Version 3
 
 著作権者: Raymond Hill および uBlock Origin の貢献者
