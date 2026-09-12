@@ -258,6 +258,29 @@ do
 done
 echo "  iCloud・パスキーの権限 OK"
 
+# ── 資源へのアクセス権 ──
+#
+# こちらはプロファイル制ではない。Hardened Runtime の枠だ。
+# だから上のループとは別に見る——壊れ方が違う。
+# 落ちても起動はするが、カメラもマイクも現在地も
+# TCC の手前で黙って拒否される（ダイアログすら出ない）。
+#
+# 三つまとめて見るのは、落ちる時は大抵三つ同時だからだ。
+# entitlements ファイルの結びが外れれば丸ごと消える
+for key in \
+    com.apple.security.device.camera \
+    com.apple.security.device.audio-input \
+    com.apple.security.personal-information.location
+do
+    if ! echo "$ECHO_ENT" | grep -q "$key"; then
+        echo "エラー: 署名に $key が乗っていない"
+        echo "       カメラ・マイク・現在地のどれかが、許可を訊く前に"
+        echo "       黙って拒否される状態で出荷される"
+        exit 1
+    fi
+done
+echo "  カメラ・マイク・位置情報の権限 OK"
+
 # ── 見に行く先が本番かどうか ──
 #
 # ここが Development のまま出ると、配った先は誰も居ない物置を覗く。
