@@ -920,6 +920,11 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // パスワードを預かるかどうかの判断に使う
     let isPrivate: Bool
 
+    // どのプロファイルのタブか。nil なら既定。
+    // 生まれた時に決まり、後から変わらない（置き場が器に焼き付くため）。
+    // プライベートのタブでは常に nil——あちらの置き場が優先される
+    let profileID: UUID?
+
     // このタブが使うデータの置き場。nil なら既定（永続）。
     // 畳んだタブを起こす時に同じ置き場で器を作り直すため、手元に持つ
     private let dataStore: WKWebsiteDataStore?
@@ -1387,12 +1392,19 @@ final class Tab: NSObject, ObservableObject, Identifiable {
          interactionState: Data? = nil,
          popupConfiguration: WKWebViewConfiguration? = nil,
          dataStore: WKWebsiteDataStore? = nil,
-         isPrivate: Bool = false) {
+         isPrivate: Bool = false,
+         profileID: UUID? = nil) {
         isPopupBorn = popupConfiguration != nil
         self.isPrivate = isPrivate
+        // プライベートの置き場が来ているなら、プロファイルは名乗らない
+        let profile = dataStore == nil ? profileID : nil
+        self.profileID = profile
+        // 置き場の優先順：プライベート → プロファイル → popup の開いた側 → 既定。
         // popup 生まれなら、開いた側が使っている置き場をそのまま引き継ぐ
-        self.dataStore = dataStore ?? popupConfiguration?.websiteDataStore
-        webView = Tab.makeWebView(popupConfiguration, dataStore: dataStore)
+        let chosenStore = dataStore
+            ?? profile.map { ProfileStore.shared.dataStore(for: $0) }
+        self.dataStore = chosenStore ?? popupConfiguration?.websiteDataStore
+        webView = Tab.makeWebView(popupConfiguration, dataStore: chosenStore)
         super.init()
 
         wire()
@@ -2915,6 +2927,9 @@ private struct SessionTab: Codable {
     // try? で受けているので、ここを Bool にすると
     // 前回のタブ構成が丸ごと飛ぶ
     var pinned: Bool? = nil
+    // どのプロファイルのタブだったか。既定なら鍵ごと無い。
+    // Optional なのは pinned と同じ理由（古い保存を壊さない）
+    var profile: UUID? = nil
 }
 
 private struct SessionState: Codable {
@@ -3290,9 +3305,15 @@ final class TabManager: NSObject, ObservableObject {
         }
         for entry in state.tabs.prefix(Self.restoreLimit) {
             // 空文字はロビー。それ以外は読み込まずに控えだけしておく
+            // 保存後に消されたプロファイルの id なら既定へ倒す。
+            // 無い置き場で器を作ると、ディスクに幽霊の領域が生まれる
+            let profile = entry.profile.flatMap {
+                ProfileStore.shared.contains($0) ? $0 : nil
+            }
             let tab = makeTab(url: entry.url.isEmpty ? nil : entry.url,
                               title: entry.title,
-                              deferLoad: true)
+                              deferLoad: true,
+                              profile: profile)
             tab.isPinned = entry.pinned == true
             tabs.append(tab)
         }
@@ -3329,7 +3350,8 @@ final class TabManager: NSObject, ObservableObject {
             // 古い保存と同じ形のままになるので、戻した時にも困らない
             return SessionTab(url: url,
                               title: tab.pageTitle,
-                              pinned: tab.isPinned ? true : nil)
+                              pinned: tab.isPinned ? true : nil,
+                              profile: tab.profileID)
         }
         let index = tabs.firstIndex { $0.id == selectedID } ?? 0
         return SessionState(tabs: entries, selectedIndex: index)
@@ -3341,8 +3363,8 @@ final class TabManager: NSObject, ObservableObject {
 
     // 作ったタブを返すのは拡張機能（tabs.create）のため。他の呼び元は捨てていい
     @discardableResult
-    func addTab(url: String? = nil) -> Tab {
-        let tab = makeTab(url: url)
+    func addTab(url: String? = nil, profile: UUID? = nil) -> Tab {
+        let tab = makeTab(url: url, profile: profile)
         tabs.append(tab)
         selectedID = tab.id
         return tab
@@ -3350,8 +3372,8 @@ final class TabManager: NSObject, ObservableObject {
 
     // ⌘クリック用：裏で開いて、今のタブに留まる
     @discardableResult
-    func addTabInBackground(url: String) -> Tab {
-        let tab = makeTab(url: url)
+    func addTabInBackground(url: String, profile: UUID? = nil) -> Tab {
+        let tab = makeTab(url: url, profile: profile)
         tabs.append(tab)
         return tab
     }
@@ -3359,8 +3381,11 @@ final class TabManager: NSObject, ObservableObject {
     // window.open() 用：WebKit が用意した設定で器を起こし、その WKWebView を返す。
     // 中身を入れるのは WebKit の仕事なので、ここでは load しない。
     // 本物のポップアップ窓に対応するので、開いたらそちらを見せる
-    func addPopupTab(configuration: WKWebViewConfiguration) -> WKWebView {
-        let tab = makeTab(url: nil, popupConfiguration: configuration)
+    func addPopupTab(configuration: WKWebViewConfiguration,
+                     profile: UUID? = nil) -> WKWebView {
+        // 置き場そのものは configuration が運んでくる。
+        // profile を渡すのは、生まれたタブが自分の所属を名乗れるようにするためだ
+        let tab = makeTab(url: nil, popupConfiguration: configuration, profile: profile)
         tabs.append(tab)
         selectedID = tab.id
         return tab.webView
@@ -3432,14 +3457,18 @@ final class TabManager: NSObject, ObservableObject {
                          title: String = "",
                          deferLoad: Bool = false,
                          interactionState: Data? = nil,
-                         popupConfiguration: WKWebViewConfiguration? = nil) -> Tab {
+                         popupConfiguration: WKWebViewConfiguration? = nil,
+                         profile: UUID? = nil) -> Tab {
+        // プライベートウィンドウにプロファイルは無い。
+        // 渡されても捨てる（Tab 側でも同じ判断をするが、意図はこちらに書く）
         let tab = Tab(url: url,
                       title: title,
                       deferLoad: deferLoad,
                       interactionState: interactionState,
                       popupConfiguration: popupConfiguration,
                       dataStore: privateStore,
-                      isPrivate: isPrivate)
+                      isPrivate: isPrivate,
+                      profileID: isPrivate ? nil : profile)
         wire(tab)
         return tab
     }
@@ -3451,12 +3480,15 @@ final class TabManager: NSObject, ObservableObject {
     // 黙って効かなくなる（古い窓に連絡が行ってしまう）
     private func wire(_ tab: Tab) {
         // ⌘クリックされたら、この管理人に連絡が来るようにする
+        // 開いた側のプロファイルを継ぐ。値で掴む（let なので変わらない）——
+        // tab 本人をクロージャに握らせると、タブが自分を掴む輪になる
+        let profile = tab.profileID
         tab.openInNewTab = { [weak self] link in
-            self?.addTabInBackground(url: link)
+            self?.addTabInBackground(url: link, profile: profile)
         }
         // window.open() で器を求められたら、ここで起こして返す
         tab.openPopup = { [weak self] configuration in
-            self?.addPopupTab(configuration: configuration)
+            self?.addPopupTab(configuration: configuration, profile: profile)
         }
         // window.close() を受けたら、そのタブを畳む
         tab.requestClose = { [weak self, weak tab] in
@@ -4208,6 +4240,9 @@ private struct DraggableTabRow: View {
     let tab: Tab
     let groupNames: [String]
 
+    // プロファイルの一覧。右クリックの「New Tab in Profile」に並べる
+    @ObservedObject private var profiles = ProfileStore.shared
+
     @State private var rowHeight: CGFloat = 1
 
     // 自分以外の窓。名簿順（窓が生まれた順）で並ぶ。
@@ -4237,7 +4272,10 @@ private struct DraggableTabRow: View {
             onClose:  { manager.closeTab(tab) },
             onMoveToNewWindow: { manager.moveTabToNewWindow(tab) },
             onUnload: { manager.unload(tab) },
-            onTogglePin: { manager.togglePin(tab) }
+            onTogglePin: { manager.togglePin(tab) },
+            // プライベートウィンドウにプロファイルは無いので、選択肢も出さない
+            profiles: manager.isPrivate ? [] : profiles.profiles,
+            onOpenInProfile: { id in manager.addTab(profile: id) }
         )
         // 高さを測っておく（上下判定に使う）。
         //
@@ -4376,6 +4414,11 @@ struct DecoTabRow: View {
     let onUnload: () -> Void
     // ピン留めの切り替え
     let onTogglePin: () -> Void
+    // プロファイルの一覧と、そのどれかで新しいタブを開く合図。
+    // 今のタブを移すのではない——置き場は器に焼き付いていて、後から変えられない。
+    // 空ならメニュー自体を出さない
+    var profiles: [BrowserProfile] = []
+    var onOpenInProfile: (UUID) -> Void = { _ in }
 
     @State private var hovering = false
     @State private var showingNewGroup = false
@@ -4470,6 +4513,22 @@ struct DecoTabRow: View {
             // ピン留めしたタブはグループ化の外に居る。
             // 選べてしまうと、入れたつもりなのに上の欄から動かない
             .disabled(tab.isPinned)
+            if !profiles.isEmpty {
+                Menu("New Tab in Profile") {
+                    ForEach(profiles) { profile in
+                        Button {
+                            onOpenInProfile(profile.id)
+                        } label: {
+                            // 今このタブが居るプロファイルに印を付ける
+                            if tab.profileID == profile.id {
+                                Label { Text(verbatim: profile.name) } icon: { Image(systemName: "checkmark") }
+                            } else {
+                                Text(verbatim: profile.name)
+                            }
+                        }
+                    }
+                }
+            }
             Menu("Move to Window") {
                 Button("New Window") { onMoveToNewWindow() }
                 if !moveTargets.isEmpty { Divider() }

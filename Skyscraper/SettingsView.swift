@@ -414,6 +414,13 @@ struct SettingsView: View {
         actionRow("Manage Extensions…", note: Self.extensionSummary) {
             showingExtensions = true
         }
+        .padding(.bottom, 22)
+
+        // ══ プロファイル ══
+        // 中身は Profile.swift にある。見出しだけこちらで付ける
+        sectionHeader("Profiles")
+
+        ProfileSettingsSection()
     }
 
     // ══════════════════════════════════════════════
