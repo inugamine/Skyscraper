@@ -18,6 +18,8 @@ struct WebExtensionListView: View {
     @State private var needsReloadNotice = false
     // 許諾シートを出す相手。nil なら出さない
     @State private var reviewing: WebExtensionManager.Loaded?
+    // 削除の確認を出す相手。nil なら出さない
+    @State private var removing: WebExtensionManager.Loaded?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -42,6 +44,24 @@ struct WebExtensionListView: View {
         .animation(.easeInOut(duration: 0.2), value: needsReloadNotice)
         .sheet(item: $reviewing) { entry in
             ExtensionPermissionSheet(entry: entry)
+        }
+        .confirmationDialog(
+            removing.map { Text("Remove “\($0.displayName)”?") } ?? Text(""),
+            isPresented: Binding(
+                get: { removing != nil },
+                set: { if !$0 { removing = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let entry = removing {
+                Button("Remove", role: .destructive) {
+                    manager.remove(id: entry.id)
+                    needsReloadNotice = true
+                }
+                Button("Cancel", role: .cancel) {}
+            }
+        } message: {
+            Text("The extension folder is moved to the Trash. Its settings inside Skyscraper are forgotten.")
         }
     }
 
@@ -175,6 +195,23 @@ struct WebExtensionListView: View {
                 .tint(Deco.gold)
                 .labelsHidden()
             }
+
+            // 利用者が入れたものだけ消せる。
+            // 同梱版は消しても次の起動で戻るので、ボタン自体を出さない
+            if entry.source == .user {
+                Button {
+                    removing = entry
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 11))
+                        .foregroundColor(Deco.dimGold)
+                        .frame(width: 30, height: 24)
+                        .overlay(Hexagon(inset: 5).stroke(Deco.faintGold.opacity(0.5), lineWidth: 0.5))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Remove this extension.")
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -204,7 +241,7 @@ struct WebExtensionListView: View {
             Text("No extensions are loaded.")
                 .font(.system(size: 12, design: .serif))
                 .foregroundColor(Deco.dimGold)
-            Text("Put an unpacked extension folder (one containing manifest.json) into the Extensions folder, then restart Skyscraper.")
+            Text("Add an unpacked extension folder (one containing manifest.json) with the button below.")
                 .font(.system(size: 10, design: .serif))
                 .foregroundColor(Deco.faintGold)
                 .multilineTextAlignment(.center)
@@ -239,7 +276,46 @@ struct WebExtensionListView: View {
                 .padding(.top, 12)
             }
 
+            // 取り込みや削除の失敗。ダイアログではなくここに出す
+            if let error = manager.lastError {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 10))
+                    Text(verbatim: error)
+                        .font(.system(size: 10, design: .serif))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .foregroundColor(Deco.rust)
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+            }
+
             HStack(spacing: 12) {
+                // フォルダを選んでその場で取り込む。
+                // 読めたらそのまま許諾シートへ——押し忘れて
+                // 「入れたのに動かない」にならないように
+                Button {
+                    Task {
+                        if let id = await manager.addFromPanel(),
+                           let entry = manager.loaded.first(where: { $0.id == id }) {
+                            reviewing = entry
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 11))
+                        Text("Add Extension\u{2026}")
+                            .font(.system(size: 11, design: .serif))
+                            .tracking(1)
+                    }
+                    .foregroundColor(Deco.gold)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .overlay(Hexagon(inset: 6).stroke(Deco.faintGold, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+
                 Button {
                     manager.revealUserExtensionsDirectory()
                 } label: {
@@ -256,11 +332,6 @@ struct WebExtensionListView: View {
                     .overlay(Hexagon(inset: 6).stroke(Deco.faintGold, lineWidth: 1))
                 }
                 .buttonStyle(.plain)
-
-                Text("New extensions are picked up on the next launch.")
-                    .font(.system(size: 10, design: .serif))
-                    .foregroundColor(Deco.dimGold)
-                    .fixedSize(horizontal: false, vertical: true)
 
                 Spacer()
             }

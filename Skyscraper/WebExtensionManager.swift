@@ -16,8 +16,9 @@
 //
 //  ── 今の範囲 ──
 //  タブと窓の橋渡し（WebExtensionBridge.swift）、ツールバーの popup、
-//  設定ページ、許諾の確認（ExtensionPermissions.swift）まで完了。
-//  アプリ内からの取り込みと削除は未実装（今は Finder でフォルダを置く）。
+//  設定ページ、許諾の確認（ExtensionPermissions.swift）、
+//  アプリ内からの取り込みと削除まで完了。
+//  拡張からの tabs.create() は未確認（uBOL は使わない）。
 //
 //  ── 読み込みと許諾の順 ──
 //  見つけただけでは controller に載せない。載せた時点で
@@ -431,6 +432,127 @@ final class WebExtensionManager: NSObject, ObservableObject {
         let dir = Self.userExtensionsDirectory
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         NSWorkspace.shared.open(dir)
+    }
+
+    // MARK: - 取り込みと削除
+
+    // 直近の失敗。一覧の足元に出す。
+    // ダイアログで出さないのは、シートの上にシートが重なるのを避けるため
+    @Published var lastError: String?
+
+    // フォルダを選んで取り込む。読み込めたらその id を返す（呼ぶ側が許諾シートを開く）。
+    //
+    // 読み込みはその場でやる。「次の起動で拾う」という以前の制限は
+    // 技術的な必然ではなかった——load(at:source:) は実行時にも呼べる
+    func addFromPanel() async -> String? {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = String(localized: "Add")
+        panel.message = String(localized: "Choose an unpacked extension folder (one containing manifest.json).")
+
+        guard await panel.begin() == .OK, let chosen = panel.url else { return nil }
+        return await add(folder: chosen)
+    }
+
+    // 展開済みのフォルダを取り込む
+    func add(folder chosen: URL) async -> String? {
+        lastError = nil
+
+        let manifest = chosen.appendingPathComponent("manifest.json")
+        guard FileManager.default.fileExists(atPath: manifest.path) else {
+            lastError = String(localized: "That folder does not contain manifest.json.")
+            return nil
+        }
+
+        let name = chosen.lastPathComponent
+        let userDir = Self.userExtensionsDirectory
+        let destination = userDir.appendingPathComponent(name, isDirectory: true)
+
+        // 既に置き場の中にあるものを選んだなら、コピーは要らない
+        let alreadyInPlace = chosen.standardizedFileURL == destination.standardizedFileURL
+
+        if !alreadyInPlace {
+            // 同じ名前が利用者の置き場にあるなら断る。
+            // 黙って上書きすると、入れたつもりの無い版で置き換わる
+            if FileManager.default.fileExists(atPath: destination.path) {
+                lastError = String(localized: "An extension named “\(name)” is already installed. Remove it first.")
+                return nil
+            }
+            do {
+                try FileManager.default.createDirectory(at: userDir, withIntermediateDirectories: true)
+                try FileManager.default.copyItem(at: chosen, to: destination)
+            } catch {
+                lastError = String(localized: "Could not copy the extension: \(error.localizedDescription)")
+                return nil
+            }
+        }
+
+        // 同梱版と同じ名前なら、同梱版を降ろして入れ替える。
+        //（同梱版より新しい uBOL を自分で入れたい場合の道）
+        if let index = loaded.firstIndex(where: { $0.id == name }) {
+            if loaded[index].isRunning {
+                try? controller.unload(loaded[index].context)
+            }
+            loaded.remove(at: index)
+        }
+
+        // 名前が同じでも中身は別物かもしれない。
+        // 前の許可を引き継がせず、必ず許諾シートを通す
+        ExtensionPermissionStore.forget(id: name)
+
+        await load(at: destination, source: .user)
+
+        guard loaded.contains(where: { $0.id == name }) else {
+            lastError = String(localized: "The extension could not be loaded. Check the manifest for errors.")
+            return nil
+        }
+        return name
+    }
+
+    // 利用者が入れた拡張を消す。同梱版は消せない（消しても次の起動で戻るだけだ）。
+    //
+    // フォルダはゴミ箱へ。間違えて押した時に取り返しがつく形にしておく
+    func remove(id: String) {
+        lastError = nil
+        guard let index = loaded.firstIndex(where: { $0.id == id }),
+              loaded[index].source == .user
+        else { return }
+
+        let entry = loaded[index]
+        if entry.isRunning {
+            try? controller.unload(entry.context)
+        }
+
+        do {
+            try FileManager.default.trashItem(at: entry.baseURL, resultingItemURL: nil)
+        } catch {
+            lastError = String(localized: "Could not remove the extension: \(error.localizedDescription)")
+            // 降ろしたのに消せなかった。載せ直して元に戻す
+            if entry.isRunning { try? controller.load(entry.context) }
+            return
+        }
+
+        ExtensionPermissionStore.forget(id: id)
+        var disabled = Self.disabledIDs
+        disabled.remove(id)
+        Self.disabledIDs = disabled
+        var hidden = Self.hiddenActionIDs
+        hidden.remove(id)
+        Self.hiddenActionIDs = hidden
+
+        loaded.remove(at: index)
+        print("WebExtension[\(id)]: removed")
+
+        // 同じ名前の同梱版があれば、そちらを戻す。
+        // 利用者版で上書きしていた場合、消したら同梱版が復活するのが自然だ
+        if let bundledDir = Self.bundledExtensionsDirectory {
+            let bundled = bundledDir.appendingPathComponent(id, isDirectory: true)
+            if FileManager.default.fileExists(atPath: bundled.appendingPathComponent("manifest.json").path) {
+                Task { await load(at: bundled, source: .bundled) }
+            }
+        }
     }
 
     func unloadAll() {
