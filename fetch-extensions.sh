@@ -63,7 +63,7 @@ done
 # 上げたい時はこの一行を書き換えて叩き直す。
 # タグ一覧: https://github.com/gorhill/uBlock/tags
 #（b0 / rc が付くものはベータ・リリース候補。安定版を選ぶこと）
-UBOL_TAG="1.73.0"
+UBOL_TAG="1.74.0"
 
 UBOL_REPO="https://github.com/gorhill/uBlock.git"
 
