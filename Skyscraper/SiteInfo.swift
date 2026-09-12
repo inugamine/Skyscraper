@@ -319,37 +319,41 @@ struct SiteInfoPopover: View {
         // ── カメラ・マイク ──
         //
         // 鍵は scheme://host[:port]。host を持たない場所（file: など）は
-        // そもそも許可を訊かれないので、空なら見に行かない
+        // そもそも許可を訊かれないので、空なら見に行かない。
+        //
+        // プロファイルのタブならそのプロファイルの分だけを見る。
+        // プライベートなら今まで通り、ディスクにある既定の記憶を見せる
+        //（一時的な記憶は窓を閉じれば消えるので、一件ずつ消す口は要らない）
+        let scope: DataScope = tab.scope.isPersistent ? tab.scope : .default
         let origin = MediaPermissionStore.storageOrigin(for: url)
         if !origin.isEmpty {
             for device in ["camera", "microphone"] {
                 guard let allowed = MediaPermissionStore.shared.decision(origin: origin,
-                                                                         device: device)
+                                                                         device: device,
+                                                                         scope: scope)
                 else { continue }
                 list.append(SitePermission(
                     id: "media.\(device)",
                     label: device == "camera" ? "Camera" : "Microphone",
                     state: allowed ? "Allowed" : "Blocked",
                     clearTitle: "Forget",
-                    clear: { MediaPermissionStore.shared.forget(origin: origin, device: device) }
+                    clear: { MediaPermissionStore.shared.forget(origin: origin, device: device, scope: scope) }
                 ))
             }
         }
 
         // ── 現在地 ──
         //
-        // 鍵の形はカメラと同じ（scheme://host[:port]）。
-        // プライベートでの一時的な記憶はここには出ない——
-        // カメラも同じで、あれは窓を閉じれば消えるので一件ずつ消す口は要らない
+        // 鍵の形はカメラと同じ（scheme://host[:port]）、射程も同じ
         let geoOrigin = GeolocationStore.storageOrigin(for: url)
         if !geoOrigin.isEmpty,
-           let allowed = GeolocationStore.shared.decision(origin: geoOrigin) {
+           let allowed = GeolocationStore.shared.decision(origin: geoOrigin, scope: scope) {
             list.append(SitePermission(
                 id: "geolocation",
                 label: "Location",
                 state: allowed ? "Allowed" : "Blocked",
                 clearTitle: "Forget",
-                clear: { GeolocationStore.shared.forget(origin: geoOrigin) }
+                clear: { GeolocationStore.shared.forget(origin: geoOrigin, scope: scope) }
             ))
         }
 
@@ -358,36 +362,37 @@ struct SiteInfoPopover: View {
         // こちらは file: にも鍵がある。PopupAllowList が、host を
         // 持たない場所にはスキームとパスから代わりの鍵を組む
         let popupKey = PopupAllowList.originKey(for: url)
-        if PopupAllowList.shared.isAllowed(popupKey) {
+        if PopupAllowList.shared.isAllowed(popupKey, scope: scope) {
             list.append(SitePermission(
                 id: "popup",
                 label: "Pop-up windows",
                 state: "Allowed",
                 clearTitle: "Revoke",
-                clear: { PopupAllowList.shared.revoke(popupKey) }
+                clear: { PopupAllowList.shared.revoke(popupKey, scope: scope) }
             ))
         }
 
         // ── パスワードの問い ──
-        if !site.isEmpty, PasswordNeverList.shared.contains(site) {
+        if !site.isEmpty, PasswordNeverList.shared.contains(site, scope: scope) {
             list.append(SitePermission(
                 id: "password",
                 label: "Saving passwords",
                 state: "Never asked here",
                 clearTitle: "Ask Again",
-                clear: { PasswordNeverList.shared.remove(site) }
+                clear: { PasswordNeverList.shared.remove(site, scope: scope) }
             ))
         }
 
         // ── 証明書の例外（この起動の間だけ）──
+        // こちらはプライベートも既定と同じ鍵なので、タブの射程をそのまま渡す
         let port = url.port ?? 443
-        if !site.isEmpty, CertificateExceptionStore.shared.hasException(host: site, port: port) {
+        if !site.isEmpty, CertificateExceptionStore.shared.hasException(host: site, port: port, scope: tab.scope) {
             list.append(SitePermission(
                 id: "certificate",
                 label: "Untrusted certificate",
                 state: "Accepted for this session",
                 clearTitle: "Revoke",
-                clear: { CertificateExceptionStore.shared.forget(host: site, port: port) }
+                clear: { CertificateExceptionStore.shared.forget(host: site, port: port, scope: tab.scope) }
             ))
         }
 
@@ -407,7 +412,9 @@ struct SiteInfoPopover: View {
         clearedData = false
         defer { isClearingData = false }
 
-        let store = WKWebsiteDataStore.default()
+        // 置き場はタブのものを使う。
+        // 既定を決め打ちすると、プロファイルのタブで押した時に別人のデータを消す
+        let store = tab.webView.configuration.websiteDataStore
         let types = WKWebsiteDataStore.allWebsiteDataTypes()
         let records = await store.dataRecords(ofTypes: types)
         let matched = records.filter { record in

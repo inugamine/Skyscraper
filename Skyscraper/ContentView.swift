@@ -920,6 +920,19 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // パスワードを預かるかどうかの判断に使う
     let isPrivate: Bool
 
+    // どのプロファイルのタブか。nil なら既定。
+    // 生まれた時に決まり、後から変わらない（置き場が器に焼き付くため）。
+    // プライベートのタブでは常に nil——あちらの置き場が優先される
+    let profileID: UUID?
+
+    // サイトごとの記憶を誰の分として持つか（Profile.swift の DataScope）。
+    // 許可・例外・「訊かない」を預かるストアは全部これを受け取る
+    var scope: DataScope {
+        if isPrivate { return .session }
+        if let profileID { return .profile(profileID) }
+        return .default
+    }
+
     // このタブが使うデータの置き場。nil なら既定（永続）。
     // 畳んだタブを起こす時に同じ置き場で器を作り直すため、手元に持つ
     private let dataStore: WKWebsiteDataStore?
@@ -1387,12 +1400,19 @@ final class Tab: NSObject, ObservableObject, Identifiable {
          interactionState: Data? = nil,
          popupConfiguration: WKWebViewConfiguration? = nil,
          dataStore: WKWebsiteDataStore? = nil,
-         isPrivate: Bool = false) {
+         isPrivate: Bool = false,
+         profileID: UUID? = nil) {
         isPopupBorn = popupConfiguration != nil
         self.isPrivate = isPrivate
+        // プライベートの置き場が来ているなら、プロファイルは名乗らない
+        let profile = dataStore == nil ? profileID : nil
+        self.profileID = profile
+        // 置き場の優先順：プライベート → プロファイル → popup の開いた側 → 既定。
         // popup 生まれなら、開いた側が使っている置き場をそのまま引き継ぐ
-        self.dataStore = dataStore ?? popupConfiguration?.websiteDataStore
-        webView = Tab.makeWebView(popupConfiguration, dataStore: dataStore)
+        let chosenStore = dataStore
+            ?? profile.map { ProfileStore.shared.dataStore(for: $0) }
+        self.dataStore = chosenStore ?? popupConfiguration?.websiteDataStore
+        webView = Tab.makeWebView(popupConfiguration, dataStore: chosenStore)
         super.init()
 
         wire()
@@ -1483,6 +1503,9 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         // WebKit 素の実装は公開の許可口を持たず即拒否するだけなので、
         // 丸ごとこちらで受ける。詳しくは Geolocation.swift の冒頭に書いた
         geolocation.webView = webView
+        geolocation.scope = scope
+        // HTTP 認証の窓も同じ射程を見る（「訊かない」の印の照合）
+        httpAuth.scope = scope
         webView.configuration.userContentController.addUserScript(GeolocationProvider.userScript)
         // 門番は別の世界に、全フレームへ。
         // こちらはページ側の JS から見えない（見えたら門番にならない）
@@ -1854,7 +1877,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
             return .local
         case "https":
             guard let host = url.host(), !host.isEmpty else { return .secure }
-            return CertificateExceptionStore.shared.hasException(host: host, port: url.port ?? 443)
+            return CertificateExceptionStore.shared.hasException(host: host, port: url.port ?? 443, scope: scope)
                 ? .exception
                 : .secure
         case "http":
@@ -2055,7 +2078,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // 今見ているページを許可一覧に加えてから開く。
     // 記録するのは「開かれる先」ではなく「開く側」のページだ
     func allowPopupsForThisSite() {
-        PopupAllowList.shared.allow(PopupAllowList.originKey(for: webView.url))
+        PopupAllowList.shared.allow(PopupAllowList.originKey(for: webView.url), scope: scope)
         openBlockedPopups()
     }
 }
@@ -2244,7 +2267,7 @@ extension Tab {
         // 後で「保存しますか」と訊くこと自体が筋違いだ——
         // 跡を残さないと言って開いた窓なのだから
         guard !isPrivate else { return }
-        guard !password.isEmpty, !PasswordNeverList.shared.contains(host) else { return }
+        guard !password.isEmpty, !PasswordNeverList.shared.contains(host, scope: scope) else { return }
 
         passwordCandidate = PasswordCandidate(host: host, scheme: scheme, port: port,
                                               username: username, password: password)
@@ -2293,7 +2316,7 @@ extension Tab {
 
     func neverSavePasswordsForThisSite() {
         if let save = pendingSave {
-            PasswordNeverList.shared.add(save.host)
+            PasswordNeverList.shared.add(save.host, scope: scope)
         }
         dismissPasswordPrompt()
     }
@@ -2362,7 +2385,7 @@ extension Tab: WKNavigationDelegate {
                 return
             }
 
-            if HTTPSFirstStore.shared.shouldUpgrade(target),
+            if HTTPSFirstStore.shared.shouldUpgrade(target, scope: scope),
                let secure = HTTPSFirstStore.upgraded(target) {
                 decisionHandler(.cancel)
                 beginUpgrade(plain: target, secure: secure)
@@ -2415,7 +2438,7 @@ extension Tab: WKNavigationDelegate {
         guard await HTTPSFirstStore.shared.confirmFallback(to: plain, in: webView.window) else {
             return
         }
-        HTTPSFirstStore.shared.allowPlain(plain)
+        HTTPSFirstStore.shared.allowPlain(plain, scope: scope)
         webView.load(URLRequest(url: plain))
     }
 
@@ -2533,7 +2556,8 @@ extension Tab: WKNavigationDelegate {
         let port = space.port == 0 ? 443 : space.port
         if CertificateExceptionStore.shared.isAllowed(host: space.host,
                                                       port: port,
-                                                      matching: trust) {
+                                                      matching: trust,
+                                                      scope: scope) {
             completionHandler(.useCredential, URLCredential(trust: trust))
             return
         }
@@ -2611,7 +2635,7 @@ extension Tab: WKNavigationDelegate {
                     self.report(error, on: webView)
                     return
                 }
-                HTTPSFirstStore.shared.allowPlain(pending.plain)
+                HTTPSFirstStore.shared.allowPlain(pending.plain, scope: self.scope)
                 webView.load(URLRequest(url: pending.plain))
             }
             return
@@ -2686,7 +2710,7 @@ extension Tab: WKNavigationDelegate {
 
         // 指紋を取れなければ例外は作らない。
         // このまま読み直しても同じ顛末書が戻るだけなので、何もしない
-        guard store.allow(host: host, port: port, trust: serverTrusts[host]) else {
+        guard store.allow(host: host, port: port, trust: serverTrusts[host], scope: scope) else {
             print("Tab: could not pin the certificate for \(host); exception not created")
             return
         }
@@ -2759,7 +2783,7 @@ extension Tab: WKUIDelegate {
         // WebKit はユーザー操作を伴わない window.open を既定で弾いているので、
         // ここへ届くのは「クリックに便乗して開かれたもの」だ
         let opener = PopupAllowList.originKey(for: webView.url)
-        guard PopupAllowList.shared.isAllowed(opener) else {
+        guard PopupAllowList.shared.isAllowed(opener, scope: scope) else {
             if let requestedURL {
                 print("Popup blocked from \(opener.isEmpty ? "(unknown origin)" : opener): \(requestedURL)")
                 blockedPopups.append(BlockedPopup(url: requestedURL))
@@ -2809,15 +2833,15 @@ extension Tab: WKUIDelegate {
         // WKSecurityOrigin は持ち回さず、ここで必要な文字列だけ抜いておく
         let originKey = MediaPermissionStore.storageOrigin(origin)
         let host = origin.host
-        // プライベートウィンドウなら記憶はメモリだけにする（MediaPermission.swift）
-        let persistent = webView.configuration.websiteDataStore.isPersistent
+        // 誰の分として覚えるかはタブが決める（プライベートはメモリだけ。MediaPermission.swift）
+        let scope = self.scope
         Task { @MainActor in
             let decision = await MediaPermissionStore.shared.decide(
                 origin: originKey,
                 host: host,
                 type: type,
                 in: webView.window,
-                persistent: persistent
+                scope: scope
             )
             decisionHandler(decision)
         }
@@ -2915,6 +2939,9 @@ private struct SessionTab: Codable {
     // try? で受けているので、ここを Bool にすると
     // 前回のタブ構成が丸ごと飛ぶ
     var pinned: Bool? = nil
+    // どのプロファイルのタブだったか。既定なら鍵ごと無い。
+    // Optional なのは pinned と同じ理由（古い保存を壊さない）
+    var profile: UUID? = nil
 }
 
 private struct SessionState: Codable {
@@ -3025,6 +3052,8 @@ final class TabManager: NSObject, ObservableObject {
         var url: String        // 空文字はロビー
         var title: String
         var interactionState: Data?
+        // どのプロファイルのタブだったか。開き直した時に同じ置き場へ戻す
+        var profile: UUID?
     }
 
     // 閉じたタブの復元用スタック（⇧⌘T）
@@ -3290,9 +3319,15 @@ final class TabManager: NSObject, ObservableObject {
         }
         for entry in state.tabs.prefix(Self.restoreLimit) {
             // 空文字はロビー。それ以外は読み込まずに控えだけしておく
+            // 保存後に消されたプロファイルの id なら既定へ倒す。
+            // 無い置き場で器を作ると、ディスクに幽霊の領域が生まれる
+            let profile = entry.profile.flatMap {
+                ProfileStore.shared.contains($0) ? $0 : nil
+            }
             let tab = makeTab(url: entry.url.isEmpty ? nil : entry.url,
                               title: entry.title,
-                              deferLoad: true)
+                              deferLoad: true,
+                              profile: profile)
             tab.isPinned = entry.pinned == true
             tabs.append(tab)
         }
@@ -3329,7 +3364,8 @@ final class TabManager: NSObject, ObservableObject {
             // 古い保存と同じ形のままになるので、戻した時にも困らない
             return SessionTab(url: url,
                               title: tab.pageTitle,
-                              pinned: tab.isPinned ? true : nil)
+                              pinned: tab.isPinned ? true : nil,
+                              profile: tab.profileID)
         }
         let index = tabs.firstIndex { $0.id == selectedID } ?? 0
         return SessionState(tabs: entries, selectedIndex: index)
@@ -3341,8 +3377,8 @@ final class TabManager: NSObject, ObservableObject {
 
     // 作ったタブを返すのは拡張機能（tabs.create）のため。他の呼び元は捨てていい
     @discardableResult
-    func addTab(url: String? = nil) -> Tab {
-        let tab = makeTab(url: url)
+    func addTab(url: String? = nil, profile: UUID? = nil) -> Tab {
+        let tab = makeTab(url: url, profile: profile)
         tabs.append(tab)
         selectedID = tab.id
         return tab
@@ -3350,8 +3386,8 @@ final class TabManager: NSObject, ObservableObject {
 
     // ⌘クリック用：裏で開いて、今のタブに留まる
     @discardableResult
-    func addTabInBackground(url: String) -> Tab {
-        let tab = makeTab(url: url)
+    func addTabInBackground(url: String, profile: UUID? = nil) -> Tab {
+        let tab = makeTab(url: url, profile: profile)
         tabs.append(tab)
         return tab
     }
@@ -3359,8 +3395,11 @@ final class TabManager: NSObject, ObservableObject {
     // window.open() 用：WebKit が用意した設定で器を起こし、その WKWebView を返す。
     // 中身を入れるのは WebKit の仕事なので、ここでは load しない。
     // 本物のポップアップ窓に対応するので、開いたらそちらを見せる
-    func addPopupTab(configuration: WKWebViewConfiguration) -> WKWebView {
-        let tab = makeTab(url: nil, popupConfiguration: configuration)
+    func addPopupTab(configuration: WKWebViewConfiguration,
+                     profile: UUID? = nil) -> WKWebView {
+        // 置き場そのものは configuration が運んでくる。
+        // profile を渡すのは、生まれたタブが自分の所属を名乗れるようにするためだ
+        let tab = makeTab(url: nil, popupConfiguration: configuration, profile: profile)
         tabs.append(tab)
         selectedID = tab.id
         return tab.webView
@@ -3432,14 +3471,18 @@ final class TabManager: NSObject, ObservableObject {
                          title: String = "",
                          deferLoad: Bool = false,
                          interactionState: Data? = nil,
-                         popupConfiguration: WKWebViewConfiguration? = nil) -> Tab {
+                         popupConfiguration: WKWebViewConfiguration? = nil,
+                         profile: UUID? = nil) -> Tab {
+        // プライベートウィンドウにプロファイルは無い。
+        // 渡されても捨てる（Tab 側でも同じ判断をするが、意図はこちらに書く）
         let tab = Tab(url: url,
                       title: title,
                       deferLoad: deferLoad,
                       interactionState: interactionState,
                       popupConfiguration: popupConfiguration,
                       dataStore: privateStore,
-                      isPrivate: isPrivate)
+                      isPrivate: isPrivate,
+                      profileID: isPrivate ? nil : profile)
         wire(tab)
         return tab
     }
@@ -3451,12 +3494,15 @@ final class TabManager: NSObject, ObservableObject {
     // 黙って効かなくなる（古い窓に連絡が行ってしまう）
     private func wire(_ tab: Tab) {
         // ⌘クリックされたら、この管理人に連絡が来るようにする
+        // 開いた側のプロファイルを継ぐ。値で掴む（let なので変わらない）——
+        // tab 本人をクロージャに握らせると、タブが自分を掴む輪になる
+        let profile = tab.profileID
         tab.openInNewTab = { [weak self] link in
-            self?.addTabInBackground(url: link)
+            self?.addTabInBackground(url: link, profile: profile)
         }
         // window.open() で器を求められたら、ここで起こして返す
         tab.openPopup = { [weak self] configuration in
-            self?.addPopupTab(configuration: configuration)
+            self?.addPopupTab(configuration: configuration, profile: profile)
         }
         // window.close() を受けたら、そのタブを畳む
         tab.requestClose = { [weak self, weak tab] in
@@ -3678,7 +3724,8 @@ final class TabManager: NSObject, ObservableObject {
         let restoreState = tab.isHome ? nil : tab.restorableState
         recentlyClosed.append(ClosedTab(url: restoreURL,
                                         title: tab.pageTitle,
-                                        interactionState: restoreState))
+                                        interactionState: restoreState,
+                                        profile: tab.profileID))
         if recentlyClosed.count > 20 { recentlyClosed.removeFirst() }
         // 動画・音声の再生を確実に止めてから退去させる。
         // about:blank の読み込みだけでは非同期で、WebView がどこかに
@@ -3850,11 +3897,32 @@ final class TabManager: NSObject, ObservableObject {
             addTab()
             return
         }
+        // 閉じた後でプロファイルが消されていたら既定へ倒す（restoreSession と同じ理屈）
+        let profile = closed.profile.flatMap { ProfileStore.shared.contains($0) ? $0 : nil }
         let tab = makeTab(url: closed.url.isEmpty ? nil : closed.url,
                           title: closed.title,
-                          interactionState: closed.interactionState)
+                          interactionState: closed.interactionState,
+                          profile: profile)
         tabs.append(tab)
         selectedID = tab.id
+    }
+
+    // ── プロファイルの削除 ──
+
+    // この窓にあるそのプロファイルのタブを全部閉じる。
+    // 閉じたタブの控えからも抑える——置き場ごと消すのに、開き直す道を残すのは筋が通らない
+    func closeTabs(inProfile id: UUID) {
+        for tab in tabs where tab.profileID == id {
+            closeTab(tab)
+        }
+        recentlyClosed.removeAll { $0.profile == id }
+    }
+
+    // 全ての窓で同じことをする（ProfileStore.remove から呼ぶ）
+    static func closeTabsEverywhere(inProfile id: UUID) {
+        for manager in openWindows {
+            manager.closeTabs(inProfile: id)
+        }
     }
 
     // 番号でタブを選ぶ（0始まり）
@@ -4208,6 +4276,9 @@ private struct DraggableTabRow: View {
     let tab: Tab
     let groupNames: [String]
 
+    // プロファイルの一覧。右クリックの「New Tab in Profile」に並べる
+    @ObservedObject private var profiles = ProfileStore.shared
+
     @State private var rowHeight: CGFloat = 1
 
     // 自分以外の窓。名簿順（窓が生まれた順）で並ぶ。
@@ -4237,7 +4308,10 @@ private struct DraggableTabRow: View {
             onClose:  { manager.closeTab(tab) },
             onMoveToNewWindow: { manager.moveTabToNewWindow(tab) },
             onUnload: { manager.unload(tab) },
-            onTogglePin: { manager.togglePin(tab) }
+            onTogglePin: { manager.togglePin(tab) },
+            // プライベートウィンドウにプロファイルは無いので、選択肢も出さない
+            profiles: manager.isPrivate ? [] : profiles.profiles,
+            onOpenInProfile: { id in manager.addTab(profile: id) }
         )
         // 高さを測っておく（上下判定に使う）。
         //
@@ -4376,6 +4450,11 @@ struct DecoTabRow: View {
     let onUnload: () -> Void
     // ピン留めの切り替え
     let onTogglePin: () -> Void
+    // プロファイルの一覧と、そのどれかで新しいタブを開く合図。
+    // 今のタブを移すのではない——置き場は器に焼き付いていて、後から変えられない。
+    // 空ならメニュー自体を出さない
+    var profiles: [BrowserProfile] = []
+    var onOpenInProfile: (UUID) -> Void = { _ in }
 
     @State private var hovering = false
     @State private var showingNewGroup = false
@@ -4390,7 +4469,8 @@ struct DecoTabRow: View {
             // 以前はここに金の菱形を置いて、押すと留めが外れる作りだった。
             // 絵札と並べると頭が混むので菱形はやめた。
             // 留めの入切は右クリックか Tabs メニューからやる
-            FaviconBadge(image: tab.favicon, isPinned: tab.isPinned)
+            FaviconBadge(image: tab.favicon, isPinned: tab.isPinned,
+                         profileName: profiles.first { $0.id == tab.profileID }?.name)
 
             // 音を鳴らしている／ミュート中のインジケータ
             if tab.isMuted || tab.isPlayingAudio {
@@ -4470,6 +4550,22 @@ struct DecoTabRow: View {
             // ピン留めしたタブはグループ化の外に居る。
             // 選べてしまうと、入れたつもりなのに上の欄から動かない
             .disabled(tab.isPinned)
+            if !profiles.isEmpty {
+                Menu("New Tab in Profile") {
+                    ForEach(profiles) { profile in
+                        Button {
+                            onOpenInProfile(profile.id)
+                        } label: {
+                            // 今このタブが居るプロファイルに印を付ける
+                            if tab.profileID == profile.id {
+                                Label { Text(verbatim: profile.name) } icon: { Image(systemName: "checkmark") }
+                            } else {
+                                Text(verbatim: profile.name)
+                            }
+                        }
+                    }
+                }
+            }
             Menu("Move to Window") {
                 Button("New Window") { onMoveToNewWindow() }
                 if !moveTargets.isEmpty { Divider() }

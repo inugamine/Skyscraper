@@ -345,6 +345,9 @@ final class FaviconStore {
 struct FaviconBadge: View {
     let image: NSImage?
     let isPinned: Bool
+    // プロファイルの名。あれば左下に小さな菱形の点を置き、ホバーで名を出す。
+    // プロファイルごとに色は付けない——黒と金の盤に色を増やすと壊れる
+    var profileName: String? = nil
     var side: CGFloat = 17
 
     var body: some View {
@@ -368,5 +371,22 @@ struct FaviconBadge: View {
                 .stroke(isPinned ? Deco.gold : Deco.faintGold,
                         lineWidth: isPinned ? 1 : 0.7)
         )
+        // プロファイルの印。枠の左下の角に乗せる。
+        // 中を盤の色で塗ってから線を引くのは、下の枠線と重なった時に
+        // 点だと分かるようにするためだ
+        .overlay(alignment: .bottomLeading) {
+            if profileName != nil {
+                Rectangle()
+                    .fill(Deco.panel)
+                    .overlay(Rectangle().stroke(Deco.gold, lineWidth: 0.8))
+                    .frame(width: side * 0.30, height: side * 0.30)
+                    .rotationEffect(.degrees(45))
+                    .offset(x: -side * 0.08, y: side * 0.08)
+            }
+        }
+        // 名は点ではなく絵札全体に付ける。
+        // 点は 5pt しか無いので、そこに乗せろというのは無理な話だ。
+        // 空文字の help は何も出ないので、印の無いタブには影響しない
+        .help(profileName ?? "")
     }
 }
