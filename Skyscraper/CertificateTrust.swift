@@ -233,16 +233,18 @@ final class CertificateExceptionStore: ObservableObject {
     // 通した場所の一覧（設定画面の表示用）
     var places: [String] { allowed.keys.sorted() }
 
-    private static func key(host: String, port: Int) -> String {
-        "\(host.lowercased()):\(port)"
+    // 鍵は "host:port"。プロファイルならその印を前置きする（DataScope）。
+    // プライベートは既定と同じ鍵——この控えは元からメモリだけで、終えば消える
+    private static func key(host: String, port: Int, scope: DataScope) -> String {
+        scope.key("\(host.lowercased()):\(port)")
     }
 
     // この接続を通すか。
     //
     // 番地に例外があるだけでは足りない——利用者が見て押した
     // その一枚と同じものが差し出されている時に限る
-    func isAllowed(host: String, port: Int, matching trust: SecTrust?) -> Bool {
-        guard let expected = allowed[Self.key(host: host, port: port)],
+    func isAllowed(host: String, port: Int, matching trust: SecTrust?, scope: DataScope) -> Bool {
+        guard let expected = allowed[Self.key(host: host, port: port, scope: scope)],
               let trust,
               let actual = CertificateInspector.digest(of: trust)
         else { return false }
@@ -251,25 +253,25 @@ final class CertificateExceptionStore: ObservableObject {
 
     // この番地に例外を作ってあるか。
     // 鍵の表示と盤の一覧に使う（こちらは指紋を見ない）
-    func hasException(host: String, port: Int) -> Bool {
-        !host.isEmpty && allowed[Self.key(host: host, port: port)] != nil
+    func hasException(host: String, port: Int, scope: DataScope) -> Bool {
+        !host.isEmpty && allowed[Self.key(host: host, port: port, scope: scope)] != nil
     }
 
     // 見せた一枚を控えて例外にする。
     // 指紋を取れなければ何もしない——照合できない例外は
     // 「番地だけで素通し」と同じことになる
     @discardableResult
-    func allow(host: String, port: Int, trust: SecTrust?) -> Bool {
+    func allow(host: String, port: Int, trust: SecTrust?, scope: DataScope) -> Bool {
         guard !host.isEmpty,
               let trust,
               let digest = CertificateInspector.digest(of: trust)
         else { return false }
-        allowed[Self.key(host: host, port: port)] = digest
+        allowed[Self.key(host: host, port: port, scope: scope)] = digest
         return true
     }
 
-    func forget(host: String, port: Int) {
-        allowed.removeValue(forKey: Self.key(host: host, port: port))
+    func forget(host: String, port: Int, scope: DataScope) {
+        allowed.removeValue(forKey: Self.key(host: host, port: port, scope: scope))
     }
 
     func reset() {

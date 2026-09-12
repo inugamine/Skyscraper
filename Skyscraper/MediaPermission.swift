@@ -44,17 +44,20 @@ final class MediaPermissionStore {
 
     // MARK: - サイト一件ぶんの出し入れ（アドレスバーのサイト情報から）
 
-    // その場所について覚えていること。nil なら未設定（次に訊く）
-    func decision(origin: String, device: String) -> Bool? {
-        decisions["\(origin)|\(device)"]
+    // その場所について覚えていること。nil なら未設定（次に訊く）。
+    // プライベート（.session）ならセッションの記憶を先に見て、無ければ永続の方を見る
+    func decision(origin: String, device: String, scope: DataScope) -> Bool? {
+        let key = "\(origin)|\(device)"
+        if !scope.isPersistent, let saved = sessionDecisions[key] { return saved }
+        return decisions[scope.key(key)]
     }
 
     // その場所の記憶を忘れる。他のサイトには手を触れない。
     // device を渡せばその装置だけ、省けばその場所の分を丸ごと。
     // カメラだけ許してマイクは断った、という状態があり得るので、
     // 一覧からは一行ずつ消せる形にしてある
-    func forget(origin: String, device: String? = nil) {
-        let prefix = origin + "|"
+    func forget(origin: String, device: String? = nil, scope: DataScope) {
+        let prefix = scope.key(origin) + "|"
         let targets = decisions.keys.filter { key in
             if let device { return key == prefix + device }
             return key.hasPrefix(prefix)
@@ -67,35 +70,33 @@ final class MediaPermissionStore {
     // MARK: - 判断
 
     // origin は保存用のキー（scheme://host:port）、host は画面に出す名前。
-    // persistent が false ならプライベートウィンドウ。記憶はメモリにしか書かない
+    // scope が .session ならプライベートウィンドウ。記憶はメモリにしか書かない。
+    // .profile なら鍵に印が付くので、他のプロファイルの記憶とは混ざらない
     func decide(origin: String,
                 host: String,
                 type: WKMediaCaptureType,
                 in window: NSWindow?,
-                persistent: Bool = true) async -> WKPermissionDecision {
-        let keys = Self.deviceKeys(for: type).map { "\(origin)|\($0)" }
+                scope: DataScope) async -> WKPermissionDecision {
+        let devices = Self.deviceKeys(for: type)
 
         // カメラとマイクを両方要求された場合、片方でも拒否済みなら訊かずに断る。
-        // 両方とも記憶済みならその通りにする。
-        // プライベートではセッションの記憶を先に見て、無ければ永続の方を見る
-        let saved = keys.compactMap { key -> Bool? in
-            if !persistent, let s = sessionDecisions[key] { return s }
-            return decisions[key]
-        }
+        // 両方とも記憶済みならその通りにする
+        let saved = devices.compactMap { decision(origin: origin, device: $0, scope: scope) }
         if saved.contains(false) {
             return .deny
         }
-        if saved.count == keys.count {
+        if saved.count == devices.count {
             return .grant
         }
 
+        let persistent = scope.isPersistent
         let (allowed, remember) = await ask(host: host, type: type, in: window, persistent: persistent)
         if remember {
             if persistent {
-                for key in keys { decisions[key] = allowed }
+                for device in devices { decisions[scope.key("\(origin)|\(device)")] = allowed }
                 UserDefaults.standard.set(decisions, forKey: storageKey)
             } else {
-                for key in keys { sessionDecisions[key] = allowed }
+                for device in devices { sessionDecisions["\(origin)|\(device)"] = allowed }
             }
         }
         return allowed ? .grant : .deny

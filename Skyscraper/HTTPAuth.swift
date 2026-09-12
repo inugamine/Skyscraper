@@ -53,6 +53,10 @@ final class HTTPAuthPrompter {
     // 実ったら預ける約束（場所ごと）
     private var pendingSaves: [String: PendingSave] = [:]
 
+    // このタブの記憶の射程。wire() でタブから入れられる。
+    // 「このサイトでは訊かない」の印を、誰の分として見るか（Profile.swift）
+    var scope: DataScope = .default
+
     // MARK: - 出入口
 
     // ここで扱える種類か。
@@ -133,7 +137,7 @@ final class HTTPAuthPrompter {
                                         insecure: scheme == "http",
                                         failed: failed,
                                         defaultUser: saved.first?.username ?? "",
-                                        offerSave: !PasswordNeverList.shared.contains(space.host),
+                                        offerSave: !PasswordNeverList.shared.contains(space.host, scope: scope),
                                         in: window) {
             answer = Answer(user: asked.user, password: asked.password)
             if asked.save {

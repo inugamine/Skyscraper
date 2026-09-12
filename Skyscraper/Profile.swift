@@ -34,6 +34,40 @@ import SwiftUI
 import Combine
 import WebKit
 
+// MARK: - 記憶の射程
+
+// サイトごとの記憶（許可・例外・「訊かない」）を、誰の分として持つか。
+//
+// ストア側は鍵の前置きで割るだけで、中身の構造は変えない。
+// 既定は素のオリジンを鍵にするので、今までの保存はそのまま読める（移行は無い）。
+// プロファイルを消す時は、その前置きを持つ鍵を全部捨てればいい
+// （二段目で入れる）。
+//
+// 以前は `persistent: Bool` で「プライベートか否か」だけを渡していた。
+// プロファイルが増えて二値では足りなくなったので、同じ口をこの型に広げた
+enum DataScope: Hashable {
+    case `default`          // 普通の窓、プロファイル無し。鍵は素のオリジン
+    case profile(UUID)      // プロファイル。鍵に印を前置きする
+    case session            // プライベート。メモリだけで、最後の一枚を閉じた時に捨てる
+
+    // ディスクに書くか。プライベートだけが書かない
+    var isPersistent: Bool { self != .session }
+
+    // 保存用の鍵。
+    // プライベートはメモリの辞書を別に持つので、鍵は既定と同じ形でいい
+    // （通常で許したサイトはプライベートでも許す——その照合に同じ鍵が要る）
+    func key(_ origin: String) -> String {
+        switch self {
+        case .default, .session:  return origin
+        case .profile(let id):    return Self.prefix(for: id) + origin
+        }
+    }
+
+    static func prefix(for id: UUID) -> String {
+        "profile:" + id.uuidString + "|"
+    }
+}
+
 struct BrowserProfile: Identifiable, Codable, Hashable {
     let id: UUID
     var name: String

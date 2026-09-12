@@ -925,6 +925,14 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // プライベートのタブでは常に nil——あちらの置き場が優先される
     let profileID: UUID?
 
+    // サイトごとの記憶を誰の分として持つか（Profile.swift の DataScope）。
+    // 許可・例外・「訊かない」を預かるストアは全部これを受け取る
+    var scope: DataScope {
+        if isPrivate { return .session }
+        if let profileID { return .profile(profileID) }
+        return .default
+    }
+
     // このタブが使うデータの置き場。nil なら既定（永続）。
     // 畳んだタブを起こす時に同じ置き場で器を作り直すため、手元に持つ
     private let dataStore: WKWebsiteDataStore?
@@ -1495,6 +1503,9 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         // WebKit 素の実装は公開の許可口を持たず即拒否するだけなので、
         // 丸ごとこちらで受ける。詳しくは Geolocation.swift の冒頭に書いた
         geolocation.webView = webView
+        geolocation.scope = scope
+        // HTTP 認証の窓も同じ射程を見る（「訊かない」の印の照合）
+        httpAuth.scope = scope
         webView.configuration.userContentController.addUserScript(GeolocationProvider.userScript)
         // 門番は別の世界に、全フレームへ。
         // こちらはページ側の JS から見えない（見えたら門番にならない）
@@ -1866,7 +1877,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
             return .local
         case "https":
             guard let host = url.host(), !host.isEmpty else { return .secure }
-            return CertificateExceptionStore.shared.hasException(host: host, port: url.port ?? 443)
+            return CertificateExceptionStore.shared.hasException(host: host, port: url.port ?? 443, scope: scope)
                 ? .exception
                 : .secure
         case "http":
@@ -2067,7 +2078,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // 今見ているページを許可一覧に加えてから開く。
     // 記録するのは「開かれる先」ではなく「開く側」のページだ
     func allowPopupsForThisSite() {
-        PopupAllowList.shared.allow(PopupAllowList.originKey(for: webView.url))
+        PopupAllowList.shared.allow(PopupAllowList.originKey(for: webView.url), scope: scope)
         openBlockedPopups()
     }
 }
@@ -2256,7 +2267,7 @@ extension Tab {
         // 後で「保存しますか」と訊くこと自体が筋違いだ——
         // 跡を残さないと言って開いた窓なのだから
         guard !isPrivate else { return }
-        guard !password.isEmpty, !PasswordNeverList.shared.contains(host) else { return }
+        guard !password.isEmpty, !PasswordNeverList.shared.contains(host, scope: scope) else { return }
 
         passwordCandidate = PasswordCandidate(host: host, scheme: scheme, port: port,
                                               username: username, password: password)
@@ -2305,7 +2316,7 @@ extension Tab {
 
     func neverSavePasswordsForThisSite() {
         if let save = pendingSave {
-            PasswordNeverList.shared.add(save.host)
+            PasswordNeverList.shared.add(save.host, scope: scope)
         }
         dismissPasswordPrompt()
     }
@@ -2374,7 +2385,7 @@ extension Tab: WKNavigationDelegate {
                 return
             }
 
-            if HTTPSFirstStore.shared.shouldUpgrade(target),
+            if HTTPSFirstStore.shared.shouldUpgrade(target, scope: scope),
                let secure = HTTPSFirstStore.upgraded(target) {
                 decisionHandler(.cancel)
                 beginUpgrade(plain: target, secure: secure)
@@ -2427,7 +2438,7 @@ extension Tab: WKNavigationDelegate {
         guard await HTTPSFirstStore.shared.confirmFallback(to: plain, in: webView.window) else {
             return
         }
-        HTTPSFirstStore.shared.allowPlain(plain)
+        HTTPSFirstStore.shared.allowPlain(plain, scope: scope)
         webView.load(URLRequest(url: plain))
     }
 
@@ -2545,7 +2556,8 @@ extension Tab: WKNavigationDelegate {
         let port = space.port == 0 ? 443 : space.port
         if CertificateExceptionStore.shared.isAllowed(host: space.host,
                                                       port: port,
-                                                      matching: trust) {
+                                                      matching: trust,
+                                                      scope: scope) {
             completionHandler(.useCredential, URLCredential(trust: trust))
             return
         }
@@ -2623,7 +2635,7 @@ extension Tab: WKNavigationDelegate {
                     self.report(error, on: webView)
                     return
                 }
-                HTTPSFirstStore.shared.allowPlain(pending.plain)
+                HTTPSFirstStore.shared.allowPlain(pending.plain, scope: self.scope)
                 webView.load(URLRequest(url: pending.plain))
             }
             return
@@ -2698,7 +2710,7 @@ extension Tab: WKNavigationDelegate {
 
         // 指紋を取れなければ例外は作らない。
         // このまま読み直しても同じ顛末書が戻るだけなので、何もしない
-        guard store.allow(host: host, port: port, trust: serverTrusts[host]) else {
+        guard store.allow(host: host, port: port, trust: serverTrusts[host], scope: scope) else {
             print("Tab: could not pin the certificate for \(host); exception not created")
             return
         }
@@ -2771,7 +2783,7 @@ extension Tab: WKUIDelegate {
         // WebKit はユーザー操作を伴わない window.open を既定で弾いているので、
         // ここへ届くのは「クリックに便乗して開かれたもの」だ
         let opener = PopupAllowList.originKey(for: webView.url)
-        guard PopupAllowList.shared.isAllowed(opener) else {
+        guard PopupAllowList.shared.isAllowed(opener, scope: scope) else {
             if let requestedURL {
                 print("Popup blocked from \(opener.isEmpty ? "(unknown origin)" : opener): \(requestedURL)")
                 blockedPopups.append(BlockedPopup(url: requestedURL))
@@ -2821,15 +2833,15 @@ extension Tab: WKUIDelegate {
         // WKSecurityOrigin は持ち回さず、ここで必要な文字列だけ抜いておく
         let originKey = MediaPermissionStore.storageOrigin(origin)
         let host = origin.host
-        // プライベートウィンドウなら記憶はメモリだけにする（MediaPermission.swift）
-        let persistent = webView.configuration.websiteDataStore.isPersistent
+        // 誰の分として覚えるかはタブが決める（プライベートはメモリだけ。MediaPermission.swift）
+        let scope = self.scope
         Task { @MainActor in
             let decision = await MediaPermissionStore.shared.decide(
                 origin: originKey,
                 host: host,
                 type: type,
                 in: webView.window,
-                persistent: persistent
+                scope: scope
             )
             decisionHandler(decision)
         }

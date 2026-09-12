@@ -28,8 +28,8 @@ final class PopupAllowList {
         hosts = Set(UserDefaults.standard.stringArray(forKey: storageKey) ?? [])
     }
 
-    func isAllowed(_ host: String) -> Bool {
-        !host.isEmpty && hosts.contains(host)
+    func isAllowed(_ host: String, scope: DataScope) -> Bool {
+        !host.isEmpty && hosts.contains(scope.key(host))
     }
 
     // 許可一覧の鍵。通常はページの host。
@@ -47,17 +47,18 @@ final class PopupAllowList {
         return "\(scheme):\(url.path(percentEncoded: false))"
     }
 
-    func allow(_ host: String) {
+    // 鍵は上の originKey。プロファイルならその印を前置きする（DataScope）
+    func allow(_ host: String, scope: DataScope) {
         guard !host.isEmpty else { return }
-        hosts.insert(host)
+        hosts.insert(scope.key(host))
         UserDefaults.standard.set(Array(hosts), forKey: storageKey)
     }
 
     // 一件だけ取り消す（サイト情報から）。
     // 設定画面の reset() は全部忘れるので、一枚のために
     // 他のサイトの許可まで巻き添えにする理由は無い
-    func revoke(_ host: String) {
-        guard hosts.remove(host) != nil else { return }
+    func revoke(_ host: String, scope: DataScope) {
+        guard hosts.remove(scope.key(host)) != nil else { return }
         UserDefaults.standard.set(Array(hosts), forKey: storageKey)
     }
 

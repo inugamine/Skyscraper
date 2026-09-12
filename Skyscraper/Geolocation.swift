@@ -74,21 +74,18 @@ final class GeolocationStore: ObservableObject {
         UserDefaults.standard.removeObject(forKey: storageKey)
     }
 
-    // その場所について覚えていること。nil なら未設定（次に訊く）
-    func decision(origin: String) -> Bool? {
-        decisions[origin]
-    }
-
-    // 同じだが、プライベートウィンドウならセッションの記憶も見る。
-    // permissions.query の答えに使う——あれはダイアログを出さずに「今どうか」だけを返す
-    func decision(origin: String, persistent: Bool) -> Bool? {
-        if !persistent, let saved = sessionDecisions[origin] { return saved }
-        return decisions[origin]
+    // その場所について覚えていること。nil なら未設定（次に訊く）。
+    //
+    // プライベート（.session）ならセッションの記憶を先に見る。
+    // permissions.query の答えにも使う——あれはダイアログを出さずに「今どうか」だけを返す
+    func decision(origin: String, scope: DataScope) -> Bool? {
+        if !scope.isPersistent, let saved = sessionDecisions[origin] { return saved }
+        return decisions[scope.key(origin)]
     }
 
     // その場所の記憶だけを忘れる。他のサイトには手を触れない
-    func forget(origin: String) {
-        guard decisions.removeValue(forKey: origin) != nil else { return }
+    func forget(origin: String, scope: DataScope) {
+        guard decisions.removeValue(forKey: scope.key(origin)) != nil else { return }
         UserDefaults.standard.set(decisions, forKey: storageKey)
     }
 
@@ -99,17 +96,18 @@ final class GeolocationStore: ObservableObject {
 
     // MARK: - 判断
 
-    // persistent が false ならプライベートウィンドウ。記憶はメモリにしか書かない
-    func decide(origin: String, host: String, in window: NSWindow?, persistent: Bool = true) async -> Bool {
+    // scope が .session ならプライベートウィンドウ。記憶はメモリにしか書かない。
+    // .profile なら鍵に印が付くので、他のプロファイルの記憶とは混ざらない
+    func decide(origin: String, host: String, in window: NSWindow?, scope: DataScope) async -> Bool {
         guard isEnabled else { return false }
 
-        if !persistent, let saved = sessionDecisions[origin] { return saved }
-        if let saved = decisions[origin] { return saved }
+        if let saved = decision(origin: origin, scope: scope) { return saved }
 
+        let persistent = scope.isPersistent
         let (allowed, remember) = await ask(host: host, in: window, persistent: persistent)
         if remember {
             if persistent {
-                decisions[origin] = allowed
+                decisions[scope.key(origin)] = allowed
                 UserDefaults.standard.set(decisions, forKey: storageKey)
             } else {
                 sessionDecisions[origin] = allowed
@@ -221,6 +219,10 @@ final class GeolocationProvider: NSObject {
 
     // 器は wire() で差し替わる。強く持つとタブが解けない
     weak var webView: WKWebView?
+
+    // このタブの記憶の射程。wire() でタブから入れられる。
+    // 以前は置き場の isPersistent を見ていたが、プロファイルはそれでは見分けられない
+    var scope: DataScope = .default
 
     private let manager = CLLocationManager()
 
@@ -421,9 +423,8 @@ final class GeolocationProvider: NSObject {
                 return
             }
 
-            // プライベートウィンドウかどうかは置き場で見る。
-            // 非永続のストアを使っているのがその印だ（PrivateBrowsing.swift）
-            let persistent = webView?.configuration.websiteDataStore.isPersistent ?? true
+            // 誰の分として覚えるかはタブが決める（プライベート・プロファイル・既定）
+            let scope = self.scope
 
             // 問いならここで答えて終わる。記憶が無ければ prompt——
             // 「訊けばダイアログが出る」という意味で、仕様通りだ
@@ -431,7 +432,7 @@ final class GeolocationProvider: NSObject {
                 let state: String
                 if !GeolocationStore.shared.isEnabled {
                     state = "denied"
-                } else if let saved = GeolocationStore.shared.decision(origin: key, persistent: persistent) {
+                } else if let saved = GeolocationStore.shared.decision(origin: key, scope: scope) {
                     state = saved ? "granted" : "denied"
                 } else {
                     state = "prompt"
@@ -445,10 +446,10 @@ final class GeolocationProvider: NSObject {
             while askingOrigins.contains(key) {
                 try? await Task.sleep(nanoseconds: 120_000_000)
             }
-            let known = GeolocationStore.shared.decision(origin: key) != nil
+            let known = GeolocationStore.shared.decision(origin: key, scope: scope) != nil
             if !known { askingOrigins.insert(key) }
             let allowed = await GeolocationStore.shared.decide(
-                origin: key, host: host, in: webView?.window, persistent: persistent
+                origin: key, host: host, in: webView?.window, scope: scope
             )
             askingOrigins.remove(key)
 

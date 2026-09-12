@@ -52,8 +52,10 @@ final class HTTPSFirstStore: ObservableObject {
     // 平文のまま通すことにした場所の一覧（設定画面の表示用）
     var places: [String] { plainAllowed.sorted() }
 
-    private static func key(_ url: URL) -> String {
-        "\(url.host()?.lowercased() ?? ""):\(url.port ?? 80)"
+    // 鍵は "host:port"。プロファイルならその印を前置きする（DataScope）。
+    // プライベートは既定と同じ鍵——この控えは元からメモリだけで、終えば消える
+    private static func key(_ url: URL, scope: DataScope) -> String {
+        scope.key("\(url.host()?.lowercased() ?? ""):\(url.port ?? 80)")
     }
 
     // MARK: - 持ち上げるかどうか
@@ -62,12 +64,12 @@ final class HTTPSFirstStore: ObservableObject {
     //
     // 判断はここ一箇所に閉じ込める。呼ぶ側（Tab の decidePolicyFor）に
     // 条件を散らすと、除外を足した時にどこかが取り残される
-    func shouldUpgrade(_ url: URL) -> Bool {
+    func shouldUpgrade(_ url: URL, scope: DataScope) -> Bool {
         guard isEnabled,
               url.scheme?.lowercased() == "http",
               let host = url.host(), !host.isEmpty,
               !Self.isExempt(host: host),
-              !plainAllowed.contains(Self.key(url))
+              !plainAllowed.contains(Self.key(url, scope: scope))
         else { return false }
         return true
     }
@@ -120,9 +122,9 @@ final class HTTPSFirstStore: ObservableObject {
 
     // MARK: - 控え
 
-    func allowPlain(_ url: URL) {
+    func allowPlain(_ url: URL, scope: DataScope) {
         guard let host = url.host(), !host.isEmpty else { return }
-        plainAllowed.insert(Self.key(url))
+        plainAllowed.insert(Self.key(url, scope: scope))
     }
 
     func reset() {

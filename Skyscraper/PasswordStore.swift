@@ -232,21 +232,23 @@ final class PasswordNeverList {
 
     var isEmpty: Bool { hosts.isEmpty }
 
-    func contains(_ host: String) -> Bool {
-        !host.isEmpty && hosts.contains(host)
+    // 鍵は host。プロファイルならその印を前置きする（DataScope）。
+    // パスワードの実体はキーチェーンで共通だが、「訊かない」の印だけは人ごとに割れる
+    func contains(_ host: String, scope: DataScope) -> Bool {
+        !host.isEmpty && hosts.contains(scope.key(host))
     }
 
-    func add(_ host: String) {
+    func add(_ host: String, scope: DataScope) {
         guard !host.isEmpty else { return }
-        hosts.insert(host)
+        hosts.insert(scope.key(host))
         UserDefaults.standard.set(Array(hosts), forKey: storageKey)
     }
 
     // 一件だけ解く（サイト情報から）。
     // 「このサイトでは訊かない」を押した後で気が変わった時、
     // 今までは設定画面で全部忘れるしか道が無かった
-    func remove(_ host: String) {
-        guard hosts.remove(host) != nil else { return }
+    func remove(_ host: String, scope: DataScope) {
+        guard hosts.remove(scope.key(host)) != nil else { return }
         UserDefaults.standard.set(Array(hosts), forKey: storageKey)
     }
 
