@@ -16,6 +16,8 @@ struct WebExtensionListView: View {
     // DNR もコンテンツスクリプトもページ読み込み時に当たるので、
     // 開いたままのページには効かない
     @State private var needsReloadNotice = false
+    // 許諾シートを出す相手。nil なら出さない
+    @State private var reviewing: WebExtensionManager.Loaded?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -38,6 +40,9 @@ struct WebExtensionListView: View {
         .background(Deco.ink)
         .preferredColorScheme(.dark)
         .animation(.easeInOut(duration: 0.2), value: needsReloadNotice)
+        .sheet(item: $reviewing) { entry in
+            ExtensionPermissionSheet(entry: entry)
+        }
     }
 
     // ── 見出し ──
@@ -94,7 +99,7 @@ struct WebExtensionListView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(verbatim: entry.displayName)
                     .font(.system(size: 13, design: .serif))
-                    .foregroundColor(entry.isEnabled ? Deco.cream : Deco.dimGold)
+                    .foregroundColor(entry.isRunning ? Deco.cream : Deco.dimGold)
                     .lineLimit(1)
 
                 HStack(spacing: 8) {
@@ -109,47 +114,83 @@ struct WebExtensionListView: View {
                         .padding(.horizontal, 7)
                         .padding(.vertical, 2)
                         .overlay(Hexagon(inset: 4).stroke(Deco.faintGold, lineWidth: 0.5))
+
+                    // 許諾の状態。通っているものには何も出さない
+                    if entry.review == .pending {
+                        badge("Needs review", color: Deco.gold)
+                    } else if entry.review == .denied {
+                        badge("Not allowed", color: Deco.rust)
+                    }
                 }
             }
 
             Spacer(minLength: 8)
 
-            // ツールバーにボタンを出すか。
-            // 拡張の入切とは別なので、切っても遮断は動き続ける。
-            // 切られている拡張にはそもそもボタンが無いので伸ばす
-            Button {
-                manager.setShowsAction(!entry.showsAction, for: entry.id)
-            } label: {
-                Image(systemName: entry.showsAction ? "eye" : "eye.slash")
-                    .font(.system(size: 12))
-                    .foregroundColor(entry.showsAction ? Deco.gold : Deco.dimGold)
-                    .frame(width: 30, height: 24)
-                    .overlay(Hexagon(inset: 5).stroke(
-                        entry.showsAction ? Deco.faintGold : Deco.faintGold.opacity(0.5),
-                        lineWidth: 0.5
-                    ))
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(!entry.isEnabled)
-            .opacity(entry.isEnabled ? 1 : 0.35)
-            .help(Self.actionVisibilityHelp(entry.showsAction))
-
-            Toggle("", isOn: Binding(
-                get: { entry.isEnabled },
-                set: { newValue in
-                    manager.setEnabled(newValue, for: entry.id)
-                    needsReloadNotice = true
+            // 未確認・断ったものは、トグルではなく確認への入口を出す。
+            // ここにトグルを置くと、許諾を見ずに入にできてしまう
+            if entry.review != .approved {
+                Button {
+                    reviewing = entry
+                } label: {
+                    Text("Review\u{2026}")
+                        .font(.system(size: 11, design: .serif))
+                        .tracking(1)
+                        .foregroundColor(Deco.gold)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 6)
+                        .overlay(Hexagon(inset: 5).stroke(Deco.gold, lineWidth: 1))
+                        .contentShape(Hexagon(inset: 5))
                 }
-            ))
-            .toggleStyle(.switch)
-            .tint(Deco.gold)
-            .labelsHidden()
+                .buttonStyle(.plain)
+            } else {
+                // ツールバーにボタンを出すか。
+                // 拡張の入切とは別なので、切っても遮断は動き続ける。
+                // 切られている拡張にはそもそもボタンが無いので伸ばす
+                Button {
+                    manager.setShowsAction(!entry.showsAction, for: entry.id)
+                } label: {
+                    Image(systemName: entry.showsAction ? "eye" : "eye.slash")
+                        .font(.system(size: 12))
+                        .foregroundColor(entry.showsAction ? Deco.gold : Deco.dimGold)
+                        .frame(width: 30, height: 24)
+                        .overlay(Hexagon(inset: 5).stroke(
+                            entry.showsAction ? Deco.faintGold : Deco.faintGold.opacity(0.5),
+                            lineWidth: 0.5
+                        ))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!entry.isEnabled)
+                .opacity(entry.isEnabled ? 1 : 0.35)
+                .help(Self.actionVisibilityHelp(entry.showsAction))
+
+                Toggle("", isOn: Binding(
+                    get: { entry.isEnabled },
+                    set: { newValue in
+                        manager.setEnabled(newValue, for: entry.id)
+                        needsReloadNotice = true
+                    }
+                ))
+                .toggleStyle(.switch)
+                .tint(Deco.gold)
+                .labelsHidden()
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(Deco.panel2)
         .overlay(Rectangle().stroke(Deco.faintGold, lineWidth: 0.5))
+    }
+
+    // 行の状態を示す小さな札
+    private func badge(_ title: LocalizedStringKey, color: Color) -> some View {
+        Text(title)
+            .font(.system(size: 9, design: .serif))
+            .tracking(1)
+            .foregroundColor(color)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .overlay(Hexagon(inset: 4).stroke(color.opacity(0.7), lineWidth: 0.5))
     }
 
     // ── 何も無いとき ──

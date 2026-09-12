@@ -15,8 +15,14 @@
 //     （同梱版より新しい uBOL を自分で入れたい場合の逃げ道）
 //
 //  ── 今の範囲 ──
-//  タブと窓の橋渡し（WebExtensionBridge.swift）まで完了。
-//  ツールバーの popup（サイトごとの遮断レベル切替など）は未実装。
+//  タブと窓の橋渡し（WebExtensionBridge.swift）、ツールバーの popup、
+//  設定ページ、許諾の確認（ExtensionPermissions.swift）まで完了。
+//  アプリ内からの取り込みと削除は未実装（今は Finder でフォルダを置く）。
+//
+//  ── 読み込みと許諾の順 ──
+//  見つけただけでは controller に載せない。載せた時点で
+//  DNR もコンテンツスクリプトも動き始める——訊く前に動いているのでは
+//  訊く意味が無い。未確認のものは保留にして一覧に出す。
 //
 
 import AppKit
@@ -40,18 +46,36 @@ final class WebExtensionManager: NSObject, ObservableObject {
     // 二度と入れ直せなくなるためで、controller に載せるかどうかだけを
     // isEnabled で切り替える
     struct Loaded: Identifiable {
+        // 許諾の状態。
+        //
+        // pending は「まだ訊いていない」。controller には載せていない。
+        // denied は「訊いて断られた」。どちらも動いていないが、
+        // 一覧での見せ方と、次に何が起きるかが違う
+        enum Review {
+            case pending
+            case approved
+            case denied
+        }
+
         let id: String            // フォルダ名。一覧の鍵としても使う
         let displayName: String
         let version: String
         let source: Source
         let baseURL: URL
+        // 許諾シートが要求権限を読むために持っておく
+        let ext: WKWebExtension
         let context: WKWebExtensionContext
+        var review: Review
+        // approved の時だけ意味を持つ
         var isEnabled: Bool
 
         // ツールバー（アドレスバー右端）にボタンを出すか。
         // 拡張そのものの有効・無効とは別勘定で、これを倒しても
         // 遮断やコンテンツスクリプトは動き続ける。見た目だけの話
         var showsAction: Bool
+
+        // 実際に動いているか
+        var isRunning: Bool { review == .approved && isEnabled }
     }
 
     // 全タブ・全ウィンドウで一つを共有する。
@@ -62,9 +86,9 @@ final class WebExtensionManager: NSObject, ObservableObject {
     @Published private(set) var loaded: [Loaded] = []
 
     // 橋渡し側が「拡張が一つでも生きているか」を見るための口。
-    // 切られているものは数えない
+    // 保留中のものも切られているものも数えない
     var contexts: [WKWebExtensionContext] {
-        loaded.filter(\.isEnabled).map(\.context)
+        loaded.filter(\.isRunning).map(\.context)
     }
 
     // loadAll() の二重呼び防止（窓を複数開いても一度だけ）
@@ -131,21 +155,31 @@ final class WebExtensionManager: NSObject, ObservableObject {
         // 無ければ作っておく。Finder で開いて放り込めるように
         try? FileManager.default.createDirectory(at: userDir, withIntermediateDirectories: true)
 
+        let userFolders = Self.extensionFolders(in: userDir)
+        let bundledFolders = Self.bundledExtensionsDirectory
+            .map { Self.extensionFolders(in: $0) } ?? []
+
+        // この仕組みを入れる前から入っていた分を、許可済みとして引き継ぐ。
+        // 利用者が自分で入れたもので、現に動いている——
+        // 起動したら突然「確認してください」と出るのは筋が悪い。
+        // 二度目からは何もしない（一度断ったものが復活しては困る）
+        ExtensionPermissionStore.grandfatherIfNeeded(
+            ids: (userFolders + bundledFolders).map(\.lastPathComponent)
+        )
+
         // 利用者の分を先に読む。
         // 同じ名前が同梱版にもあれば、こちらが優先される
-        for url in Self.extensionFolders(in: userDir) {
+        for url in userFolders {
             await load(at: url, source: .user)
         }
 
-        if let bundledDir = Self.bundledExtensionsDirectory {
-            for url in Self.extensionFolders(in: bundledDir) {
-                let name = url.lastPathComponent
-                guard !loaded.contains(where: { $0.id == name }) else {
-                    print("WebExtension[\(name)]: bundled copy skipped (overridden by user)")
-                    continue
-                }
-                await load(at: url, source: .bundled)
+        for url in bundledFolders {
+            let name = url.lastPathComponent
+            guard !loaded.contains(where: { $0.id == name }) else {
+                print("WebExtension[\(name)]: bundled copy skipped (overridden by user)")
+                continue
             }
+            await load(at: url, source: .bundled)
         }
 
         print("WebExtensionManager: loaded \(loaded.count) extension(s)")
@@ -190,63 +224,142 @@ final class WebExtensionManager: NSObject, ObservableObject {
             // 設定が引き継がれる
             context.uniqueIdentifier = "net.live-on.inugamine.Skyscraper.extension.\(name)"
 
-            // ── 要求された権限を丸ごと通す ──
-            // 自分が同梱したものと、利用者が自分で置いたものしか読まない。
-            // 取り込み UI を作る段になったら、ここを許諾ダイアログに差し替える
-            for permission in ext.requestedPermissions {
-                context.setPermissionStatus(.grantedExplicitly, for: permission)
-            }
-            for pattern in ext.requestedPermissionMatchPatterns {
-                context.setPermissionStatus(.grantedExplicitly, for: pattern)
-            }
-            // optional 側も通す。
-            // uBOL は遮断レベルが 4 段階あり、上の段（Optimal / Complete）は
-            // optional_host_permissions の <all_urls> を要る。
-            // ここを通さないと一番下の段だけで止まる
-            for permission in ext.optionalPermissions {
-                context.setPermissionStatus(.grantedExplicitly, for: permission)
-            }
-            for pattern in ext.optionalPermissionMatchPatterns {
-                context.setPermissionStatus(.grantedExplicitly, for: pattern)
+            // 許諾の記憶を見る。無ければ保留——controller には載せない
+            let decision = ExtensionPermissionStore.decision(for: name)
+            let allowsPrivate = ExtensionPermissionStore.allowsPrivateData(for: name)
+
+            let review: Loaded.Review
+            var enabled = false
+
+            switch decision {
+            case nil:
+                review = .pending
+            case .some(false):
+                review = .denied
+            case .some(true):
+                review = .approved
+                // 権限は載せる前に付与する。
+                // 切られていても付与だけはやっておく——
+                // 後で入に戻した時に context を組み直さずに済む
+                Self.applyGrants(ext, to: context, allowsPrivateData: allowsPrivate)
+                enabled = !Self.disabledIDs.contains(name)
+                if enabled {
+                    try controller.load(context)
+                }
             }
 
-            // ── プライベートウィンドウでも働かせる ──
-            //
-            // これが既定の false のままだと、拡張にはプライベートの窓も
-            // その中のタブも一切見えない。エラーは一つも出ないまま
-            // uBOL の遮断だけが黙って効かなくなる——プライベートにした途端
-            // 広告が戻るのは、使う側から見れば壊れているのと同じだ。
-            //
-            // 引き換えに、拡張のバックグラウンドはプライベートのタブの
-            // URL を知る。読み込むのは自分で同梱したものと、
-            // 利用者が自分で置いたものだけなので、ここでは通している。
-            // Safari は拡張ごとに許可を訊く——一覧に切り替えを置くならここを見る。
-            //
-            // load の前に立てること。載せた後で触ると反映に読み直しが要る
-            context.hasAccessToPrivateData = true
-
-            // 切られていなければ controller に載せる。
-            // 切られていても一覧には出すので、context 自体は作って手元に持つ
-            let enabled = !Self.disabledIDs.contains(name)
-            if enabled {
-                try controller.load(context)
-            }
             loaded.append(Loaded(
                 id: name,
                 displayName: ext.displayName ?? name,
                 version: ext.displayVersion ?? "?",
                 source: source,
                 baseURL: resourceBaseURL,
+                ext: ext,
                 context: context,
+                review: review,
                 isEnabled: enabled,
                 showsAction: !Self.hiddenActionIDs.contains(name)
             ))
             let origin = source == .bundled ? "bundled" : "user"
-            let state = enabled ? "" : ", disabled"
+            let state: String
+            switch review {
+            case .pending:  state = ", awaiting review"
+            case .denied:   state = ", denied"
+            case .approved: state = enabled ? "" : ", disabled"
+            }
             print("WebExtension[\(name)]: loaded (\(ext.displayName ?? "?") \(ext.displayVersion ?? "?"), \(origin)\(state))")
         } catch {
             print("WebExtension[\(name)]: load FAILED: \(error)")
         }
+    }
+
+    // 要求された権限を context に付与する。
+    //
+    // ── 丸ごと通している理由 ──
+    // 個別に選べる形にはしていない。拡張は要求した権限が欠けると
+    // 黙って壊れることが多く、その壊れ方が利用者から見えない。
+    // 「入れるか入れないか」を訊いて、入れるなら要求通りに通す。
+    //
+    // optional 側も通す。uBOL は遮断レベルが 4 段階あり、
+    // 上の段（Optimal / Complete）は optional_host_permissions の
+    // <all_urls> を要る——ここを通さないと一番下の段で止まる。
+    // 許諾シートでも optional を含めて並べている（通すものを全部見せる）
+    private static func applyGrants(_ ext: WKWebExtension,
+                                    to context: WKWebExtensionContext,
+                                    allowsPrivateData: Bool) {
+        for permission in ext.requestedPermissions {
+            context.setPermissionStatus(.grantedExplicitly, for: permission)
+        }
+        for pattern in ext.requestedPermissionMatchPatterns {
+            context.setPermissionStatus(.grantedExplicitly, for: pattern)
+        }
+        for permission in ext.optionalPermissions {
+            context.setPermissionStatus(.grantedExplicitly, for: permission)
+        }
+        for pattern in ext.optionalPermissionMatchPatterns {
+            context.setPermissionStatus(.grantedExplicitly, for: pattern)
+        }
+
+        // ── プライベートウィンドウでも働かせるか ──
+        //
+        // false のままだと、拡張にはプライベートの窓も
+        // その中のタブも一切見えない。エラーは一つも出ないまま
+        // uBOL の遮断だけが黙って効かなくなる——プライベートにした途端
+        // 広告が戻るのは、使う側から見れば壊れているのと同じだ。
+        //
+        // 引き換えに、拡張のバックグラウンドはプライベートのタブの
+        // URL を知る。だから許諾シートで個別に訊く。
+        //
+        // load の前に立てること。載せた後で触ると反映に読み直しが要る
+        context.hasAccessToPrivateData = allowsPrivateData
+    }
+
+    // MARK: - 許諾
+
+    // 保留中の拡張を通す。許諾シートの「許可」から呼ぶ
+    func approve(id: String, allowsPrivateData: Bool) {
+        guard let index = loaded.firstIndex(where: { $0.id == id }),
+              loaded[index].review != .approved
+        else { return }
+
+        let entry = loaded[index]
+        ExtensionPermissionStore.record(id: id, allowed: true, privateData: allowsPrivateData)
+        Self.applyGrants(entry.ext, to: entry.context, allowsPrivateData: allowsPrivateData)
+
+        // 一度断ってから通した場合、disabledIDs には入っていない。
+        // 許したのに切れたままにならないよう、ここでは必ず入にする
+        do {
+            try controller.load(entry.context)
+        } catch {
+            print("WebExtension[\(id)]: approve FAILED: \(error)")
+            return
+        }
+
+        var disabled = Self.disabledIDs
+        disabled.remove(id)
+        Self.disabledIDs = disabled
+
+        loaded[index].review = .approved
+        loaded[index].isEnabled = true
+        print("WebExtension[\(id)]: approved (private data: \(allowsPrivateData))")
+    }
+
+    // 保留中の拡張を断る。
+    //
+    // 一覧からは消さない。消すと、気が変わった時に
+    // フォルダを置き直すしか道が無くなる
+    func deny(id: String) {
+        guard let index = loaded.firstIndex(where: { $0.id == id }) else { return }
+
+        // 既に載っていれば降ろす（許可済みを後から断った場合）
+        if loaded[index].isRunning {
+            try? controller.unload(loaded[index].context)
+        }
+
+        ExtensionPermissionStore.record(id: id, allowed: false, privateData: false)
+        loaded[index].review = .denied
+        loaded[index].isEnabled = false
+        print("WebExtension[\(id)]: denied")
     }
 
     // MARK: - 切り替え
@@ -258,6 +371,9 @@ final class WebExtensionManager: NSObject, ObservableObject {
     // 切り替えた後はリロードが要る（呼ぶ側が案内する）
     func setEnabled(_ enabled: Bool, for id: String) {
         guard let index = loaded.firstIndex(where: { $0.id == id }) else { return }
+        // まだ訊いていないものと断られたものはここでは動かせない。
+        // 通すには許諾シートを通す（approve）
+        guard loaded[index].review == .approved else { return }
         guard loaded[index].isEnabled != enabled else { return }
 
         let context = loaded[index].context
@@ -318,7 +434,7 @@ final class WebExtensionManager: NSObject, ObservableObject {
     }
 
     func unloadAll() {
-        for entry in loaded where entry.isEnabled {
+        for entry in loaded where entry.isRunning {
             try? controller.unload(entry.context)
         }
         loaded.removeAll()
