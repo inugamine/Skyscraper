@@ -237,6 +237,11 @@ final class ProfileStore: ObservableObject {
     // この時点では名簿に無い識別子を使うタブは一つも無い（復元も既定へ倒す）ので、
     // 使用中で断られる理由が無い。それでも転んだら控えに残して、次でまた試す
     func purgePendingRemovals() async {
+        // WebKit の下地を先に起こす。
+        // まっさらな Mac では置き場がまだ一つも無く、この状態で
+        // allDataStoreIdentifiers を叩くと WebKit の中で落ちた（2026-09、MacBook Air）
+        _ = WKWebsiteDataStore.default()
+
         let known = Set(profiles.map(\.id))
         let onDisk = (try? await WKWebsiteDataStore.allDataStoreIdentifiers) ?? []
         let orphans = onDisk.filter { !known.contains($0) }
