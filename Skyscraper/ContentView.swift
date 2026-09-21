@@ -5130,6 +5130,21 @@ struct BookmarkManager: View {
                     .overlay(Hexagon(inset: 7).stroke(Deco.faintGold, lineWidth: 1))
                 }
                 .buttonStyle(.plain)
+
+                // 他所のブラウザからの引き取り。File メニューにも同じ口が
+                // 居るが、棚を整えに来た人がまず開くのはこの盤だ。
+                // Safari も Chrome も管理画面から取り込める
+                Button { BookmarkImport.chooseFile(into: store) } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "square.and.arrow.down").font(.system(size: 11))
+                        Text("Import…").font(.system(size: 12, design: .serif)).tracking(1)
+                    }
+                    .foregroundColor(Deco.gold)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .overlay(Hexagon(inset: 7).stroke(Deco.faintGold, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+
                 Spacer()
 
                 if !store.bookmarks.isEmpty {
