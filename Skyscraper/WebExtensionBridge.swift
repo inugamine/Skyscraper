@@ -5,7 +5,7 @@
 //  拡張機能から見た「タブ」と「窓」を用意する。
 //
 //  ── なぜ要るのか ──
-//  DNR（宣言的な通信遮断）は WebKit がエンジンで実行するので、
+//  DNR (宣言的な通信遮断) は WebKit がエンジンで実行するので、
 //  こちらが何もしなくても効く。だが拡張の中身はそれだけではない。
 //  uBOL のコンテンツスクリプトは、ページを開くたびに
 //  「このホストに当てる整形フィルタは何か」を runtime.sendMessage() で
@@ -19,7 +19,7 @@
 //
 //  ── 実装の範囲 ──
 //  プロトコルの要求は全て optional なので、綴りを間違えても
-//  コンパイルは通ってしまう（黙って呼ばれなくなるだけ）。
+//  コンパイルは通ってしまう (黙って呼ばれなくなるだけ)。
 //  当てずっぽうで広く実装せず、要る順に足して挙動で確かめる。
 //
 
@@ -55,7 +55,7 @@ extension Tab: WKWebExtensionTab {
 
     // ピン留め。chrome.tabs.query({ pinned: true }) がここを見る。
     //
-    // 引数無しの isPinned は手元に持っている旗の方に解釈される（再帰しない）。
+    // 引数無しの isPinned は手元に持っている旗の方に解釈される (再帰しない)。
     // 上の isMuted と全く同じ形だ
     func isPinned(for context: WKWebExtensionContext) -> Bool {
         isPinned
@@ -180,11 +180,11 @@ extension TabManager: WKWebExtensionWindow {
 // MARK: - 名簿の更新を管理役へ流す
 
 extension WebExtensionManager {
-    // tabs 配列の差分から、開いた／閉じたを拾って WebKit に知らせる。
+    // tabs 配列の差分から、開いた/閉じたを拾って WebKit に知らせる。
     //
     // 挿入経路が addTab / addTabInBackground / addPopupTab / reopenClosed /
     // restoreSession / adopt と六つあるので、個別に差し込むと必ず漏れる。
-    // TabManager.tabs の didSet 一箇所で差分を取る方が確実だ
+    // TabManager.tabs の didSet 一箇所で差分を取る方が確実。
     func tabsChanged(from oldTabs: [Tab], to newTabs: [Tab], in manager: TabManager) {
         guard !contexts.isEmpty else { return }
 

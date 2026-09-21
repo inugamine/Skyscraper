@@ -11,14 +11,14 @@
 //  国内のアドネットワークも含めてこちらが手を出す必要はない。
 //  リストの更新も uBOL 側で完結する。
 //
-//  では何が残るか。サイト固有の空枠だ。
+//  では何が残るか。サイト固有の空枠である。
 //
 //  通信が止まっても、枠を作っている div や section は DOM に残る。
 //  min-height が直書きされていると、そこだけ真っ白に空く。
 //  特に Google Ad Manager の div（id が div-gpt-ad-<数字>）は
 //  公開フィルタリストが拾わない。id がサイトごとに違う上、
 //  前方一致で潰すのは誤爆の危険があるからだろう。
-//  自分専用のブラウザならその割り切りができる——それがここの価値だ。
+//  自分専用のブラウザならその割り切りができる。
 //
 //  ── YouTube には手を出さない ──
 //
@@ -37,8 +37,7 @@
 //  ── 育て方 ──
 //  普段見るサイトで空枠が残っていたら、Web インスペクタで要素を掴んで
 //  cosmeticRules に一行足す。ドメイン一覧を追いかけるより効果が見える。
-//  誤爆を避けるため、汎用的なクラス名（.ad-box など）は必ず if-domain で
-//  サイトを限定すること。
+//  誤爆を避けるため、汎用的なクラス名（.ad-box など）は必ず if-domain でサイトを限定すること。
 //
 
 import WebKit
@@ -132,14 +131,14 @@ final class AdBlocker {
         var domains: [String]? = nil
         // 効かせない場所。YouTube のように、枠を隠すこと自体を
         // 見咎めてくるサイトを汎用ルールから外すために使う。
-        // domains と同時には指定できない（下の組み立てを見ろ）
+        // domains と同時には指定できない (下の組み立てを見ろ)
         var exceptDomains: [String]? = nil
     }
 
     private static let cosmeticRules: [Cosmetic] = [
         // ── どのサイトでも通用するもの ──
         //
-        // AdSense の枠と、Google Ad Manager（GPT）のスロット。
+        // AdSense の枠と、Google Ad Manager (GPT) のスロット。
         // GPT は div の id が div-gpt-ad-<数字> で固定なので前方一致で拾える。
         // min-height が直書きされていることが多く、隠さないと空白が残る。
         //
@@ -162,9 +161,9 @@ final class AdBlocker {
     // MARK: - ルールの組み立て
 
     // Safari コンテンツブロッカー形式の JSON を組み立てる。
-    // 注意：文字列連結で組むと、正規表現の \. が JSON としては不正な
-    // エスケープになり、コンパイルが丸ごと失敗する（JSON 上は \\. と
-    // 二重化が必要）。エスケープは JSONSerialization に任せる
+    // 注意：文字列連結で組むと、正規表現の \. が JSON としては不正なエスケープになり、
+    // コンパイルが丸ごと失敗する。(JSON 上は \\. と二重化が必要)
+    // エスケープは JSONSerialization に任せる
     private static var rulesJSON: String {
         // 通信遮断ルール（1ドメイン1ルール。alternation | は使えないため）
         var rules: [[String: Any]] = blockedDomains.map { domain in
@@ -177,8 +176,8 @@ final class AdBlocker {
         // 空枠の掃除
         for rule in cosmeticRules {
             var trigger: [String: Any] = ["url-filter": ".*"]
-            // if-domain と unless-domain は同居できない（WebKit が
-            // ルールごと弾く）。片方だけを入れる
+            // if-domain と unless-domain は同居できない。(WebKit がルールごと弾く)
+            // 片方だけを入れる
             if let domains = rule.domains {
                 trigger["if-domain"] = domains
             } else if let except = rule.exceptDomains {

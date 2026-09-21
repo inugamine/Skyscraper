@@ -7,23 +7,23 @@
 //  ── 何が分かれて、何が分かれないか ──
 //  WKWebsiteDataStore(forIdentifier:) は Cookie・localStorage・
 //  IndexedDB・キャッシュを、識別子ごとに別のディスク領域へ置く。
-//  同じサイトに別のアカウントで同時にログインできるのはこのおかげだ。
+//  同じサイトに別のアカウントで同時にログインできるのはこのおかげ。
 //
 //  分かれないもの：
-//  ・拡張機能の状態（browser.storage）。あれは WKWebExtensionController が
+//  ・拡張機能の状態 (browser.storage)。あれは WKWebExtensionController が
 //    持っていて、管理役は全窓で一つを共有している
 //  ・パスワードとパスキー。macOS のキーチェーン側にあるので割れない。
 //    Safari も割っていない
 //  ・ブックマーク・履歴・設定。ブラウザ全体のものだ
 //
 //  ── 誰が持つか ──
-//  プロファイルはタブの属性だ。グループ（TabGrouper）の属性ではない。
+//  プロファイルはタブの属性だ。グループ (TabGrouper) の属性ではない。
 //  websiteDataStore は WKWebView の生成時に焼き付くので後から変えられず、
-//  グループは LLM が付けた名前の対応表に過ぎない（再生成で消える）。
+//  グループは LLM が付けた名前の対応表に過ぎない (再生成で消える)。
 //  タブが profileID を持ち、それに合う置き場で器を作る——それだけだ。
 //
 //  ── 名前は自前で持つ ──
-//  WebKit は識別子（UUID）の一覧こそ返す（fetchAllDataStoreIdentifiers）が、
+//  WebKit は識別子 (UUID) の一覧こそ返す (fetchAllDataStoreIdentifiers) が、
 //  名前は付けられない。名前 ↔ UUID の対応は UserDefaults に置く。
 //  UUID を失えばその置き場は二度と開けなくなるので、
 //  この対応表は「削除」以外の理由で消してはならない。
@@ -36,12 +36,12 @@ import WebKit
 
 // MARK: - 記憶の射程
 
-// サイトごとの記憶（許可・例外・「訊かない」）を、誰の分として持つか。
+// サイトごとの記憶 (許可・例外・「訊かない」) を、誰の分として持つか。
 //
 // ストア側は鍵の前置きで割るだけで、中身の構造は変えない。
-// 既定は素のオリジンを鍵にするので、今までの保存はそのまま読める（移行は無い）。
+// 既定は素のオリジンを鍵にするので、今までの保存はそのまま読める (移行は無い)。
 // プロファイルを消す時は、その前置きを持つ鍵を全部捨てればいい
-// （二段目で入れる）。
+// (二段目で入れる)。
 //
 // 以前は `persistent: Bool` で「プライベートか否か」だけを渡していた。
 // プロファイルが増えて二値では足りなくなったので、同じ口をこの型に広げた
@@ -55,7 +55,7 @@ enum DataScope: Hashable {
 
     // 保存用の鍵。
     // プライベートはメモリの辞書を別に持つので、鍵は既定と同じ形でいい
-    // （通常で許したサイトはプライベートでも許す——その照合に同じ鍵が要る）
+    // (通常で許したサイトはプライベートでも許す——その照合に同じ鍵が要る)
     func key(_ origin: String) -> String {
         switch self {
         case .default, .session:  return origin
@@ -85,7 +85,7 @@ final class ProfileStore: ObservableObject {
     // 一度開いた置き場は使い回す。
     //
     // forIdentifier: が同じ id で同じ実体を返すかは保証を見付けられなかった。
-    // 別の実体が返っても中身（ディスク）は同じはずだが、
+    // 別の実体が返っても中身 (ディスク) は同じはずだが、
     // 「タブごとに別の実体」は PrivateBrowsing で懲りた話なので、
     // こちらで一つに束ねておく
     private var stores: [UUID: WKWebsiteDataStore] = [:]
@@ -123,7 +123,7 @@ final class ProfileStore: ObservableObject {
         profile(id) != nil
     }
 
-    // 置き場を出す。無ければ作る（ディスク上の領域もこの時に生まれる）
+    // 置き場を出す。無ければ作る (ディスク上の領域もこの時に生まれる)
     func dataStore(for id: UUID) -> WKWebsiteDataStore {
         if let store = stores[id] { return store }
         let store = WKWebsiteDataStore(forIdentifier: id)
@@ -177,7 +177,7 @@ final class ProfileStore: ObservableObject {
     // 今度はネットワークプロセスがセッションを抱えたままになる（実測：
     // "Data store is in use" → "(by network process)" と変わったまま四秒粘っても通らない）。
     // そこに粘るのは筋が悪い。removeData は使用中でも通るので、中身はここで空にする。
-    // 利用者から見ればそれで終わりだ。空の箱は次の起動、WebView が生まれる前に消す。
+    // 利用者から見ればそれで終わり。空の箱は次の起動、WebView が生まれる前に消す。
     // Safari も置き場の後始末は起動時にやっている
     func remove(_ id: UUID) async -> String? {
         guard contains(id) else { return nil }
@@ -185,7 +185,7 @@ final class ProfileStore: ObservableObject {
         // 1. 全窓からそのプロファイルのタブを閉じる
         TabManager.closeTabsEverywhere(inProfile: id)
 
-        // 2. 各ストアの記憶（鍵に印の付いた分）を捨てる
+        // 2. 各ストアの記憶 (鍵に印の付いた分) を捨てる
         GeolocationStore.shared.forgetProfile(id)
         MediaPermissionStore.shared.forgetProfile(id)
         HTTPSFirstStore.shared.forgetProfile(id)
@@ -228,18 +228,17 @@ final class ProfileStore: ObservableObject {
         return false
     }
 
-    // 前回消し残した箱を片付ける。起動直後に呼ぶ（SkyscraperApp.init）。
+    // 前回消し残した箱を片付ける。起動直後に呼ぶ (SkyscraperApp.init)。
     //
     // 控えにあるものだけでなく、WebKit に識別子付きの置き場を全部出させて、
-    // 名簿に居ないものは全部消す。控えを残す前に転んだ孤児（作りかけで落ちた、
-    // 古い版が控えずにあきらめた）もこれで拾える。
+    // 名簿に居ないものは全部消す。控えを残す前に転んだ孤児 (作りかけで落ちた、古い版が控えずにあきらめた) もこれで拾える。
     //
-    // この時点では名簿に無い識別子を使うタブは一つも無い（復元も既定へ倒す）ので、
+    // この時点では名簿に無い識別子を使うタブは一つも無い (復元も既定へ倒す) ので、
     // 使用中で断られる理由が無い。それでも転んだら控えに残して、次でまた試す
     func purgePendingRemovals() async {
         // WebKit の下地を先に起こす。
         // まっさらな Mac では置き場がまだ一つも無く、この状態で
-        // allDataStoreIdentifiers を叩くと WebKit の中で落ちた（2026-09、MacBook Air）
+        // allDataStoreIdentifiers を叩くと WebKit の中で落ちた (2026-09、MacBook Air)
         _ = WKWebsiteDataStore.default()
 
         let known = Set(profiles.map(\.id))

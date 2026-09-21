@@ -5,18 +5,18 @@
 //  アドレスバー右端に並ぶ、拡張機能のボタン。
 //
 //  ── WebKit が用意してくれるもの ──
-//  アイコン（action.icon(for:)）、名前（label）、バッジ（badgeText）、
+//  アイコン (action.icon(for:))、名前 (label)、バッジ(badgeText)、
 //  そして popup の NSPopover 一式（popupPopover）まで WebKit 側が持っている。
 //  中身の WebView も寸法調整も自動で、閉じれば closePopup() まで呼ばれる。
 //
 //  ── こちらの仕事 ──
-//  ・ボタンを描く（アール・デコの他の道具と揃える）
+//  ・ボタンを描く (アール・デコの他の道具と揃える)
 //  ・押されたら context.performAction(for:) を呼ぶ
 //  ・popover を出す位置（＝ボタンの実体）を WebKit に教える
 //
 //  位置合わせのために NSView の参照が要るが、SwiftUI のボタンからは
 //  自分の NSView を取れない。目印だけを NSViewRepresentable で敷いて、
-//  その実体を拡張ごとに控えておく（ExtensionActionAnchorRegistry）。
+//  その実体を拡張ごとに控えておく (ExtensionActionAnchorRegistry)。
 //
 
 import AppKit
@@ -32,7 +32,7 @@ import WebKit
 //
 // 弱参照にしてはいけない。SwiftUI は NSViewRepresentable が作った
 // NSView を自分の都合で作り直すので、弱参照だと押した瞬間に
-// nil になっていることがある（実測して anchor=false になった）。
+// nil になっていることがある (実測して anchor=false になった)。
 // 拡張の数だけの小さなビューを抱えるだけなので、強参照で持つ
 @MainActor
 final class ExtensionActionAnchorRegistry {
@@ -104,7 +104,7 @@ struct WebExtensionActionButton: View {
                 // 押された事実を WebKit へ渡す。
                 // popup を持つ拡張なら presentActionPopup が飛んでくるし、
                 // 持たない拡張なら onClicked のイベントが発火する。
-                // ユーザー操作の記録（activeTab 権限）もこの中で行われる
+                // ユーザー操作の記録 (activeTab 権限) もこの中で行われる
                 entry.context.performAction(for: tab)
             } label: {
                 icon(action)
@@ -170,7 +170,7 @@ struct WebExtensionActionButton: View {
 
 // 有効で、かつ「ツールバーに出す」とされた拡張ぶんのボタンを横に並べる。
 // 隠されているだけの拡張は背後で普通に動いている。
-// 拡張が無ければ何も出さない（アドレスバーの幅を食わない）
+// 拡張が無ければ何も出さない (アドレスバーの幅を食わない)
 struct WebExtensionActionBar: View {
     @ObservedObject var tab: Tab
     @ObservedObject private var manager = WebExtensionManager.shared

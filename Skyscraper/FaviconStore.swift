@@ -2,11 +2,11 @@
 //  FaviconStore.swift
 //  Skyscraper
 //
-//  ファビコン（サイトの絵札）を集めて、ホスト名を鍵に貯めておく係。
+//  ファビコンを集めて、ホスト名を鍵に貯めておく係。
 //
 //  ── なぜ自前で書くのか ──
 //  WKWebView はファビコンの API を出していない。WebKit の内側には
-//  ちゃんと持っているのだが（Safari のタブに出ているのがそれだ）、
+//  ちゃんと持っているのだが(Safari のタブに出ているのがそれ)、
 //  公開されているのは iOS の一部だけで macOS には無い。
 //
 //  ── なぜ JS で画像まで取らないのか ──
@@ -17,13 +17,13 @@
 //  他所から来た絵を描いた時点で汚染され toDataURL が例外を投げる。
 //  だからアプリ側の URLSession で取る。
 //
-//  その URLSession は .ephemeral 固定だ。Cookie を一切載せない。
+//  その URLSession は .ephemeral 固定。Cookie を一切載せない。
 //  絵を一枚もらうのに身分証を出す理由が無いし、こうしておけば
 //  プライベートウィンドウでも普通の窓でも同じ経路で済む。
 //
 //  ── プライベートウィンドウはディスクに書かない ──
 //  ファビコンがディスクに残るということは、訪れたホスト名が
-//  ディスクに残るということだ。跡を残さないと言って開いた窓で
+//  ディスクに残るということになる。跡を残さないと言って開いた窓で
 //  それをやったら台無しになる。読むのは可、書くのは不可。
 //
 //  ── SVG は写らない ──
@@ -73,7 +73,7 @@ final class FaviconStore {
     // 取得中のもの。同じホストのタブを何枚も開いた時に、
     // 同じ絵を人数分取りに行かせない。
     //
-    // 中身が NSImage ではなく Data なのは Swift 6 の都合だ。
+    // 中身が NSImage ではなく Data なのは Swift 6 の都合。
     // Task.value は戻り値が Sendable であることを要求するが、
     // NSImage は Sendable じゃない。焼き直した PNG のバイトを
     // 受け渡して、絵に戻すのは受け取った側でやる
@@ -120,10 +120,10 @@ final class FaviconStore {
     }
 
     // 無ければ取りに行く。
-    // candidates はページから拾った <link> の宛先（優先順）。
+    // candidates はページから拾った <link> の宛先 (優先順)。
     // 最後に /favicon.ico を自分で足すので、空で渡しても構わない。
     //
-    // ignoringCache が真なら、手元にあっても取りに行く（古びた分の取り直し）
+    // ignoringCache が真なら、手元にあっても取りに行く (古びた分の取り直し)
     func icon(for host: String, candidates: [URL], allowDiskWrite: Bool,
               ignoringCache: Bool = false) async -> NSImage? {
         if !ignoringCache {
@@ -237,7 +237,7 @@ final class FaviconStore {
     // 鍵はホスト名の SHA-256。
     //
     // ホスト名をそのままファイル名にしないのは、国際化ドメインや
-    // 妙に長い相手で足を掬われないためだ。
+    // 妙に長い相手で足を掬われないため。
     // 中身を見て回れないが、ここは絵の置き場であって台帳ではない
     private func path(_ host: String) -> URL? {
         guard let directory else { return nil }
@@ -273,7 +273,7 @@ final class FaviconStore {
             print("FaviconStore: no cache directory; prune skipped")
             return
         }
-        // 数百枚の日付を見て回るだけの仕事だ。
+        // 数百枚の日付を見て回るだけの仕事。
         // 起動直後の一番道が混む時間に主スレッドを使う理由が無い
         Task.detached(priority: .utility) {
             Self.prune(directory: directory)
@@ -385,7 +385,7 @@ struct FaviconBadge: View {
             }
         }
         // 名は点ではなく絵札全体に付ける。
-        // 点は 5pt しか無いので、そこに乗せろというのは無理な話だ。
+        // 点は 5pt しか無いので、そこに乗せろというのは無理な話。
         // 空文字の help は何も出ないので、印の無いタブには影響しない
         .help(profileName ?? "")
     }

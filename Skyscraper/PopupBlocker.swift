@@ -5,9 +5,9 @@
 //  window.open() で開かれるポップアップの門番。
 //
 //  WKWebView は既定で「ユーザー操作を伴わない window.open()」を弾いている
-//  （javaScriptCanOpenWindowsAutomatically が false）。
+//  (javaScriptCanOpenWindowsAutomatically が false)。
 //  だから createWebViewWith まで届くのは、クリックに便乗して開かれたものだ。
-//  リンクを踏んだ結果（target="_blank"）とは navigationType で区別できる。
+//  リンクを踏んだ結果 (target="_blank") とは navigationType で区別できる。
 //
 //  ただし OAuth のログイン窓、決済窓、共有ボタンも同じ形をしている。
 //  黙って捨てると、利用者からは「ボタンが壊れている」ようにしか見えない。
@@ -47,14 +47,14 @@ final class PopupAllowList {
         return "\(scheme):\(url.path(percentEncoded: false))"
     }
 
-    // 鍵は上の originKey。プロファイルならその印を前置きする（DataScope）
+    // 鍵は上の originKey。プロファイルならその印を前置きする (DataScope)
     func allow(_ host: String, scope: DataScope) {
         guard !host.isEmpty else { return }
         hosts.insert(scope.key(host))
         UserDefaults.standard.set(Array(hosts), forKey: storageKey)
     }
 
-    // 一件だけ取り消す（サイト情報から）。
+    // 一件だけ取り消す (サイト情報から)。
     // 設定画面の reset() は全部忘れるので、一枚のために
     // 他のサイトの許可まで巻き添えにする理由は無い
     func revoke(_ host: String, scope: DataScope) {

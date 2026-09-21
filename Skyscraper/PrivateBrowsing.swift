@@ -14,7 +14,7 @@
 //  非永続ストアは Cookie もキャッシュもディスクに触れない。
 //  アプリを終えれば跡形も無く消える。
 //  それでも最後の一枚を閉じた時点で中身を捨てるのは、
-//  「閉じたのにプロセスの中には残っている」のが筋の通らない話だからだ。
+//  「閉じたのにプロセスの中には残っている」のが筋の通らない話だから。
 //
 
 import Foundation
@@ -49,7 +49,7 @@ enum PrivateBrowsing {
         GeolocationStore.shared.forgetSession()
         MediaPermissionStore.shared.forgetSession()
 
-        // 呼ぶ側（窓）はもう死んでいるので、完了は待たない
+        // 呼ぶ側 (窓) はもう死んでいるので、完了は待たない
         store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(),
                          modifiedSince: .distantPast) {
             print("PrivateBrowsing: the last private window closed; data discarded")

@@ -20,12 +20,12 @@ final class Updater: ObservableObject {
     // 「アップデートを確認」メニューを押せるかどうか
     @Published var canCheckForUpdates = false
 
-    // 自動で更新を確認するか（設定画面のスイッチと連動）
+    // 自動で更新を確認するか (設定画面のスイッチと連動)
     @Published var automaticallyChecksForUpdates: Bool {
         didSet { controller.updater.automaticallyChecksForUpdates = automaticallyChecksForUpdates }
     }
 
-    // 更新を自動でダウンロードするか（設定画面のスイッチと連動）
+    // 更新を自動でダウンロードするか (設定画面のスイッチと連動)
     @Published var automaticallyDownloadsUpdates: Bool {
         didSet { controller.updater.automaticallyDownloadsUpdates = automaticallyDownloadsUpdates }
     }
@@ -48,7 +48,7 @@ final class Updater: ObservableObject {
             .assign(to: &$canCheckForUpdates)
     }
 
-    // 手動での更新チェック（メニューから呼ばれる）
+    // 手動での更新チェック (メニューから呼ばれる)
     func checkForUpdates() {
         controller.updater.checkForUpdates()
     }

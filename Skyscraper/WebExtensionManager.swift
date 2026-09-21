@@ -2,21 +2,21 @@
 //  WebExtensionManager.swift
 //  Skyscraper
 //
-//  Web Extensions（Chrome/Safari 互換の拡張機能）を読み込んで動かす。
+//  Web Extensions (Chrome/Safari 互換の拡張機能) を読み込んで動かす。
 //  実体は WebKit の WKWebExtension 一式（macOS 15.4 / Safari 18.4 で公開）。
 //
 //  ── 置き場所は二つ ──
-//  1. アプリの中（Skyscraper.app/Contents/Resources/Extensions/）
+//  1. アプリの中 (Skyscraper.app/Contents/Resources/Extensions/)
 //     標準装備。今は uBlock Origin Lite を同梱している。
 //     release.sh がビルド時に放り込む
 //  2. ~/Library/Application Support/Skyscraper/Extensions/
 //     利用者が自分で足したもの。
 //     同じ名前のフォルダが両方にあればこちらが勝つ
-//     （同梱版より新しい uBOL を自分で入れたい場合の逃げ道）
+//     (同梱版より新しい uBOL を自分で入れたい場合の逃げ道)
 //
 //  ── 今の範囲 ──
-//  タブと窓の橋渡し（WebExtensionBridge.swift）、ツールバーの popup、
-//  設定ページ、許諾の確認（ExtensionPermissions.swift）、
+//  タブと窓の橋渡し(WebExtensionBridge.swift)、ツールバーの popup、
+//  設定ページ、許諾の確認 (ExtensionPermissions.swift)、
 //  アプリ内からの取り込みと削除まで完了。
 //  拡張からの tabs.create() は未確認（uBOL は使わない）。
 //
@@ -75,7 +75,7 @@ final class WebExtensionManager: NSObject, ObservableObject {
         // approved の時だけ意味を持つ
         var isEnabled: Bool
 
-        // ツールバー（アドレスバー右端）にボタンを出すか。
+        // ツールバー (アドレスバー右端) にボタンを出すか。
         // 拡張そのものの有効・無効とは別勘定で、これを倒しても
         // 遮断やコンテンツスクリプトは動き続ける。見た目だけの話
         var showsAction: Bool
@@ -86,7 +86,7 @@ final class WebExtensionManager: NSObject, ObservableObject {
 
     // 全タブ・全ウィンドウで一つを共有する。
     // WKWebViewConfiguration.webExtensionController に刺すのは
-    // WebView 生成の前でなければならない（生成後の configuration は複製が返る）
+    // WebView 生成の前でなければならない (生成後の configuration は複製が返る)
     let controller: WKWebExtensionController
 
     @Published private(set) var loaded: [Loaded] = []
@@ -140,7 +140,7 @@ final class WebExtensionManager: NSObject, ObservableObject {
     }
 
     // アプリに同梱した拡張の置き場。
-    // 開発中（release.sh を通さず Xcode から直に走らせた場合）は
+    // 開発中 (release.sh を通さず Xcode から直に走らせた場合) は
     // 存在しないことがあるので、無ければ黙って飛ばす
     static var bundledExtensionsDirectory: URL? {
         Bundle.main.resourceURL?.appendingPathComponent("Extensions", isDirectory: true)
@@ -216,7 +216,7 @@ final class WebExtensionManager: NSObject, ObservableObject {
             let ext = try await WKWebExtension(resourceBaseURL: resourceBaseURL)
 
             // manifest の解釈で拾った不備。致命でなくても出しておく
-            // （権限名の綴り違いなどは黙って無視されるので、これが唯一の手がかりになる）
+            // (権限名の綴り違いなどは黙って無視されるので、これが唯一の手がかりになる)
             for error in ext.errors {
                 Self.log.warning("[\(name, privacy: .public)] manifest warning: \(error, privacy: .public)")
             }
@@ -226,8 +226,7 @@ final class WebExtensionManager: NSObject, ObservableObject {
             // 識別子は起動をまたいで同じにする。
             // 既定では毎回ちがう UUID が振られるので、そのままだと
             // 拡張側の設定（uBOL の遮断レベルなど）が毎回まっさらに戻る。
-            // フォルダ名だけで作るのは意図的で、同梱版を利用者版で上書きしても
-            // 設定が引き継がれる
+            // フォルダ名だけで作るのは意図的で、同梱版を利用者版で上書きしても設定が引き継がれる
             context.uniqueIdentifier = "net.live-on.inugamine.Skyscraper.extension.\(name)"
 
             // 許諾の記憶を見る。無ければ保留——controller には載せない
@@ -287,9 +286,9 @@ final class WebExtensionManager: NSObject, ObservableObject {
     // 「入れるか入れないか」を訊いて、入れるなら要求通りに通す。
     //
     // optional 側も通す。uBOL は遮断レベルが 4 段階あり、
-    // 上の段（Optimal / Complete）は optional_host_permissions の
+    // 上の段 (Optimal / Complete) は optional_host_permissions の
     // <all_urls> を要る——ここを通さないと一番下の段で止まる。
-    // 許諾シートでも optional を含めて並べている（通すものを全部見せる）
+    // 許諾シートでも optional を含めて並べている (通すものを全部見せる)
     private static func applyGrants(_ ext: WKWebExtension,
                                     to context: WKWebExtensionContext,
                                     allowsPrivateData: Bool) {
@@ -374,7 +373,7 @@ final class WebExtensionManager: NSObject, ObservableObject {
     //
     // 既に読み込み済みのページには即座には反映されない。
     // DNR のルールもコンテンツスクリプトもページ読み込み時に当たるので、
-    // 切り替えた後はリロードが要る（呼ぶ側が案内する）
+    // 切り替えた後はリロードが要る (呼ぶ側が案内する)
     func setEnabled(_ enabled: Bool, for id: String) {
         guard let index = loaded.firstIndex(where: { $0.id == id }) else { return }
         // まだ訊いていないものと断られたものはここでは動かせない。
@@ -412,7 +411,7 @@ final class WebExtensionManager: NSObject, ObservableObject {
     // controller には触らない。拡張は載ったまま動き続け、
     // 消えるのはボタンだけなのでリロードも要らない。
     //
-    // 注意：popup しか入口を持たない拡張（uBOL の遮断レベル切替など）は、
+    // 注意：popup しか入口を持たない拡張 (uBOL の遮断レベル切替など) は、
     // ボタンを隠すと設定に触る手立てが無くなる。呼ぶ側で一言添えること
     func setShowsAction(_ shows: Bool, for id: String) {
         guard let index = loaded.firstIndex(where: { $0.id == id }) else { return }
@@ -445,7 +444,7 @@ final class WebExtensionManager: NSObject, ObservableObject {
     // ダイアログで出さないのは、シートの上にシートが重なるのを避けるため
     @Published var lastError: String?
 
-    // フォルダを選んで取り込む。読み込めたらその id を返す（呼ぶ側が許諾シートを開く）。
+    // フォルダを選んで取り込む。読み込めたらその id を返す (呼ぶ側が許諾シートを開く)。
     //
     // 読み込みはその場でやる。「次の起動で拾う」という以前の制限は
     // 技術的な必然ではなかった——load(at:source:) は実行時にも呼べる
@@ -516,7 +515,7 @@ final class WebExtensionManager: NSObject, ObservableObject {
         return name
     }
 
-    // 利用者が入れた拡張を消す。同梱版は消せない（消しても次の起動で戻るだけだ）。
+    // 利用者が入れた拡張を消す。同梱版は消せない (消しても次の起動で戻るだけ)。
     //
     // フォルダはゴミ箱へ。間違えて押した時に取り返しがつく形にしておく
     func remove(id: String) {
@@ -551,7 +550,7 @@ final class WebExtensionManager: NSObject, ObservableObject {
         Self.log.info("[\(id, privacy: .public)] removed")
 
         // 同じ名前の同梱版があれば、そちらを戻す。
-        // 利用者版で上書きしていた場合、消したら同梱版が復活するのが自然だ
+        // 利用者版で上書きしていた場合、消したら同梱版が復活するのが自然。
         if let bundledDir = Self.bundledExtensionsDirectory {
             let bundled = bundledDir.appendingPathComponent(id, isDirectory: true)
             if FileManager.default.fileExists(atPath: bundled.appendingPathComponent("manifest.json").path) {
@@ -594,7 +593,7 @@ extension WebExtensionManager: WKWebExtensionControllerDelegate {
     //
     // uBOL はページごとに遮断数をバッジへ出すので、ここが頻繁に呼ばれる。
     // action はタブごとに違う実体なので、associatedTab を見て
-    // 該当する Tab に直接知らせる（全タブを起こすと無駄が多い）
+    // 該当する Tab に直接知らせる (全タブを起こすと無駄が多い)
     func webExtensionController(_ controller: WKWebExtensionController,
                                 didUpdate action: WKWebExtension.Action,
                                 forExtensionContext context: WKWebExtensionContext) {
@@ -620,7 +619,7 @@ extension WebExtensionManager: WKWebExtensionControllerDelegate {
         }
 
         // ボタンの実体を探す。
-        // 鍵は uniqueIdentifier（登録側と必ず揃えること）
+        // 鍵は uniqueIdentifier (登録側と必ず揃えること)
         let anchor = ExtensionActionAnchorRegistry.shared.view(
             forExtension: context.uniqueIdentifier
         )
@@ -661,7 +660,7 @@ extension WebExtensionManager: WKWebExtensionControllerDelegate {
         }
     }
 
-    // 拡張が新しいタブを開きたい（chrome.tabs.create）。
+    // 拡張が新しいタブを開きたい (chrome.tabs.create)。
     //
     // これが無いと tabs.create() は "not implemented" で弾かれる。
     // uBOL は使わないが、リンクを新しいタブで開く類の拡張は大抵ここを通る。

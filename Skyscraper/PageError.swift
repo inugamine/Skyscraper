@@ -6,7 +6,7 @@
 //
 //  WKWebView は失敗しても何も描かない。放っておくと、繋がらないのか、
 //  打ち間違えたのか、証明書で止められたのかが一切分からないまま
-//  白紙が残る（新規タブから開いた場合は本当に真っ白になる）。
+//  白紙が残る (新規タブから開いた場合は本当に真っ白になる)。
 //
 
 import Foundation
@@ -68,7 +68,7 @@ struct PageError {
             // 公開の定数が無いので数値で見る。
             // 102: frame load interrupted by policy change——
             //      decidePolicyFor で .cancel / .download を返すと必ず来る
-            //      （外部スキームの引き渡し、⌘クリック、ダウンロード化）
+            //      (外部スキームの引き渡し、⌘クリック、ダウンロード化)
             // 204: 読み込みを WebKit の外側が引き取った
             return error.code == 102 || error.code == 204
         default:
@@ -192,7 +192,7 @@ struct PageError {
 
 // MARK: - 顛末書のページ
 
-// ロビー（新規タブページ）と同じ黒地・金線の造りにする。
+// ロビー (新規タブページ) と同じ黒地・金線の造りにする。
 // 失敗した時だけ別の様式になると、それ自体が驚きになる
 struct ErrorPage: View {
     let error: PageError

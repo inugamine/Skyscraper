@@ -5,7 +5,7 @@
 //  拡張機能に何を許したかを預かる係と、それを人に見せる形に整える係。
 //
 //  ── なぜ記憶が要るのか ──
-//  拡張の読み込みは起動時（WebExtensionManager.loadAll）に走る。
+//  拡張の読み込みは起動時 (WebExtensionManager.loadAll) に走る。
 //  そこで毎回許諾を訊いたら、起動のたびにダイアログが出ることになる。
 //  一度答えたら覚える。覚えていないものだけを「保留」にして、
 //  一覧から利用者の都合で確認してもらう。
@@ -16,7 +16,7 @@
 //  訊く前に動いているのでは、訊く意味が無い。
 //
 //  ── 既にあるものの引き継ぎ ──
-//  この仕組みを入れる前から入っていた拡張（uBOL）は、
+//  この仕組みを入れる前から入っていた拡張 (uBOL) は、
 //  初回だけ許可済みとして書き込む。利用者が自分で入れたもので、
 //  現に動いている。起動したら突然「確認してください」と出るのは筋が悪い。
 //
@@ -30,7 +30,7 @@ import WebKit
 enum ExtensionPermissionStore {
 
     // 拡張フォルダ名 → 許可したか。
-    // 鍵が無い＝まだ訊いていない（保留）
+    // 鍵が無い＝まだ訊いていない (保留)
     private static let decisionsKey = "skyscraper.extensions.permissions.v1"
     // プライベートウィンドウでも働かせるか。拡張ごとに持つ
     private static let privateDataKey = "skyscraper.extensions.privateData.v1"

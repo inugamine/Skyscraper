@@ -15,7 +15,7 @@
 //  ページには直しようがない。ブラウザ側で塞ぐしかない。
 //
 //  やること：composition の開始と終了を自前で見張り、
-//  「composition 中」または「終わった直後（猶予 60ms 以内）」の Enter を
+//  「composition 中」または「終わった直後 (猶予 60ms 以内)」の Enter を
 //  ページの listener に届く前に握り潰す。
 //  捕まえるのは Enter だけで、他のキーには一切触らない。
 //
@@ -29,7 +29,7 @@ import WebKit
 
 enum IMEGuard {
     // 全フレームに、他のスクリプトより先に仕込む。
-    // 埋め込みの入力欄（iframe 内のコメント欄など）も対象にしたいので
+    // 埋め込みの入力欄 (iframe 内のコメント欄など) も対象にしたいので
     // forMainFrameOnly は false
     static let userScript = WKUserScript(
         source: source,
@@ -42,7 +42,7 @@ enum IMEGuard {
         if (window.__skyscraperIMEGuardInstalled) { return; }
         window.__skyscraperIMEGuardInstalled = true;
 
-        // 確定直後とみなす猶予（ミリ秒）
+        // 確定直後とみなす猶予 (ミリ秒)
         const graceMs = 60;
 
         let composing = false;

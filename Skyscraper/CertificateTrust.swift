@@ -6,21 +6,20 @@
 //
 //  WKWebView は didReceive challenge を実装しない限り、証明書で転んだ接続を
 //  そのまま捨てる。自己署名の証明書を立てたローカルの開発サーバは、それだけで
-//  永久に開けない（顛末書が出て終わり）。手元の Raspberry Pi に繋ぐたびに
-//  別のブラウザを開く羽目になるのは、道具として不便だ。
+//  永久に開けない (顛末書が出て終わり)。手元の Raspberry Pi に繋ぐたびに
+//  別のブラウザを開く羽目になるのは、道具として不便。
 //
 //  とはいえ「検証を素通しする道」を常設するのは論外なので、条件を絞る。
 //  ・利用者が証明書の中身を見た上で、自分で押した時だけ
-//  ・その場所（ホストとポート）の、その一枚（指紋）に限って
+//  ・その場所 (ホストとポート) の、その一枚 (指紋) に限って
 //  ・アプリを終うまでの間だけ
 //  ディスクには何も書かない——次の起動では、また同じ問いから始まる。
 //  「一度通したら以後ずっと」は、間に誰かが割り込んでいた場合に
 //  取り返しがつかなくなる。
 //
 //  番地だけで許すと、一度押した場所については
-//  以後どんな証明書でも通ってしまう。指紋で縛るのはそのためだ——
-//  見た一枚と同じものである間だけ通す（差し替わったら訊き直す）。
-//
+//  以後どんな証明書でも通ってしまう。指紋で縛るのはそのため。
+//  見た一枚と同じものである間だけ通す。(差し替わったら訊き直す)
 
 import AppKit
 import Combine
@@ -32,16 +31,16 @@ import Security
 
 struct CertificateSummary {
     let host: String
-    let subject: String        // 発行先（CN か、それに準ずる要約）
+    let subject: String        // 発行先 (CN か、それに準ずる要約)
     let issuer: String         // 発行者の CN
     let notBefore: Date?
     let notAfter: Date?
-    let fingerprint: String    // SHA-256（16 進・空白区切り）
+    let fingerprint: String    // SHA-256 (16 進・空白区切り)
     // 検証が何で転んだか。Security framework の言い分をそのまま出す
     let problem: String
 
     // 自分で自分に署名している＝どこの認証局も裏書きしていない。
-    // ローカルの開発サーバはほぼこれだ
+    // ローカルの開発サーバはほぼこれ。
     var isSelfSigned: Bool { !subject.isEmpty && subject == issuer }
 
     var isExpired: Bool {
@@ -103,10 +102,10 @@ struct CertificateSummary {
 
 enum CertificateInspector {
 
-    // SecTrust から先頭（サーバ本人）の証明書を読み下す。
+    // SecTrust から先頭 (サーバ本人) の証明書を読み下す。
     //
     // 検証をここで回し直すのは、転んだ理由を文章で受け取るためだ。
-    // SecTrustEvaluateWithError は場合によっては通信に出る（OCSP 等）が、
+    // SecTrustEvaluateWithError は場合によっては通信に出る (OCSP 等) が、
     // ここへ来る時点で WebKit が既に一度評価しており、その答えは
     // 手元に残っている。押された後にしか呼ばないので、待たせても構わない
     static func summarize(trust: SecTrust?, host: String) -> CertificateSummary? {
@@ -170,7 +169,7 @@ enum CertificateInspector {
     }
 
     private static func date(of certificate: SecCertificate, oid: CFString) -> Date? {
-        // 値は CFAbsoluteTime（2001-01-01 を原点とする秒数）で入っている
+        // 値は CFAbsoluteTime (2001-01-01 を原点とする秒数) で入っている
         guard let number = property(of: certificate, oid: oid) as? NSNumber else { return nil }
         return Date(timeIntervalSinceReferenceDate: number.doubleValue)
     }
@@ -216,14 +215,13 @@ enum CertificateInspector {
 final class CertificateExceptionStore: ObservableObject {
     static let shared = CertificateExceptionStore()
 
-    // "host:port" → 通した一枚の指紋（SHA-256）。
+    // "host:port" → 通した一枚の指紋 (SHA-256)。
     // UserDefaults にもキーチェーンにも書かない。
-    // アプリを終えば消える——それがこの仕組みの根幹だ。
+    // アプリを終えば消える——それがこの仕組みの根幹。
     //
-    // @Published にしてあるのは、鍵の色をその場で変えるためだ。
-    // 例外は番地に紐づくが、番地を変えずに取り消されることがある
-    //（盤の「取り消す」）。見張り先が無いと、
-    // 次のページ遷移まで鍵が古いままになる
+    // @Published にしてあるのは、鍵の色をその場で変えるため。
+    // 例外は番地に紐づくが、番地を変えずに取り消されることがある。(盤の「取り消す」)
+    // 見張り先が無いと、次のページ遷移まで鍵が古いままになる
     @Published private var allowed: [String: String] = [:]
 
     private init() {}
@@ -233,7 +231,7 @@ final class CertificateExceptionStore: ObservableObject {
     // 通した場所の一覧（設定画面の表示用）
     var places: [String] { allowed.keys.sorted() }
 
-    // 鍵は "host:port"。プロファイルならその印を前置きする（DataScope）。
+    // 鍵は "host:port"。プロファイルならその印を前置きする。(DataScope)
     // プライベートは既定と同じ鍵——この控えは元からメモリだけで、終えば消える
     private static func key(host: String, port: Int, scope: DataScope) -> String {
         scope.key("\(host.lowercased()):\(port)")
@@ -252,7 +250,7 @@ final class CertificateExceptionStore: ObservableObject {
     }
 
     // この番地に例外を作ってあるか。
-    // 鍵の表示と盤の一覧に使う（こちらは指紋を見ない）
+    // 鍵の表示と盤の一覧に使う (こちらは指紋を見ない)
     func hasException(host: String, port: Int, scope: DataScope) -> Bool {
         !host.isEmpty && allowed[Self.key(host: host, port: port, scope: scope)] != nil
     }
@@ -279,7 +277,7 @@ final class CertificateExceptionStore: ObservableObject {
         allowed.removeAll()
     }
 
-    // あるプロファイルの分を丸ごと忘れる（プロファイルを消す時）
+    // あるプロファイルの分を丸ごと忘れる (プロファイルを消す時)
     func forgetProfile(_ id: UUID) {
         let prefix = DataScope.prefix(for: id)
         allowed = allowed.filter { !$0.key.hasPrefix(prefix) }
@@ -326,7 +324,7 @@ final class CertificateExceptionStore: ObservableObject {
         return response == .alertSecondButtonReturn
     }
 
-    // 証明書をただ見せるだけ（サイト情報の「証明書を表示」）。
+    // 証明書をただ見せるだけ。(サイト情報の「証明書を表示」)
     // 何かを許すわけではないので、ボタンは閉じるだけ
     func show(host: String, trust: SecTrust?, in window: NSWindow?) async {
         let alert = NSAlert()

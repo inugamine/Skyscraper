@@ -141,8 +141,8 @@ enum BookmarkImport {
     }
 
     // 預かるのは web の場所だけ。
-    // Firefox の place:（スマートフォルダ）、Chrome の chrome:// や
-    // javascript:（ブックマークレット）は、こちらで開いても何も起きない
+    // Firefox の place: (スマートフォルダ)、Chrome の chrome:// や
+    // javascript: (ブックマークレット)は、こちらで開いても何も起きない
     private static func webAddress(_ raw: String) -> String? {
         let address = decodeEntities(raw).trimmingCharacters(in: .whitespacesAndNewlines)
         // 頭の文字列だけを見る。URLComponents に別けさせないのは、

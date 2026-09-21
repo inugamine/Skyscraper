@@ -81,7 +81,7 @@ struct SitePermission: Identifiable {
     let id: String
     let label: LocalizedStringKey
     let state: LocalizedStringKey
-    // 取り消しの札に出す言葉（許可の性質で言い回しが変わる）
+    // 取り消しの札に出す言葉 (許可の性質で言い回しが変わる)
     let clearTitle: LocalizedStringKey
     let clear: @MainActor () -> Void
 }
@@ -93,7 +93,7 @@ struct SiteInfoPopover: View {
     // 例外の増減を盤に届ける。
     // ここで取り消した直後に、見出しの鍵も変わらないと嘘になる
     @ObservedObject private var exceptions = CertificateExceptionStore.shared
-    // 証明書の窓（シート）を出す時に、この盤を先に畳むために持つ
+    // 証明書の窓 (シート) を出す時に、この盤を先に畳むために持つ
     @Binding var isPresented: Bool
 
     // 覚えていることの一覧。取り消すたびに組み直す
@@ -318,7 +318,7 @@ struct SiteInfoPopover: View {
 
         // ── カメラ・マイク ──
         //
-        // 鍵は scheme://host[:port]。host を持たない場所（file: など）は
+        // 鍵は scheme://host[:port]。host を持たない場所 (file: など) は
         // そもそも許可を訊かれないので、空なら見に行かない。
         //
         // プロファイルのタブならそのプロファイルの分だけを見る。
@@ -402,7 +402,7 @@ struct SiteInfoPopover: View {
     // このサイトの分だけ消す。
     //
     // WKWebsiteDataStore は登録可能ドメイン単位で束ねて持っている
-    //（www.example.com も docs.example.com も "example.com" 一枚）。
+    // (www.example.com も docs.example.com も "example.com" 一枚)。
     // だから完全一致だけでは当たらないことがあり、末尾でも照合する
     private func clearSiteData() async {
         let target = host.lowercased()
@@ -437,7 +437,7 @@ struct SiteSecurityButton: View {
     @ObservedObject var tab: Tab
     // 例外の増減を鍵の色へ届ける。
     // 番地を変えずに例外が消える道がある以上
-    //（盤の「取り消す」と、設定画面の一括消し）、
+    // (盤の「取り消す」と、設定画面の一括消し)、
     // tab だけ見張っていても鍵は古いままになる
     @ObservedObject private var exceptions = CertificateExceptionStore.shared
     @State private var showingInfo = false

@@ -4,17 +4,17 @@
 //
 //  入力欄の脇に出す、預かりの一覧。
 //
-//  なぜ小窓（NSPanel）なのか：
+//  なぜ小窓 (NSPanel) なのか：
 //
 //  ページの DOM に描くと、そのサイトの JS から利用者名を読めてしまう。
 //  ログインする前に「この人はどの口座を持っているか」を教える筋合いは無い。
 //  偽の click を投げて記入を起こす道も開く。
 //
 //  SwiftUI を WKWebView の上に重ねる手も、AppKit との重なり順が
-//  当てにならない（サジェストの一覧で一度踏んでいる）。
+//  当てにならない (サジェストの一覧で一度踏んでいる)。
 //  別の窓にすれば、どちらの話も最初から起きない。
 //
-//  非活性の小窓（.nonactivatingPanel）にしてあるのが肝で、
+//  非活性の小窓 (.nonactivatingPanel) にしてあるのが肝で、
 //  これを怠ると小窓を押した拍子に入力欄が焦点を失い、
 //  blur → 一覧を畳む → 押した先が消える、の順で何も起きなくなる。
 //
@@ -33,7 +33,7 @@ final class PasswordSuggestionPanel {
 
     var isVisible: Bool { panel != nil }
 
-    // anchor は画面座標での入力欄の外枠（高さも含む）。
+    // anchor は画面座標での入力欄の外枠 (高さも含む)。
     // 上へ返す時に欄の上端が要るので、高さを潰して渡してはいけない
     func show(logins: [SavedLogin],
               anchoredTo anchor: NSRect,
@@ -128,7 +128,7 @@ final class PasswordSuggestionPanel {
         let maxX = max(bounds.minX + margin, bounds.maxX - size.width - margin)
         let x = min(max(anchor.minX, bounds.minX + margin), maxX)
 
-        // 縦：既定は欄の下（画面座標は上向きなので、下＝小さい y）
+        // 縦：既定は欄の下 (画面座標は上向きなので、下＝小さい y)
         let below = anchor.minY - size.height - gap
         if below >= bounds.minY + margin {
             return NSPoint(x: x, y: below)
@@ -140,7 +140,7 @@ final class PasswordSuggestionPanel {
             return NSPoint(x: x, y: above)
         }
 
-        // 上下どちらにも収まらない（極端に狭い窓）。広い側へ寄せて詰める
+        // 上下どちらにも収まらない (極端に狭い窓)。広い側へ寄せて詰める
         let roomBelow = anchor.minY - bounds.minY
         let roomAbove = bounds.maxY - anchor.maxY
         let y = roomAbove > roomBelow

@@ -8,9 +8,9 @@
 //  macOS の WKWebView は navigator.geolocation を持ってはいる。
 //  だが getCurrentPosition() を叩くと code:1 "User denied Geolocation" が
 //  即座に返るだけだ。WebKit の側に「許可を出す係」を差し込む口が要るのだが、
-//  その口は公開されていない（iOS の requestGeolocationPermissionFor に
+//  その口は公開されていない。(iOS の requestGeolocationPermissionFor に
 //  相当するものが macOS の WKUIDelegate に無い。Safari は非公開の
-//  WKGeolocationManagerSetProvider を使っている）。
+//  WKGeolocationManagerSetProvider を使っている)
 //  非公開の口は名前が変われば実行時に黙って死ぬので踏まない。
 //
 //  そこで navigator.geolocation を丸ごと自前の実装に差し替える。
@@ -18,7 +18,7 @@
 //  「アプリの許可」と「サイトの許可」で二度訊かれる事故も起きない。
 //
 //  ── 訊く順番 ──
-//  ① こちらのダイアログ（このサイトに渡してよいか）
+//  ① こちらのダイアログ (このサイトに渡してよいか)
 //  ② macOS の位置情報の許可（初回だけ。CoreLocation が出す）
 //  この順でなければならない。逆にすると、サイトを断るつもりの利用者から
 //  先に OS の許可だけ取り上げることになる。
@@ -51,8 +51,8 @@ final class GeolocationStore: ObservableObject {
 
     // プライベートウィンドウでの記憶。メモリだけで、最後の一枚を閉じた時に捨てる。
     //
-    // 読むのは上の decisions からも読む（通常で許したサイトはプライベートでも許す。
-    // Safari も Chrome もそうしている）。書くのはこちらだけ——痕跡を残さない
+    // 読むのは上の decisions からも読む (通常で許したサイトはプライベートでも許す。Safari も Chrome もそうしている)。
+    // 書くのはこちらだけ——痕跡を残さない
     private var sessionDecisions: [String: Bool] = [:]
 
     private init() {
@@ -74,7 +74,7 @@ final class GeolocationStore: ObservableObject {
         UserDefaults.standard.removeObject(forKey: storageKey)
     }
 
-    // あるプロファイルの分を丸ごと忘れる（プロファイルを消す時）
+    // あるプロファイルの分を丸ごと忘れる (プロファイルを消す時)
     func forgetProfile(_ id: UUID) {
         let prefix = DataScope.prefix(for: id)
         let before = decisions.count
@@ -83,9 +83,9 @@ final class GeolocationStore: ObservableObject {
         UserDefaults.standard.set(decisions, forKey: storageKey)
     }
 
-    // その場所について覚えていること。nil なら未設定（次に訊く）。
+    // その場所について覚えていること。nil なら未設定 (次に訊く)。
     //
-    // プライベート（.session）ならセッションの記憶を先に見る。
+    // プライベート (.session) ならセッションの記憶を先に見る。
     // permissions.query の答えにも使う——あれはダイアログを出さずに「今どうか」だけを返す
     func decision(origin: String, scope: DataScope) -> Bool? {
         if !scope.isPersistent, let saved = sessionDecisions[origin] { return saved }
@@ -166,7 +166,7 @@ final class GeolocationStore: ObservableObject {
     // WKSecurityOrigin から保存用の鍵を組む。
     //
     // 既定のポートは 0 で差し出されるので "https://example.com" には
-    // ポートが付かない。URL 版（下）と形が揃っていないと
+    // ポートが付かない。URL 版 (下) と形が揃っていないと
     // 「覚えているはずなのに毎回訊かれる」になる。
     // MediaPermission.swift の同名関数と同じ作法だ
     static func storageOrigin(_ origin: WKSecurityOrigin) -> String {
@@ -195,8 +195,8 @@ final class GeolocationStore: ObservableObject {
     // 同じ判定を URL からもできるようにする。
     //
     // 安全な文脈かどうかは、要求元の枠だけでは決まらない。
-    // 平文のページに埋まった https の枠は、仕様上安全な文脈ではない
-    //（祖先が一つでも平文なら、その中は全て巻き添えを食う）。
+    // 平文のページに埋まった https の枠は、仕様上安全な文脈ではない。
+    // (祖先が一つでも平文なら、その中は全て巻き添えを食う)
     // だから最上位と両方で見る
     static func isSecure(for url: URL) -> Bool {
         isSecure(scheme: url.scheme ?? "", host: url.host() ?? "")
@@ -219,7 +219,7 @@ final class GeolocationStore: ObservableObject {
     }
 }
 
-// MARK: - 現在地を取りに行く（タブごとに一人）
+// MARK: - 現在地を取りに行く (タブごとに一人)
 
 @MainActor
 final class GeolocationProvider: NSObject {
@@ -237,10 +237,10 @@ final class GeolocationProvider: NSObject {
 
     // 待たせている依頼。
     //
-    // 一発取り（getCurrentPosition）は届けたら消す。
-    // 継続（watchPosition）は clearWatch が来るまで残す。
+    // 一発取り (getCurrentPosition) は届けたら消す。
+    // 継続 (watchPosition) は clearWatch が来るまで残す。
     // 同じ配列に入れず分けてあるのは、CLLocationManager 側の
-    // 止め方が違うからだ（requestLocation は一回で自分から止まる）
+    // 止め方が違うからだ (requestLocation は一回で自分から止まる)
     private struct Pending {
         let id: Int
         let frame: WKFrameInfo
@@ -255,7 +255,7 @@ final class GeolocationProvider: NSObject {
 
     // ── Permissions-Policy ヘッダの控え ──
     //
-    // 応答の URL（フラグメントを除く）→ その文書が geolocation を誰に許しているか。
+    // 応答の URL (フラグメントを除く) → その文書が geolocation を誰に許しているか。
     // サーバが自分の文書に対して「位置情報は使わせない」と宣言できる。
     // これを見ないと、サイトの意思に反して許可を訊いてしまう。
     //
@@ -282,7 +282,7 @@ final class GeolocationProvider: NSObject {
     }
 
     // この文書は、自分のヘッダで geolocation を自分に許しているか。
-    // ヘッダが無ければ既定値（self）で許される
+    // ヘッダが無ければ既定値 (self) で許される
     private func headerAllows(documentURL: URL?) -> Bool {
         guard let documentURL,
               let policy = headerPolicies[Self.documentKey(documentURL)]
@@ -307,7 +307,7 @@ final class GeolocationProvider: NSObject {
     //
     // 仕様の「継承されるポリシー」の一段。親がヘッダで geolocation を宣言していれば、
     // その許可リストに子のオリジンが無い限り、allow 属性で何を書いても子は通らない。
-    // 宣言していなければこの段は飛ばされる（allow 属性と既定値だけで決まる）
+    // 宣言していなければこの段は飛ばされる (allow 属性と既定値だけで決まる)
     func headerAllowsDelegation(from documentURL: URL?, to childOrigin: String) -> Bool {
         guard let documentURL,
               let policy = headerPolicies[Self.documentKey(documentURL)]
@@ -348,7 +348,7 @@ final class GeolocationProvider: NSObject {
                 .filter { !$0.isEmpty }
             if tokens.isEmpty { return HeaderPolicy.none }
             if tokens.contains("*") { return .all }
-            // 列挙された URL はオリジンの形に揃えておく（比較は storageOrigin 同士）
+            // 列挙された URL はオリジンの形に揃えておく (比較は storageOrigin 同士)
             let normalized = tokens.map { token -> String in
                 if token == "self" { return token }
                 guard let u = URL(string: token) else { return token }
@@ -410,12 +410,12 @@ final class GeolocationProvider: NSObject {
 
         // 記憶もダイアログも最上位のオリジンに付ける。
         //
-        // 利用者の頭の中は「このサイトを許可した」だからだ。
+        // 利用者の頭の中は「このサイトを許可した」だから。
         // 埋め込み側のオリジンで覚えると、同じ広告網が
         // 別のサイトでも許可済みになってしまう。
         //
         // 主フレームしか注入していない間は、これは
-        // frameInfo から取るのと完全に同じ値になる（保存済みもそのまま使える）
+        // frameInfo から取るのと完全に同じ値になる (保存済みもそのまま使える)
         let key = GeolocationStore.storageOrigin(for: topURL)
         let host = topURL.host() ?? ""
 
@@ -436,7 +436,7 @@ final class GeolocationProvider: NSObject {
             let scope = self.scope
 
             // 問いならここで答えて終わる。記憶が無ければ prompt——
-            // 「訊けばダイアログが出る」という意味で、仕様通りだ
+            // 「訊けばダイアログが出る」という意味で仕様通り。
             if isQuery {
                 let state: String
                 if !GeolocationStore.shared.isEnabled {
@@ -481,7 +481,7 @@ final class GeolocationProvider: NSObject {
         guard let webView else { return false }
 
         // 先にヘッダ。要求元の文書と最上位の文書、どちらかが自分を禁じていれば断る。
-        // 連鎖の途中の文書のヘッダは見ていない（門番の各段で native に訊く口が要る。別件）
+        // 連鎖の途中の文書のヘッダは見ていない (門番の各段で native に訊く口が要る。別件)
         guard headerAllows(documentURL: frame.request.url),
               headerAllows(documentURL: webView.url)
         else { return false }
@@ -613,7 +613,7 @@ final class GeolocationProvider: NSObject {
 
 // MARK: - CoreLocation からの返事
 
-// CLLocationManager を作った場（＝メイン）へ返ってくるので、
+// CLLocationManager を作った場 (＝メイン) へ返ってくるので、
 // assumeIsolated で受けられる。Task で包むと順番が入れ替わる
 extension GeolocationProvider: CLLocationManagerDelegate {
 
@@ -650,7 +650,7 @@ extension GeolocationProvider: CLLocationManagerDelegate {
     }
 }
 
-// MARK: - 門番からの問い（隔離ワールド、返信付き）
+// MARK: - 門番からの問い (隔離ワールド、返信付き)
 
 // 門番が子の問い合わせに答える時、自分の文書のヘッダが子のオリジンを許しているかをここに訊く。
 //
@@ -668,7 +668,7 @@ extension GeolocationProvider: WKScriptMessageHandlerWithReply {
     }
 }
 
-// MARK: - 門番（隔離ワールド）
+// MARK: - 門番 (隔離ワールド)
 
 // その枠が現在地を訊いてよいかを見る係。
 //
@@ -894,8 +894,8 @@ extension GeolocationProvider {
 
     // ページ本来の世界に、全フレームへ仕込む。
     //
-    // 枠の中にも開けるのは、別の世界に門番（GeolocationGuard）を
-    // 置いて allow 属性を見るようにしたからだ。
+    // 枠の中にも開けるのは、別の世界に門番 (GeolocationGuard) を
+    // 置いて allow 属性を見るようにしたから。
     // 判定をこちら側（.page）に置いてはいけない——
     // ページ側の JS から messageHandlers を直接叩けるので、
     // ここに門番を置いても門番ごと跨がれる
@@ -1006,7 +1006,7 @@ extension GeolocationProvider {
 
         // 素の navigator.geolocation は Navigator.prototype 側の getter なので、
         // インスタンスに自前の項目を置けば影になる。
-        // configurable を残すのは、後から剥がせないと直しようが無くなるからだ
+        // configurable を残すのは、後から剥がせないと直しようが無くなるから。
         Object.defineProperty(navigator, 'geolocation', {
             value: Object.freeze(geolocation), enumerable: true, configurable: true
         });

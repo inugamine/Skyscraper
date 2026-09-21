@@ -4,7 +4,7 @@
 //
 //  他所で貯めたログイン情報を引き取る。
 //
-//  Passwords.app（iCloud キーチェーン）の中身は、第三者のアプリからは
+//  Passwords.app (iCloud キーチェーン) の中身は、第三者のアプリからは
 //  読めない。login キーチェーンとは別の「データ保護キーチェーン」に入って
 //  いて、アクセスグループとエンタイトルメントで囲われているからだ。
 //  ASAuthorizationPasswordRequest はあの見慣れたシートを出せるが、
@@ -54,7 +54,7 @@ enum PasswordImport {
         guard let urlColumn = column(header, ["url", "website", "websiteurl", "uri", "loginuri", "site"]),
               let passwordColumn = column(header, ["password", "pass", "loginpassword"])
         else { throw Failure.noColumns }
-        // 利用者名の欄が無い書き出しもある（その場合は空のまま預かる）
+        // 利用者名の欄が無い書き出しもある (その場合は空のまま預かる)
         let userColumn = column(header, ["username", "user", "login", "loginusername", "account", "email"])
 
         var imported = 0
@@ -71,7 +71,7 @@ enum PasswordImport {
             }
             let username = userColumn.flatMap { value(row, $0) } ?? ""
 
-            // 同じ場所・同じ利用者名なら中身が差し替わる（PasswordStore.save の作り）
+            // 同じ場所・同じ利用者名なら中身が差し替わる (PasswordStore.save の作り)
             if PasswordStore.shared.save(host: origin.host,
                                          scheme: origin.scheme,
                                          port: origin.port,
@@ -172,7 +172,7 @@ enum CSV {
             case ",":
                 row.append(field)
                 field = ""
-            // CRLF は Swift では一文字（拡張書記素クラスタ）として来る。
+            // CRLF は Swift では一文字 (拡張書記素クラスタ) として来る。
             // "\r" と "\n" だけを見ていると、Windows 生まれの CSV が
             // まるごと一行として読まれ、一件も取り込めない
             case "\r\n", "\r", "\n":

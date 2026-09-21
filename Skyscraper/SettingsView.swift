@@ -2,12 +2,12 @@
 //  SettingsView.swift
 //  Skyscraper
 //
-//  設定画面（⌘, で開く）。
+//  設定画面 (⌘, で開く)。
 //
 //  項目が増えて縦一枚では画面の小さい Mac で下がはみ出すようになったので、
 //  「一般」「プライバシー」「ライセンス」の三枚に分けて、
-//  それぞれの中を巻物（ScrollView）にしてある。
-//  窓の高さは中身に関係なく固定で、伸びるのは中の巻物だけだ。
+//  それぞれの中を巻物 (ScrollView) にしてある。
+//  窓の高さは中身に関係なく固定で、伸びるのは中の巻物だけ。
 //
 
 import SwiftUI
@@ -327,9 +327,9 @@ struct SettingsView: View {
         // ── ブックマークの持ち回り ──
         //
         // iCloud に入っていない人の所では、これを入れても
-        // 何も起きない（BookmarkSync が黙って見送る）。
+        // 何も起きない (BookmarkSync が黙って見送る)。
         // それでも札を出すのは、入っている上で
-        //「この Mac では持ち回したくない」人の逃げ道になるからだ
+        //「この Mac では持ち回したくない」人の逃げ道になるから
         Toggle(isOn: $syncsBookmarks) {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Sync bookmarks across your Macs")
@@ -356,7 +356,7 @@ struct SettingsView: View {
         // ── 未使用タブの解放 ──
         //
         // 入り切りではなく選択式なのは、この仕掛けの価値が
-        // 「やるかやらないか」ではなく「どれだけ待つか」にあるからだ。
+        // 「やるかやらないか」ではなく「どれだけ待つか」にあるから。
         // 短くすればメモリは返るが、書きかけのフォームを失う危険も上がる
         VStack(alignment: .leading, spacing: 8) {
             Text("Unload unused tabs")
@@ -486,7 +486,7 @@ struct SettingsView: View {
         // これは非常停止装置だ。普段はサイトごとに訊くので、
         // ここを切る必要は無い——切った場合は一律で断る。
         // 既定を入にしてあるのは、切った状態を既定にすると
-        // 「壊れてるのか仕様なのか」が利用者から見分けられないからだ。
+        // 「壊れてるのか仕様なのか」が利用者から見分けられないから。
         // カメラ・マイクも同じ作法で取り扱っている
         Toggle(isOn: $allowsLocation) {
             VStack(alignment: .leading, spacing: 3) {
@@ -625,7 +625,7 @@ struct SettingsView: View {
         return "\(active) of \(all.count) enabled."
     }
 
-    // 未使用タブを畳むまでの選択肢（分）。0 は「畳まない」。
+    // 未使用タブを畳むまでの選択肢 (分)。0 は「畳まない」。
     //
     // ここに無い値でも defaults 経由で入れば動く（試験用）。
     // その場合は下の unloadLabel が分数をそのまま出す

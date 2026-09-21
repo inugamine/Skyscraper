@@ -6,7 +6,7 @@
 //
 //  出どころは手元にあるものだけ——ブックマークと、今開いているタブ。
 //  閲覧履歴は取らないので候補にも出せないし、検索エンジンの
-//  suggest API も叩かない（打鍵のたびに未確定の入力を外へ送ることになる）。
+//  suggest API も叩かない。(打鍵のたびに未確定の入力を外へ送ることになる)
 //  つまりこの機能は、動いている間ネットワークに一切触れない。
 //
 
@@ -121,7 +121,7 @@ enum AddressSuggestions {
         //
         // 同じ場所でも「開く」と「そのタブへ移る」は別の行いなので、
         // 一行目と重なっても省かない。
-        // まだ何も読み込んでいないタブ（新規タブ）は URL が空なので落ちる
+        // まだ何も読み込んでいないタブ (新規タブ) は URL が空なので落ちる
         let switches = tabs.enumerated().compactMap { index, t -> (Rank, AddressSuggestion)? in
             guard !t.url.isEmpty,
                   let rank = rank(needle: needle, title: t.title, url: t.url, order: index)
@@ -143,7 +143,7 @@ enum AddressSuggestions {
 
     // 小さいほど上に出る。
     // tier で大きく分け、同じ tier の中は penalty、最後は元の並び順で決める
-    // （順位が入力のたびに揺れると、狙って選べない）
+    // (順位が入力のたびに揺れると、狙って選べない)
     private struct Rank: Comparable {
         let tier: Int
         let penalty: Int
@@ -202,7 +202,7 @@ enum AddressSuggestions {
     }
 
     // 画面に出すための形。
-    // 均しと違って大文字小文字は保つ（パスやクエリの意味が変わるため）
+    // 均しと違って大文字小文字は保つ (パスやクエリの意味が変わるため)
     private static func display(_ url: String) -> String {
         var text = url.trimmingCharacters(in: .whitespaces)
         for scheme in ["https://", "http://"] where text.lowercased().hasPrefix(scheme) {

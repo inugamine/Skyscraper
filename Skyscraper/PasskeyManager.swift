@@ -2,25 +2,25 @@
 //  PasskeyManager.swift
 //  Skyscraper
 //
-//  パスキー（WebAuthn）の橋渡し。
+//  パスキー (WebAuthn) の橋渡し。
 //
-//  WKWebView の WebAuthn は自社ドメイン（Associated Domains）限定で、
+//  WKWebView の WebAuthn は自社ドメイン (Associated Domains) 限定で、
 //  汎用ブラウザとして任意サイトのパスキーを扱うには
 //  com.apple.developer.web-browser.public-key-credential エンタイトルメント
-//  （Apple への申請制。Chrome / Firefox もこれ）が必要になる。
+//  (Apple への申請制。Chrome / Firefox もこれ) が必要になる。
 //
 //  仕組みは Chromium と同じ横取り型：
 //  1. ページに注入した JS が navigator.credentials.create / get を差し替える
-//  2. publicKey 要求だけを skyscraperPasskey ハンドラ（返信付き）へ流す
+//  2. publicKey 要求だけを skyscraperPasskey ハンドラ (返信付き) へ流す
 //  3. Swift 側が ASAuthorizationController で OS のパスキーシートを出す
-//  4. 結果（attestation / assertion）を base64url で JS へ返し、
+//  4. 結果 (attestation / assertion) を base64url で JS へ返し、
 //     JS が PublicKeyCredential 形の応答に組み直してページへ渡す
 //
 //  origin は ASPublicKeyCredentialClientData(challenge:origin:) に渡す。
 //  clientDataJSON の生成は OS 側の仕事なので、こちらで JSON は組まない。
 //
 //  エンタイトルメント未取得の間は、要求が AuthorizationError 1004 で落ちて
-//  ページには NotAllowedError が返る（＝黙って壊れず、綺麗に断られる）。
+//  ページには NotAllowedError が返る (＝黙って壊れず、綺麗に断られる)。
 //
 
 import Foundation
@@ -31,7 +31,7 @@ import AuthenticationServices
 // MARK: - base64url
 
 extension Data {
-    // WebAuthn の世界は全て base64url（パディング無し）で受け渡す
+    // WebAuthn の世界は全て base64url (パディング無し) で受け渡す
     init?(base64URL: String) {
         var s = base64URL
             .replacingOccurrences(of: "-", with: "+")
@@ -93,7 +93,7 @@ final class PasskeyBridge: NSObject {
             return
         }
 
-        // origin はメッセージを送ってきたフレームから取る（JS の自己申告は信じない）
+        // origin はメッセージを送ってきたフレームから取る (JS の自己申告は信じない)
         let origin = frame.securityOrigin
         let scheme = origin.protocol.lowercased()
         let host = origin.host.lowercased()
@@ -108,7 +108,7 @@ final class PasskeyBridge: NSObject {
         }
 
         // RP ID の検証：host そのもの、または host の登録可能な上位ドメインのみ。
-        // （厳密には Public Suffix List が要るが、"." を含む上位一致で近似する）
+        // (厳密には Public Suffix List が要るが、"." を含む上位一致で近似する)
         let rpId = ((body["rp"] as? [String: Any])?["id"] as? String)
             ?? (body["rpId"] as? String)
             ?? host
@@ -162,7 +162,7 @@ final class PasskeyBridge: NSObject {
         }
     }
 
-    // MARK: 登録（navigator.credentials.create）
+    // MARK: 登録 (navigator.credentials.create)
 
     private func buildRegistrationRequests(body: [String: Any],
                                            rpId: String,
@@ -183,7 +183,7 @@ final class PasskeyBridge: NSObject {
         let clientData = ASPublicKeyCredentialClientData(challenge: challenge, origin: origin)
         var requests: [ASAuthorizationRequest] = []
 
-        // プラットフォーム（iCloud キーチェーン等のパスキー）
+        // プラットフォーム (iCloud キーチェーン等のパスキー)
         if attachment != "cross-platform" {
             let provider = ASAuthorizationPlatformPublicKeyCredentialProvider(relyingPartyIdentifier: rpId)
             let request = provider.createCredentialRegistrationRequest(
@@ -192,7 +192,7 @@ final class PasskeyBridge: NSObject {
             requests.append(request)
         }
 
-        // セキュリティキー（YubiKey 等）
+        // セキュリティキー (YubiKey 等)
         if attachment != "platform" {
             let provider = ASAuthorizationSecurityKeyPublicKeyCredentialProvider(relyingPartyIdentifier: rpId)
             let request = provider.createCredentialRegistrationRequest(
@@ -211,7 +211,7 @@ final class PasskeyBridge: NSObject {
         return requests
     }
 
-    // MARK: 認証（navigator.credentials.get）
+    // MARK: 認証 (navigator.credentials.get)
 
     private func buildAssertionRequests(body: [String: Any],
                                         rpId: String,
@@ -280,7 +280,7 @@ final class PasskeyBridge: NSObject {
         }
     }
 
-    // allowCredentials / excludeCredentials から id（Data）の一覧を抜く
+    // allowCredentials / excludeCredentials から id (Data) の一覧を抜く
     private func descriptorIDs(_ raw: Any?) -> [Data] {
         ((raw as? [[String: Any]]) ?? []).compactMap { item in
             (item["id"] as? String).flatMap { Data(base64URL: $0) }
@@ -314,7 +314,7 @@ final class PasskeyBridge: NSObject {
     }
 }
 
-// throw で PasskeyError を運ぶための包み（enum に Error を直接付けないため）
+// throw で PasskeyError を運ぶための包み (enum に Error を直接付けないため)
 private struct PasskeyBridgeFailure: Error {
     let error: PasskeyError
     init(_ error: PasskeyError) { self.error = error }
@@ -414,10 +414,10 @@ extension PasskeyBridge: WKScriptMessageHandlerWithReply {
 
 extension PasskeyBridge {
     // navigator.credentials.create / get の publicKey 要求を横取りして
-    // skyscraperPasskey（返信付き）へ流し、返ってきた base64url を
+    // skyscraperPasskey (返信付き) へ流し、返ってきた base64url を
     // PublicKeyCredential 形の応答に組み直す。
-    // document start・メインフレーム限定（iframe 内の WebAuthn は権限委譲の
-    // 検証が別途要るので、まずは対応しない）
+    // document start・メインフレーム限定
+    // (iframe 内の WebAuthn は権限委譲の検証が別途要るので、まずは対応しない)
     static let userScript = WKUserScript(
         source: polyfillSource,
         injectionTime: .atDocumentStart,
@@ -487,7 +487,7 @@ extension PasskeyBridge {
 
         // ── attestationObject から authData を抜く最小 CBOR デコーダ ──
         // getAuthenticatorData() / getPublicKeyAlgorithm() を提供するためだけの物。
-        // 解析に失敗したらメソッド自体を生やさない（無いのは合法、壊れた値は違法）
+        // 解析に失敗したらメソッド自体を生やさない (無いのは合法、壊れた値は違法)
         const cborFirst = (u8) => {
             let i = 0;
             const arg = (info) => {
@@ -668,10 +668,10 @@ extension PasskeyBridge {
                 return nativeGet ? nativeGet(options)
                     : Promise.reject(new DOMException('Not supported.', 'NotSupportedError'));
             }
-            // 条件付き UI（アドレスバー autofill）は未対応。
+            // 条件付き UI (アドレスバー autofill) は未対応。
             // isConditionalMediationAvailable が false なので行儀の良いサイトは
             // 呼ばないが、呼ばれてもページ読み込みのたびにシートを出さない
-            // （永遠に確定しない約束＝候補が選ばれないのと同じ扱い）
+            // (永遠に確定しない約束＝候補が選ばれないのと同じ扱い)
             if (options.mediation === 'conditional') {
                 return new Promise(() => {});
             }

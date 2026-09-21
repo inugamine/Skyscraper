@@ -9,7 +9,7 @@
 //  Keychain Access.app から中身を確かめられるし、こちらが消えても
 //  利用者の資産として残る。
 //
-//  種別は kSecClassInternetPassword（Safari が使うのと同じ種別）。
+//  種別は kSecClassInternetPassword (Safari が使うのと同じ種別)。
 //  サーバ名・利用者名・プロトコル・ポートが構造化された属性として入るので、
 //  照合のたびに文字列を切り貼りしなくて済む。
 //
@@ -49,8 +49,7 @@ final class PasswordStore: ObservableObject {
     private static let securityDomain = "Skyscraper"
 
     // 一覧の画面を起こすための合図。
-    // 中身そのものは持たない（鍵はキーチェーンにあるので、
-    // アプリ側に写しを抱えると消し忘れの元になる）
+    // 中身そのものは持たない (鍵はキーチェーンにあるので、アプリ側に写しを抱えると消し忘れの元になる)
     @Published private(set) var revision = 0
 
     private init() {}
@@ -110,7 +109,7 @@ final class PasswordStore: ObservableObject {
     // MARK: 探す
 
     // その場所に預けてある利用者名の一覧。
-    // 中身（パスワード）はここでは取り出さない——
+    // 中身 (パスワード) はここでは取り出さない——
     // 属性を読むだけならキーチェーンは何も訊いてこない
     func logins(host: String, scheme: String, port: Int) -> [SavedLogin] {
         var query = Self.query(host: host, scheme: scheme, port: port)
@@ -232,7 +231,7 @@ final class PasswordNeverList {
 
     var isEmpty: Bool { hosts.isEmpty }
 
-    // 鍵は host。プロファイルならその印を前置きする（DataScope）。
+    // 鍵は host。プロファイルならその印を前置きする (DataScope)。
     // パスワードの実体はキーチェーンで共通だが、「訊かない」の印だけは人ごとに割れる
     func contains(_ host: String, scope: DataScope) -> Bool {
         !host.isEmpty && hosts.contains(scope.key(host))
@@ -244,7 +243,7 @@ final class PasswordNeverList {
         UserDefaults.standard.set(Array(hosts), forKey: storageKey)
     }
 
-    // 一件だけ解く（サイト情報から）。
+    // 一件だけ解く (サイト情報から)。
     // 「このサイトでは訊かない」を押した後で気が変わった時、
     // 今までは設定画面で全部忘れるしか道が無かった
     func remove(_ host: String, scope: DataScope) {
@@ -257,7 +256,7 @@ final class PasswordNeverList {
         UserDefaults.standard.removeObject(forKey: storageKey)
     }
 
-    // あるプロファイルの分を丸ごと忘れる（プロファイルを消す時）
+    // あるプロファイルの分を丸ごと忘れる (プロファイルを消す時)
     func forgetProfile(_ id: UUID) {
         let prefix = DataScope.prefix(for: id)
         let before = hosts.count

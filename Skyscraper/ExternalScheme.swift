@@ -30,7 +30,7 @@ final class ExternalSchemeStore {
 
     var hasSavedDecisions: Bool { !decisions.isEmpty }
 
-    // 覚えた判断をすべて忘れる（設定画面から呼ぶ）
+    // 覚えた判断をすべて忘れる (設定画面から呼ぶ)
     func reset() {
         decisions.removeAll()
         UserDefaults.standard.removeObject(forKey: storageKey)

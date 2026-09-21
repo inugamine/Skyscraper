@@ -58,7 +58,7 @@ enum PageExporter {
             Task { @MainActor in
                 do {
                     // 既定の WKPDFConfiguration は文書の全体を写す
-                    //（画面に見えている範囲だけではない）
+                    // (画面に見えている範囲だけではない)
                     let data = try await pdfData(from: webView)
                     try data.write(to: url)
                 } catch {
@@ -166,7 +166,7 @@ enum PageExporter {
     // MARK: - WebKit の書き出し
 
     // createPDF / createWebArchiveData には async 版が生えていない
-    //（Result を渡す形の完了通知は自動で橋渡しされない）ので、自分でくるむ
+    // (Result を渡す形の完了通知は自動で橋渡しされない) ので、自分でくるむ
 
     private static func pdfData(from webView: WKWebView) async throws -> Data {
         try await withCheckedThrowingContinuation { continuation in
@@ -198,7 +198,7 @@ enum PageExporter {
     }
 
     // 保存名の下ごしらえ。
-    // ファイル名に使えない文字（/ と :）は題名によく混ざるので均す
+    // ファイル名に使えない文字 (/ と :) は題名によく混ざるので均す
     private static func suggestedName(_ tab: Tab) -> String {
         let raw = jobTitle(tab)
         let cleaned = raw

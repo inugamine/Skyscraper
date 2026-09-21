@@ -18,12 +18,12 @@
 //  ── 出し方の作法 ──
 //  ただ URL を垂れ流すと、かえって騙しの片棒を担ぐ。
 //  この帯が守る規則は四つ：
-//   ・ホストだけを明るく、それ以外を沈める（部分域の偽装が浮く）
+//   ・ホストだけを明るく、それ以外を沈める (部分域の偽装が浮く)
 //   ・利用者情報部（user@）は警告色で晒す（隠すと "apple.com@evil.com" が通る）
 //   ・省略は必ず後ろから（前を削るとホストが消える＝一番大事な所が消える）
 //   ・javascript: と data: はスキーム名を明示する（宛先に見せかけた実行）
 //
-//  IDN（多言語ドメイン）は文字体系の混在で見る。詳しくは HostGuard の冒頭に書いた。
+//  IDN (多言語ドメイン) は文字体系の混在で見る。詳しくは HostGuard の冒頭に書いた。
 //
 
 import SwiftUI
@@ -35,7 +35,7 @@ enum LinkHover {
     static let messageHandlerName = "skyscraperLinkHover"
 
     // 全フレームに、他のスクリプトより先に仕込む。
-    // 埋め込みの枠（iframe）の中のリンクも見たいので forMainFrameOnly は false
+    // 埋め込みの枠 (iframe) の中のリンクも見たいので forMainFrameOnly は false
     static let userScript = WKUserScript(
         source: source,
         injectionTime: .atDocumentStart,
@@ -157,10 +157,10 @@ struct LinkHoverDisplay: Equatable {
     var warning: Warning?
 
     enum Warning: Equatable {
-        case credentials  // 番地に人の名前が紛れている（偽装の常套手段）
+        case credentials  // 番地に人の名前が紛れている (偽装の常套手段)
         case punycode     // 見た目を偽れる符号化ホスト
-        case script       // javascript:（宛先ではなく実行）
-        case opaque       // data: / blob:（中身が番地に埋まっている）
+        case script       // javascript: (宛先ではなく実行)
+        case opaque       // data: / blob: (中身が番地に埋まっている)
     }
 
     var isEmpty: Bool {
@@ -198,7 +198,7 @@ extension LinkHoverDisplay {
             break
         }
 
-        // ホストが無い型（mailto: tel: file: など）。強調する所が無いので素直に出す
+        // ホストが無い型 (mailto: tel: file: など)。強調する所が無いので素直に出す
         guard let rawHost = parts.host, !rawHost.isEmpty else {
             return LinkHoverDisplay(scheme: scheme.isEmpty ? "" : scheme + ":",
                                     trail: clip(dropScheme(text, scheme + ":")))
@@ -210,7 +210,7 @@ extension LinkHoverDisplay {
         // 利用者情報部。ここが本命の落とし穴だ。
         // "https://www.mybank.example.com@evil.test/" の飛び先は evil.test であって
         // mybank ではない。隠すと騙しに加担するので、警告色で必ず出す。
-        // 合言葉の方は伏せる（肩越しに見られる方が困る）
+        // 合言葉の方は伏せる (肩越しに見られる方が困る)
         if let user = parts.user, !user.isEmpty {
             display.credentials = parts.password == nil ? user + "@" : user + ":****@"
             display.warning = .credentials
@@ -256,19 +256,19 @@ extension LinkHoverDisplay {
 //
 // なので文字そのものを見る。ラテン文字の中にキリル文字や
 // ギリシア文字が紛れ込んでいれば、それは読ませるためではなく騙すための混ぜ方だ。
-// 疑わしいものは符号化した姿（xn--pple-43d.com）に戻して出す——
+// 疑わしいものは符号化した姿 (xn--pple-43d.com) に戻して出す——
 // 読みにくいのは承知の上で、その読みにくさ自体が警告になる。
 //
-// 一方で、日本語のドメイン（総務省.jp の類）は漢字・仮名・英数字が
+// 一方で、日本語のドメイン (総務省.jp の類) は漢字・仮名・英数字が
 // 混ざるのが普通だ。そこを符号化して出すのは単なる嫌がらせなので通す。
 // UTS 39 の Highly Restrictive に倣った線引きだ。
 //
 // 残っている穴：全ての文字が一つの体系で揃った偽装
-//（キリル文字だけで綴った "аррӏе" のような類）は、
+// (キリル文字だけで綴った "аррӏе" のような類) は、
 // 体系の混在が起きないので抜ける。そこまで見るには同形異義の対応表が要る。
 enum HostGuard {
     struct Verdict {
-        // 帯に出すホスト（疑わしければ符号化されている）
+        // 帯に出すホスト (疑わしければ符号化されている)
         var host: String
         var warning: LinkHoverDisplay.Warning?
     }
@@ -297,7 +297,7 @@ enum HostGuard {
         case latin, cyrillic, greek, cjk, hangul, other
     }
 
-    // 数字と区切りはどの体系にも属さないので nil を返す（数えない）
+    // 数字と区切りはどの体系にも属さないので nil を返す (数えない)
     private static func script(of scalar: UnicodeScalar) -> Script? {
         switch scalar.value {
         case 0x30...0x39, 0x2D, 0x5F:
@@ -325,12 +325,12 @@ enum HostGuard {
         }
         // 一つの体系で揃っているなら、少なくとも「混ぜた」痕は無い
         if scripts.count <= 1 { return false }
-        // 日本語・韓国語のドメインは英数字と混ざるのが普通だ。そこは通す
+        // 日本語・韓国語のドメインは英数字と混ざるのが普通。そこは通す
         if scripts == [.latin, .cjk] || scripts == [.latin, .hangul] { return false }
         return true
     }
 
-    // MARK: Punycode 符号化（RFC 3492）
+    // MARK: Punycode 符号化 (RFC 3492)
 
     // Foundation には公開の口が無いので自前で組む。
     // 復号は要らない（読める姿は既に手元にある）
@@ -407,7 +407,7 @@ enum HostGuard {
 // MARK: - 帯の形
 
 // 左下に据える帯。左辺と下辺は窓の縁に接するので描かず、
-// 右端を斜めに落として楔にする。段々ビルの裾と同じ理屈だ
+// 右端を斜めに落として楔にする。段々ビルの裾と同じ理屈。
 private struct LinkHoverBarShape: Shape {
     var cut: CGFloat = 13
 
@@ -496,7 +496,7 @@ struct LinkHoverBar: View {
 
     private func warningColor(_ warning: LinkHoverDisplay.Warning) -> Color {
         switch warning {
-        // 符号化ホストは「読みにくい」ではなく「騙されかけている」の印だ。
+        // 符号化ホストは「読みにくい」ではなく「騙されかけている」の印。
         // 利用者情報部の警告と同じ重みで出す
         case .credentials, .script, .punycode: return Deco.rust
         case .opaque:                          return Deco.dimGold
@@ -509,7 +509,7 @@ struct LinkHoverBar: View {
 extension View {
     // ページの上に帯を重ねる。display が nil の間は何も出さない。
     //
-    // animation を重ねる先が overlay の内側なのは、下地が WebView だからだ。
+    // animation を重ねる先が overlay の内側なのは、下地が WebView だから。
     // 外側に掛けると、帯が出入りするたびに Web の中身まで
     // 「変わったもの」として巻き添えで動かされる
     func linkHoverBar(_ display: LinkHoverDisplay?, flipped: Bool) -> some View {

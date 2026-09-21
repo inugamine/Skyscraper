@@ -5,27 +5,27 @@
 //  動画を再生している間、スクリーンセーバーと画面のスリープを止める番人。
 //
 //  macOS には「今こういう用事をしているから寝るな」と宣言する仕組みがある
-//  （ProcessInfo.beginActivity）。.idleDisplaySleepDisabled を立てている間は
+//  (ProcessInfo.beginActivity)。.idleDisplaySleepDisabled を立てている間は
 //  無操作タイマーが進まなくなり、画面が暗くならず、スクリーンセーバーも出ない。
 //  終わったら endActivity で必ず返す。返し忘れると永久に寝なくなるので、
 //  宣言と返却は必ずこのクラス一箇所に閉じ込める。
 //
-//  厄介なのは「動画が再生中か」の判定だ。WKWebView には
+//  厄介なのは「動画が再生中か」の判定。WKWebView には
 //  requestMediaPlaybackState(_:) があるが、音だけの再生と区別が付かない。
 //  ラジオや podcast まで画面を点けっぱなしにするのは違う。
 //  なので各フレームに小さな見張りを仕込み、動画が流れている間だけ
-//  4秒おきに「生きてるぞ」の合図（心拍）を送らせる。
+//  4秒おきに「生きてるぞ」の合図 (心拍) を送らせる。
 //
-//  心拍方式にしたのは、フレームの出入りを数えなくて済むからだ。
-//  iframe 内の埋め込み動画（ブログに貼られた YouTube など）も同じ合図を送る。
+//  心拍方式にしたのは、フレームの出入りを数えなくて済むから。
+//  iframe 内の埋め込み動画 (ブログに貼られた YouTube など) も同じ合図を送る。
 //  誰か一人でも送っていれば止める、10秒間誰からも来なければ返す。それだけ。
 //  フレームが動画を流したまま消し飛んでも、心拍が途絶えれば勝手に片付く。
 //
 //  ただし数えるのは「各窓で今見ているタブ」からの心拍だけだ。
-//  裏タブで動画を流しっぱなしにしても画面は普通に寝る（他のブラウザも同じ）。
+//  裏タブで動画を流しっぱなしにしても画面は普通に寝る (他のブラウザも同じ)。
 //  誰が選ばれているかは TabManager が selectedID の変化のたびに
 //  noteSelection(_:in:) で知らせてくる。こちらから見に行かないのは、
-//  窓の名簿（TabManager.registry）が向こうの内側のものだからだ。
+//  窓の名簿 (TabManager.registry) が向こうの内側のものだからだ。
 //
 //  止め始めが最大4秒、止め終わりが最大10秒遅れるが、
 //  スクリーンセーバーの発動は最短でも1分先なので実害は無い。
@@ -74,7 +74,7 @@ final class SleepBlocker: NSObject, WKScriptMessageHandler {
 
     // MARK: - 各タブから呼ぶ
 
-    // 見張りの仕込み。全フレームに入れる（埋め込み動画も拾いたい）
+    // 見張りの仕込み。全フレームに入れる (埋め込み動画も拾いたい)
     static let userScript = WKUserScript(
         source: source,
         injectionTime: .atDocumentEnd,
@@ -83,7 +83,7 @@ final class SleepBlocker: NSObject, WKScriptMessageHandler {
 
     // MARK: - 窓から呼ぶ
 
-    // この窓で今見ているタブの WebView を告げる（nil でこの窓を名簿から外す）。
+    // この窓で今見ているタブの WebView を告げる (nil でこの窓を名簿から外す)。
     // TabManager の selectedID の didSet から呼ばれる。
     // 窓を閉じた時は tearDownTabs が selectedID を nil にするので、
     // その didSet でここにも nil が届いて勝手に片付く
@@ -94,9 +94,8 @@ final class SleepBlocker: NSObject, WKScriptMessageHandler {
         } else {
             selected.removeValue(forKey: key)
         }
-        // 見ているタブが変わった直後は、前のタブの心拍がまだ
-        // 10秒の内側に残っている。残りを切り上げて、新しいタブから
-        // 心拍が来ない限り次の見回りで手を放す
+        // 見ているタブが変わった直後は、前のタブの心拍がまだ10秒の内側に残っている。
+        // 残りを切り上げて、新しいタブから心拍が来ない限り次の見回りで手を放す
         lastBeat = .distantPast
         evaluate()
     }
@@ -144,15 +143,15 @@ final class SleepBlocker: NSObject, WKScriptMessageHandler {
         if (window.__skyscraperSleepBlockerInstalled) { return; }
         window.__skyscraperSleepBlockerInstalled = true;
 
-        // 心拍の間隔（ミリ秒）。アプリ側の猶予より十分短く保つこと
+        // 心拍の間隔 (ミリ秒)。アプリ側の猶予より十分短く保つこと
         const beatMs = 4000;
 
         // 「見るための動画」かどうか。
-        // ・videoWidth が 0 ＝ まだ絵が無い（音声だけの <video> もここで落ちる）
+        // ・videoWidth が 0 ＝ まだ絵が無い (音声だけの <video> もここで落ちる)
         // ・小さすぎるものは飾りか計測用の隠し動画とみなす
         // ・loop かつ muted は、記事の背景に敷かれた装飾動画の典型。
         //   これで画面が点きっぱなしになるのは筋が違うので数えない
-        //   （X の動画は loop ではないので、消音のまま見ていても数えられる）
+        //   (X の動画は loop ではないので、消音のまま見ていても数えられる)
         const watchable = (video) => {
             if (video.paused || video.ended) { return false; }
             if (!video.videoWidth) { return false; }

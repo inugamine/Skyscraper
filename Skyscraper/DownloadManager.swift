@@ -2,10 +2,10 @@
 //  DownloadManager.swift
 //  Skyscraper
 //
-//  ダウンロードの受け持ちと、画面下に出る棚（一覧）。
+//  ダウンロードの受け持ちと、画面下に出る棚 (一覧)。
 //
 //  以前は Tab が WKDownloadDelegate を兼ねていたが、
-//  ダウンロードはタブより長生きする（保存中にタブを閉じられる）。
+//  ダウンロードはタブより長生きする (保存中にタブを閉じられる)。
 //  持ち主をアプリ側へ移して、タブが消えても最後まで面倒を見る。
 //
 //  記録はメモリ上だけに置く。アプリを終了すれば消える。
@@ -16,8 +16,7 @@
 //  返り、ファイルを頭から書き直して静かに壊すのを確認したため。
 //  代わりに、再開位置は毎回ディスク上の実ファイルサイズから決める。
 //  実サイズだけが唯一信用できる拠り所で、何度止めても狂わない。
-//  続きの取得は自前の URLSession に Range を付けて投げ、
-//  ファイルの末尾へ追記していく。
+//  続きの取得は自前の URLSession に Range を付けて投げ、ファイルの末尾へ追記していく。
 //
 
 import SwiftUI
@@ -612,7 +611,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
         Task { @MainActor in
             // 保存パネルを出して、保存先はユーザーに決めてもらう
             let panel = NSSavePanel()
-            // Twitter の画像 URL（…?format=jpg&name=large）のように拡張子が落ちる場合は
+            // Twitter の画像 URL (…?format=jpg&name=large) のように拡張子が落ちる場合は
             // 応答の MIME タイプから補う
             var filename = suggestedFilename
             if (filename as NSString).pathExtension.isEmpty,
@@ -630,7 +629,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
                 completionHandler(nil)   // キャンセル
                 return
             }
-            // 同名ファイルがあれば退かす（WebKit は上書きしてくれない）
+            // 同名ファイルがあれば退かす (WebKit は上書きしてくれない)
             try? FileManager.default.removeItem(at: url)
 
             // 棚に載せるのは保存先が決まってから。

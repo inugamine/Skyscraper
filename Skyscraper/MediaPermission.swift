@@ -5,7 +5,7 @@
 //  カメラ・マイクの使用許可をサイトごとに預かる係。
 //
 //  WKWebView は requestMediaCapturePermissionFor を実装しない限り、
-//  getUserMedia() を問答無用で拒否する（エラーすら分かりにくい）。
+//  getUserMedia() を問答無用で拒否する (エラーすら分かりにくい)。
 //  ここで許可の判断と、サイトごとの記憶を引き受ける。
 //
 
@@ -22,7 +22,7 @@ final class MediaPermissionStore {
     private var decisions: [String: Bool]
 
     // プライベートウィンドウでの記憶。メモリだけで、最後の一枚を閉じた時に捨てる。
-    // 読むのは上の decisions からも読む、書くのはこちらだけ（Geolocation と同じ作法）
+    // 読むのは上の decisions からも読む、書くのはこちらだけ (Geolocation と同じ作法)
     private var sessionDecisions: [String: Bool] = [:]
 
     private init() {
@@ -31,7 +31,7 @@ final class MediaPermissionStore {
 
     var hasSavedDecisions: Bool { !decisions.isEmpty }
 
-    // 覚えた許可をすべて忘れる（設定画面から呼ぶ）
+    // 覚えた許可をすべて忘れる (設定画面から呼ぶ)
     func reset() {
         decisions.removeAll()
         UserDefaults.standard.removeObject(forKey: storageKey)
@@ -42,7 +42,7 @@ final class MediaPermissionStore {
         sessionDecisions.removeAll()
     }
 
-    // あるプロファイルの分を丸ごと忘れる（プロファイルを消す時）
+    // あるプロファイルの分を丸ごと忘れる (プロファイルを消す時)
     func forgetProfile(_ id: UUID) {
         let prefix = DataScope.prefix(for: id)
         let before = decisions.count
@@ -51,9 +51,9 @@ final class MediaPermissionStore {
         UserDefaults.standard.set(decisions, forKey: storageKey)
     }
 
-    // MARK: - サイト一件ぶんの出し入れ（アドレスバーのサイト情報から）
+    // MARK: - サイト一件ぶんの出し入れ (アドレスバーのサイト情報から)
 
-    // その場所について覚えていること。nil なら未設定（次に訊く）。
+    // その場所について覚えていること。nil なら未設定 (次に訊く）)
     // プライベート（.session）ならセッションの記憶を先に見て、無ければ永続の方を見る
     func decision(origin: String, device: String, scope: DataScope) -> Bool? {
         let key = "\(origin)|\(device)"
@@ -78,7 +78,7 @@ final class MediaPermissionStore {
 
     // MARK: - 判断
 
-    // origin は保存用のキー（scheme://host:port）、host は画面に出す名前。
+    // origin は保存用のキー (scheme://host:port)、host は画面に出す名前。
     // scope が .session ならプライベートウィンドウ。記憶はメモリにしか書かない。
     // .profile なら鍵に印が付くので、他のプロファイルの記憶とは混ざらない
     func decide(origin: String,
@@ -150,7 +150,7 @@ final class MediaPermissionStore {
 
     // WKSecurityOrigin から保存用のキーを組む。
     // WKSecurityOrigin の各プロパティは macOS 26 でメインアクター隔離になったので、
-    // ここも nonisolated にせずメインで受ける（呼び元のデリゲートもメインだ）
+    // ここも nonisolated にせずメインで受ける (呼び元のデリゲートもメインだ)
     static func storageOrigin(_ origin: WKSecurityOrigin) -> String {
         let scheme = origin.`protocol`
         var text = scheme.isEmpty ? origin.host : "\(scheme)://\(origin.host)"
@@ -158,7 +158,7 @@ final class MediaPermissionStore {
         return text
     }
 
-    // URL から同じ形の鍵を組む（サイト情報の監査用）。
+    // URL から同じ形の鍵を組む 。(サイト情報の監査用)
     //
     // 上の WKSecurityOrigin 版は既定のポートを 0 で差し出すので、
     // "https://example.com" にはポートが付かない。

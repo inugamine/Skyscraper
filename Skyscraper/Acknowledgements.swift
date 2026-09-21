@@ -209,13 +209,13 @@ enum Acknowledgements {
 
     // ══ Apache License 2.0 の全文 ══
     //
-    // Skyscraper 本体と Readability.js の両方がこのライセンスだ。
+    // Skyscraper 本体と Readability.js の両方がこのライセンス。
     // 第 4 条(a) は「受け取った人にライセンスの写しを渡せ」と言っている。
     // .app だけを受け取った人にはリポジトリの LICENSE が届かないので、
-    // URL を示すだけでは足りない。ここに全文を持つ。
+    // URL を示すだけでは足りないのでここに全文を持つ。
     //
     // 末尾の APPENDIX にある Copyright [yyyy] [name of copyright owner] は
-    // ソースの頭に貼る雛形であって、埋める欄ではない。角括弧のままが正しい。
+    // ソースの頭に貼る雛形であって、埋める欄ではない。
     static let apacheLicense = Acknowledgement(
         id: "Apache-2.0",
         name: "Apache License 2.0",

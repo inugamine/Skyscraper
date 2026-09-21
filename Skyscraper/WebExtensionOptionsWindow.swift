@@ -2,13 +2,12 @@
 //  WebExtensionOptionsWindow.swift
 //  Skyscraper
 //
-//  拡張機能の設定ページ（options page）を出すための専用窓。
+//  拡張機能の設定ページ (options page) を出すための専用窓。
 //
 //  ── なぜタブで開かないのか ──
 //  設定ページの URL は webkit-extension:// スキームで、
-//  WebKit は「その拡張専用の WKWebViewConfiguration で作られた WebView」
-//  以外からの読み込みを問答無用で取り消す（context.webViewConfiguration の
-//  説明にそう書かれている）。
+//  WebKit は「その拡張専用の WKWebViewConfiguration で作られた WebView」以外からの読み込みを問答無用で取り消す
+// (context.webViewConfiguration の説明にそう書かれている)。
 //
 //  Tab.makeWebView は通常経路と window.open() 経路の二本立てで、
 //  OAuth の window.opener も全画面の引っこ抜きもそこを通っている。

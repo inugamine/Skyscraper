@@ -10,7 +10,7 @@
 //  こちらのブリッジに偽の送信を流し込んだりはできない。
 //
 //  記入するのは主フレームだけにしてある。iframe の中の入力欄は、
-//  親と違う出所であることが多い（広告・埋め込みウィジェット）。
+//  親と違う出所であることが多い (広告・埋め込みウィジェット)。
 //  親の資格情報をそこへ流すのは、そのまま漏洩の経路になる。
 //
 
@@ -30,7 +30,7 @@ enum PasswordFill {
         in: world
     )
 
-    // 記入を頼む。値は JSON にして渡す（引用符や改行で式が壊れないように）
+    // 記入を頼む。値は JSON にして渡す (引用符や改行で式が壊れないように)
     static func fillScript(username: String, password: String) -> String? {
         guard let user = jsonString(username), let secret = jsonString(password) else {
             return nil
@@ -56,7 +56,7 @@ enum PasswordFill {
                 window.webkit.messageHandlers.skyscraperPassword.postMessage(
                     Object.assign({ kind: kind }, payload || {})
                 );
-            } catch (e) { /* ハンドラが無い（世界が違う）時は黙る */ }
+            } catch (e) { /* ハンドラが無い (世界が違う) 時は黙る */ }
         };
 
         // 人の目に触れている入力欄か。
@@ -136,7 +136,7 @@ enum PasswordFill {
             });
         };
 
-        // ページが仕込んだ焦点移動では出さない（isTrusted）。
+        // ページが仕込んだ焦点移動では出さない (isTrusted)。
         // ここを見ないと、目に見えない欄へ勝手に焦点を移して一覧を出させ、
         // 記入を誘う手が通ってしまう
         document.addEventListener('focusin', (event) => {

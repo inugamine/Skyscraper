@@ -5,13 +5,13 @@
 //  ⇧⌘A。開いている全ての窓のタブを串刺しで探して飛ぶ。
 //
 //  ── なぜ別立てなのか ──
-//  アドレスバーの候補一覧（AddressSuggestions）にも「開いているタブ」は
+//  アドレスバーの候補一覧 (AddressSuggestions) にも「開いているタブ」は
 //  出るが、あちらは自分の窓の中だけを見ている。
 //  窓を三枚も開くと「どこかで開いたはずのあのページ」を探す手が無くなる。
 //  こちらは TabManager.openWindows を全部歩く。
 //
 //  飛び先が別の窓だった場合は、その窓を前に出してから選ぶ。
-//  窓の実体は TabManager が持っていない（持ち主は SwiftUI）ので、
+//  窓の実体は TabManager が持っていない (持ち主は SwiftUI) ので、
 //  タブの WebView が載っている NSWindow を借りる——
 //  全タブは ZStack に常時マウントされているので、必ず窓に載っている。
 //
@@ -186,7 +186,7 @@ struct TabSearchField: NSViewRepresentable {
 
 // 窓いっぱいに暗幕を張って、その真ん中に出す。
 // シートにしないのは、⇧⌘A で開いて Esc で消えるまでの往復を
-// できるだけ軽くしたいからだ（シートは出入りに間がある）
+// できるだけ軽くしたいから。(シートは出入りに間がある)
 struct TabSearchPanel: View {
     @ObservedObject var manager: TabManager
 
@@ -342,7 +342,7 @@ struct TabSearchPanel: View {
         .contentShape(Rectangle())
         // Button ではなく onTapGesture なのは、押した拍子に
         // first responder が打ち込み欄から奪われるのを避けるためだ
-        //（アドレスバーの候補一覧と同じ判断）
+        // (アドレスバーの候補一覧と同じ判断)
         .onTapGesture { activate(match) }
         .onHover { inside in
             if inside { selection = index }
@@ -361,7 +361,7 @@ struct TabSearchPanel: View {
         TabManager.reveal(tabID: match.id)
     }
 
-    // ↑↓。端まで来たら巻き戻す（候補一覧と同じ流儀）
+    // ↑↓。端まで来たら巻き戻す (候補一覧と同じ流儀)
     private func move(_ offset: Int) -> Bool {
         let count = matches.count
         guard count > 0 else { return true }

@@ -2,7 +2,7 @@
 //  PrivacyManager.swift
 //  Skyscraper
 //
-//  閲覧データ（キャッシュ・Cookie 等)の削除を担う管理役。
+//  閲覧データ (キャッシュ・Cookie 等) の削除を担う管理役。
 //
 
 import Foundation
@@ -14,8 +14,8 @@ final class PrivacyManager: ObservableObject {
 
     // 削除の種類
     enum Scope: Identifiable {
-        case cache      // キャッシュのみ（ログインは残る）
-        case cookies    // Cookie のみ（ログインが切れる）
+        case cache      // キャッシュのみ (ログインは残る)
+        case cookies    // Cookie のみ (ログインが切れる)
         case all        // 閲覧データすべて
 
         var id: String { title }
@@ -43,7 +43,7 @@ final class PrivacyManager: ObservableObject {
         var dataTypes: Set<String> {
             switch self {
             case .cache:
-                // OfflineWebApplicationCache（AppCache）は macOS 26.2 で廃止。
+                // OfflineWebApplicationCache (AppCache) は macOS 26.2 で廃止。
                 // 仕様自体がなくなっているので、外しても消し残しは出ない
                 return [
                     WKWebsiteDataTypeDiskCache,
@@ -58,17 +58,17 @@ final class PrivacyManager: ObservableObject {
         }
     }
 
-    // 確認ダイアログに出す対象（nil なら非表示）
+    // 確認ダイアログに出す対象 (nil なら非表示)
     @Published var pendingScope: Scope? = nil
     // 「削除しました」の一言表示
     @Published var lastClearedMessage: String? = nil
 
-    // 確認を求める（設定画面のボタンから呼ばれる）
+    // 確認を求める (設定画面のボタンから呼ばれる)
     func requestClear(_ scope: Scope) {
         pendingScope = scope
     }
 
-    // 実際に削除する（確認ダイアログの「削除」から呼ばれる)
+    // 実際に削除する (確認ダイアログの「削除」から呼ばれる)
     func performClear(_ scope: Scope) async {
         let store = WKWebsiteDataStore.default()
         let types = scope.dataTypes
@@ -84,7 +84,7 @@ final class PrivacyManager: ObservableObject {
     }
 
     // 現在地のサイト別許可を全部忘れる。
-    // 上のトグル自体には手を触れない（切るのと忘れるのは別の話だ）
+    // 上のトグル自体には手を触れない (切るのと忘れるのは別の話だ)
     func resetLocationPermissions() {
         GeolocationStore.shared.reset()
         flash(String(localized: "Done. Location permissions have been reset."))
@@ -104,7 +104,7 @@ final class PrivacyManager: ObservableObject {
     }
 
     // 「このサイトでは訊かない」を忘れる。
-    // 預かっているパスワードそのものには手を触れない（消すのは一覧の画面から）
+    // 預かっているパスワードそのものには手を触れない (消すのは一覧の画面から)
     func resetPasswordNeverList() {
         PasswordNeverList.shared.reset()
         flash(String(localized: "Done. Password prompts have been reset."))

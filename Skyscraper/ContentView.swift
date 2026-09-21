@@ -27,7 +27,7 @@ enum Deco {
     // 警告に使う錆色。
     // 信号機の赤をそのまま持ち込むと盤全体の色調が壊れるので、
     // 金の隣に置いても喧嘩しないテラコッタに寄せてある。
-    // 使い道は鍵の警告表示だけだ（乱発すれば意味が消える）
+    // 使い道は鍵の警告表示だけ (乱発すれば意味が消える)
     static let rust      = Color(red: 0xb5/255, green: 0x6a/255, blue: 0x3c/255)
 }
 
@@ -111,25 +111,25 @@ struct Sunburst: Shape {
     }
 }
 
-// 扇を横に連ねた飾り罫（フリーズ）。ロゴ下の区切りに使う。
+// 扇を横に連ねた飾り罫 (フリーズ)。ロゴ下の区切りに使う。
 // 各扇は根元がすぼまったパルメット形（釣鐘を逆さにした輪郭）
 struct FanFrieze: Shape {
     var fans: Int = 5       // 手前の段の扇の個数
     var rays: Int = 4       // 各扇の放射線の本数
-    var overlap: CGFloat = 0.62  // 扇の幅（step に対する半径の比）
-    var tiers: Int = 1      // 段数（2 で鱗紋になる）
+    var overlap: CGFloat = 0.62  // 扇の幅 (step に対する半径の比)
+    var tiers: Int = 1      // 段数 (2 で鱗紋になる)
 
-    // 弧の振り幅。深く回して胴を膨らませる（両端は中心から sin150°=0.5r 下）
+    // 弧の振り幅。深く回して胴を膨らませる (両端は中心から sin150°=0.5r 下)
     private let startDeg = 150.0
     private let endDeg   = 390.0
-    // 要（根元）は円の中心から半径×1.15 下。弧端（0.5r）との差が絞りの深さになる
+    // 要 (根元) は円の中心から半径×1.15 下。弧端 (0.5r) との差が絞りの深さになる
     private let pinchDrop: CGFloat = 1.15
 
     func path(in rect: CGRect) -> Path {
         var p = Path()
         let step = rect.width / CGFloat(max(fans, 1))
         // 扇一つの全高は (1 + pinchDrop) × 半径。段の持ち上げも足して果に収める
-        let lift: CGFloat = 0.85   // 奧の段の持ち上げ（半径比）。絞った根元が谷に深く収まる
+        let lift: CGFloat = 0.85   // 奧の段の持ち上げ (半径比)。絞った根元が谷に深く収まる
         let unitH = 1 + pinchDrop
         let maxRadius = tiers > 1 ? rect.height / (unitH + lift) : rect.height / unitH
         let radius = min(step * overlap, maxRadius)
@@ -186,7 +186,7 @@ struct FanFrieze: Shape {
 
 // MARK: - ロビーの額縁飾り
 
-// 四隅の飾り。入れ子のL字罫＋対角に降りる段々（ビルの写し）
+// 四隅の飾り。入れ子のL字罫＋対角に降りる段々 (ビルの写し)
 // 左上向きに描き、他の隅は反転で使い回す
 struct CornerOrnament: Shape {
     func path(in rect: CGRect) -> Path {
@@ -201,7 +201,7 @@ struct CornerOrnament: Shape {
             p.addLine(to: CGPoint(x: s, y: inset))
         }
 
-        // 対角に降りる階段（段々ビルのモチーフを隅に落とし込む）
+        // 対角に降りる階段 (段々ビルのモチーフを隅に落とし込む)
         let step = s * 0.11
         var pt = CGPoint(x: s * 0.92, y: s * 0.36)
         p.move(to: pt)
@@ -241,7 +241,7 @@ struct LobbyFrame: View {
                               y: geo.size.height - pad - corner / 2)
             }
         }
-        // 飾りはクリックを拾わない（下のボタン操作を邪魔しない）
+        // 飾りはクリックを拾わない (下のボタン操作を邪魔しない)
         .allowsHitTesting(false)
     }
 
@@ -258,7 +258,7 @@ struct LobbyFrame: View {
 }
 
 // 扇の両脇に置く、外に向かって降りる段々の袖。
-// 高い辺が左（扇寄り）の右袖を描き、左袖は反転で使い回す
+// 高い辺が左 (扇寄り) の右袖を描き、左袖は反転で使い回す
 struct SteppedWing: Shape {
     var steps: Int = 4
     func path(in rect: CGRect) -> Path {
@@ -283,7 +283,7 @@ struct SteppedWing: Shape {
 // ロビー下端中央の扇飾り。既存の Sunburst を流用し、
 // 両脇に段々の袖、要にダイヤを一粒置く
 struct LobbyBottomFan: View {
-    // 袖のグラデーション：内（扇寄り）が明るく、外に向かって沈む。
+    // 袖のグラデーション：内 (扇寄り) が明るく、外に向かって沈む。
     // 左袖は反転で描くので、同じ定義のまま左右対称になる
     private let wingGradient = LinearGradient(
         colors: [Deco.gold, Deco.gold.opacity(0.25)],
@@ -300,7 +300,7 @@ struct LobbyBottomFan: View {
 
                 Sunburst(rays: 7, arcRatios: [1.0, 0.62])
                     .stroke(
-                        // 要（下）を明るく、先端（上）を闇に沈ませる
+                        // 要 (下) を明るく、先端 (上) を闇に沈ませる
                         LinearGradient(colors: [Deco.gold.opacity(0.30), Deco.gold],
                                        startPoint: .top, endPoint: .bottom),
                         lineWidth: 1
@@ -333,7 +333,7 @@ struct Bookmark: Identifiable, Codable, Hashable {
     // 階層は描く直前に BookmarkTree が組み直すので、
     // 並べ替えも重複判定も今までの仕組みがそのまま生きる。
     //
-    // Optional にしてあるのは古い保存を壊さないためだ。
+    // Optional にしてあるのは古い保存を壊さないため。
     // 自動生成の Codable は、非 Optional の項目の鍵が無いと
     // 既定値に落ちず keyNotFound を投げる。下の init は try? で
     // 受けているので、それをやると保存済みが丸ごと消える
@@ -351,7 +351,7 @@ final class BookmarkStore: ObservableObject {
 
     // iCloud への持ち回り役。こちらが強く持ち、あちらは弱く持ち返す。
     //
-    // 下の init で後回しに結んでいるのは、BookmarkSync が self を要るからだ。
+    // 下の init で後回しに結んでいるのは、BookmarkSync が self を必要とするから。
     // 全ての持ち物が埋まるまで self は渡せない
     private var sync: BookmarkSync?
 
@@ -444,7 +444,7 @@ final class BookmarkStore: ObservableObject {
     }
 
     // 取り込みを引っ返す時の逃げ道。
-    // 一件ずつ押して消すのは十件で限界だ
+    // 一件ずつ押して消すのは十件で限界
     func deleteAll() {
         guard !bookmarks.isEmpty else { return }
         bookmarks = []
@@ -479,11 +479,11 @@ final class BookmarkStore: ObservableObject {
 
 // 素の WKWebView は、右クリックの「画像をダウンロード」「リンク先のファイルをダウンロード」を
 // 選んでも WKDownloadDelegate を一切呼ばず、内部で保存先が決まらないまま
-// "Could not create a sandbox extension for ''" を吐いて黙って失敗する（WebKit の既知の不具合）。
+// "Could not create a sandbox extension for ''" を吐いて黙って失敗する (WebKit の既知の不具合)。
 // そこで右クリック位置を控えておき、該当メニュー項目の飛び先を自前の処理に差し替えて、
-// startDownload(using:) で既存のダウンロード経路（NSSavePanel の流れ）に合流させる。
+// startDownload(using:) で既存のダウンロード経路 (NSSavePanel の流れ) に合流させる。
 final class SkyscraperWebView: WKWebView {
-    // 直近の右クリック位置（CSS ピクセル・左上原点）。elementFromPoint に渡す
+    // 直近の右クリック位置 (CSS ピクセル・左上原点)。elementFromPoint に渡す
     private var lastRightClick: CGPoint = .zero
 
     override func rightMouseDown(with event: NSEvent) {
@@ -558,7 +558,7 @@ final class SkyscraperWebView: WKWebView {
 // 全画面再生に入ると、WebKit は WKWebView を別ウィンドウへ引っこ抜き、
 // 終わったら元の親に戻す。親が SwiftUI の管理下だと、SwiftUI は
 // 「子が居ない」と見て即座に引き戻し、WebKit は梯子を外されて
-// 全画面を諦める（一瞬だけ大画面になって戻る症状）。
+// 全画面を諦める (一瞬だけ大画面になって戻る症状)。
 // SwiftUI にはこの器だけを見せ、WKWebView の出入りは見せない。
 final class WebViewContainer: NSView {
     // 裏タブの WebView がクリックを拾わないよう、AppKit の層でも遮断する
@@ -588,11 +588,11 @@ struct WebView: NSViewRepresentable {
         // opacity(0) だけだと、ビュー階層上は「窓に載ってて hidden でない」
         // ままなので、WebKit は全タブを表示中だと見なす。すると裏タブで
         // 動画が鳴っている間、WebCore が自前で
-        // PreventUserIdleDisplaySleep（"HTMLMediaElement playback"）を握り続け、
+        // PreventUserIdleDisplaySleep ("HTMLMediaElement playback") を握り続け、
         // こちらが SleepBlocker で手を放しても画面が寝ない。
         // 描画も全タブ分回り続けるので、そもそも無駄が多い。
         //
-        // 隠すのは WKWebView 本体ではなくこの器の方だ。
+        // 隠すのは WKWebView 本体ではなくこの器の方。
         // 全画面再生に入ると WebKit は WKWebView を別の窓へ引っこ抜くので、
         // 本体に isHidden を立てると大画面が真っ黒になる。
         // 器なら、引っこ抜かれている間は中身と縁が切れているので影響しない。
@@ -605,7 +605,7 @@ struct WebView: NSViewRepresentable {
         //
         // 全画面の出入りでは WebKit が自分で親を付け替え、終わったら
         // 元の器に戻す。その途中でこちらが付け直しに行くと、全画面が
-        // 即座に中断される（一瞬だけ大画面になって戻る症状）。
+        // 即座に中断される (一瞬だけ大画面になって戻る症状)。
         //
         // fullscreenState を見て避けようとしたが、引っこ抜きと
         // 状態の切り替わりには隙間があり、そこを踏むと
@@ -613,7 +613,7 @@ struct WebView: NSViewRepresentable {
         // 「迷子」と誤判して引き戻してしまう。
         // 再描画が頻繁なページ（X など）でだけ再現するのはこのせい。
         //
-        // 後始末は WebKit の仕事だ。任せる
+        // 後始末は WebKit の仕事なので任せる
     }
 
     // 制約ではなく autoresizing で押さえる。
@@ -648,14 +648,14 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // 設定は必ず生成前に済ませる。
     //
     // let ではなく var なのは、しばらく触られていないタブを畳む時に
-    // 一度捨て、戻ってきた時に作り直すためだ。
-    // 差し替えるのはこのファイルの中からだけ（private(set)）
+    // 一度捨て、戻ってきた時に作り直すため。
+    // 差し替えるのはこのファイルの中からだけ (private(set))
     private(set) var webView: WKWebView
 
     // WKWebView の器を作る。
     // popup が渡された場合は、WebKit が用意した設定をそのまま使う。
     // 自前の設定で作り直すと window.opener の関係が結ばれず、
-    // 「開いた窓が親に結果を返す」流れ（OAuth など）が成立しない
+    // 「開いた窓が親に結果を返す」流れ (OAuth など) が成立しない
     private static func makeWebView(_ popup: WKWebViewConfiguration?,
                                     dataStore: WKWebsiteDataStore?) -> WKWebView {
         let configuration = popup ?? WKWebViewConfiguration()
@@ -685,7 +685,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         if configuration.webExtensionController == nil {
             configuration.webExtensionController = WebExtensionManager.shared.controller
         }
-        // 動画の全画面ボタン（Fullscreen API）を使えるようにする。
+        // 動画の全画面ボタン (Fullscreen API) を使えるようにする。
         // macOS の WKWebView はこれが既定で無効で、ページが
         // requestFullscreen() を呼んでも黙って拒否される（おかげで
         // YouTube も X も大画面ボタンが無反応になる）
@@ -698,7 +698,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         // ピクチャ・イン・ピクチャはここでは開けない。
         // iOS には allowsPictureInPictureMediaPlayback があるが、
         // macOS の WKWebViewConfiguration / WKPreferences には相当する
-        // 公開項目が無い（macOS 26 SDK で確認済み）。
+        // 公開項目が無い。(macOS 26 SDK で確認済み)
         // 標準の requestPictureInPicture() は呼べるが NotSupportedError を返し、
         // 素の <video controls> でさえ WebKit 純正の操作盤に PiP ボタンが出ない。
         // つまり WKWebView 自体で無効化されている。
@@ -723,11 +723,11 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // 並び順の面倒は TabManager が見る——タブは自分が何番目かを知らない。
     //
     // TabGrouper にも pinned という名前があるが、あちらは
-    // 「自動グループ化で上書きしない」印で、こことは別物だ
+    // 「自動グループ化で上書きしない」印で、こことは別物
     @Published var isPinned: Bool = false
-    // 疑似大画面（シアター）中か。サイドバーやバー類の隠しに使う
+    // 疑似大画面 (シアター) 中か。サイドバーやバー類の隠しに使う
     @Published var isVideoFullscreen: Bool = false
-    // リーダーモードが使えるページか（Readability の判定器による）
+    // リーダーモードが使えるページか (Readability の判定器による)
     @Published var isReaderAvailable: Bool = false
     // リーダーモード表示中か
     @Published var isReaderActive: Bool = false
@@ -735,11 +735,11 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     @Published var isFindBarVisible: Bool = false
     // 検索語
     @Published var findQuery: String = ""
-    // 直近の検索が空振りしたか（入力欄の色を落とす合図）
+    // 直近の検索が空振りしたか (入力欄の色を落とす合図)
     @Published var findNotFound: Bool = false
-    // 検索欄に焦点を移す合図（⌘F のたびに増える）
+    // 検索欄に焦点を移す合図 (⌘F のたびに増える)
     @Published var findFocusTrigger: Int = 0
-    // ブロックしたポップアップ（知らせバーに出す）
+    // ブロックしたポップアップ (知らせバーに出す)
     @Published var blockedPopups: [BlockedPopup] = []
 
     // 今マウスが乗っているリンクの飛び先。nil なら帯を出さない。
@@ -752,7 +752,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // 帯の下敷きになる辺りにリンクが居る。帯を右下へ逃がす合図
     @Published var hoverFlipped: Bool = false
 
-    // このタブの絵札（ファビコン）。
+    // このタブのファビコン
     // 器とは別にこちらが持つので、タブを畳んでも絵は消えない
     @Published var favicon: NSImage?
 
@@ -787,20 +787,20 @@ final class Tab: NSObject, ObservableObject, Identifiable {
 
     // 失敗した宛先。やり直しに使う。
     // WKWebView は commit していない読み込みを覚えていないので、
-    // reload() を呼んでも何も起きない（＝自前で持つしかない）
+    // reload() を呼んでも何も起きない (＝自前で持つしかない)
     private var failedURL: URL?
 
-    // ⌘クリックされたリンクを新規タブで開くための連絡先（TabManager が入れる）
+    // ⌘クリックされたリンクを新規タブで開くための連絡先 (TabManager が入れる)
     var openInNewTab: ((String) -> Void)?
 
-    // window.open() で新しい器を求められた時の連絡先（TabManager が入れる）。
+    // window.open() で新しい器を求められた時の連絡先 (TabManager が入れる)
     // 返された WKWebView をそのまま WebKit に渡す
     var openPopup: ((WKWebViewConfiguration) -> WKWebView?)?
 
-    // window.close() で自分を畳むための連絡先（TabManager が入れる）
+    // window.close() で自分を畳むための連絡先 (TabManager が入れる)
     var requestClose: (() -> Void)?
 
-    // 自分を前に出してもらうための連絡先（TabManager が入れる）。
+    // 自分を前に出してもらうための連絡先。(TabManager が入れる)
     // 裏のタブが alert() を出した時に使う——見えていないページの問いに
     // 答えろと言われても、利用者には何のことか分からない
     var requestActivate: (() -> Void)?
@@ -811,7 +811,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // そのタブが選ばれた時まで先送りにする（Safari と同じ方式）
     private var pendingURL: String?
 
-    // 先送りにしている履歴の復元（interactionState）。
+    // 先送りにしている履歴の復元。(interactionState)
     // これを WKWebView に入れた瞬間 WebKit が自分で読み込みを始めるので、
     // 遅延読み込みと併せる場合はここに控えておく
     private var pendingInteractionState: Data?
@@ -820,15 +820,15 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     private var savedZoom: CGFloat = 1.0
 
     // 最後に見られていた時刻。自動で畳む際の物差しに使う。
-    // @Published にしないのは、これが動くたびに盤を描き直す理由が無いからだ
+    // @Published にしないのは、これが動くたびに盤を描き直す理由が無いから
     private(set) var lastActiveAt = Date()
 
     func noteActivity() { lastActiveAt = Date() }
 
-    // MARK: - 絵札（ファビコン）
+    // MARK: - ファビコン
 
     // 今映しているページのホスト。
-    // ロビーや file:// では nil（絵札の取りようがない）
+    // ロビーや file:// では nil（ファビコンの取りようがない）
     private var faviconTargetHost: String? {
         let text = webView.url?.absoluteString ?? urlText
         guard let url = URL(string: text),
@@ -837,7 +837,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         return host
     }
 
-    // 手元にあるものだけで絵札を決める。通信はしない。
+    // 手元にあるものだけでファビコンを決める。通信はしない。
     //
     // セッション復元の直後はここが効く——まだ何も読んでいないタブでも
     // 番地は持っているので、帯には最初から絵が並ぶ
@@ -869,13 +869,12 @@ final class Tab: NSObject, ObservableObject, Identifiable {
 
         webView.evaluateJavaScript(Self.faviconLinkScript) { [weak self] result, _ in
             // Task に入る前に let へ落とす。
-            // weak のまま跨ぐと Swift 6 に叱られる（wire の見張りと同じ理屈）
+            // weak のまま跨ぐと Swift 6 に叱られる (wire の見張りと同じ理屈)
             guard let self else { return }
             let links = (result as? [String])?.compactMap { URL(string: $0) } ?? []
             Task { @MainActor in
                 // プライベートウィンドウではディスクに焼き付けない。
-                // 絵札がディスクに残るのは、訪れたホスト名が
-                // ディスクに残るということだ
+                // ファビコンがディスクに残るのは、訪れたホスト名がディスクに残るということ
                 let image = await FaviconStore.shared.icon(for: host,
                                                            candidates: links,
                                                            allowDiskWrite: !self.isPrivate,
@@ -890,8 +889,8 @@ final class Tab: NSObject, ObservableObject, Identifiable {
 
     // ページから <link rel="icon"> の宛先を拾う。
     //
-    // 拾うのは在り処だけだ。画像の実体をここで fetch すると
-    // CORS で死ぬので、取りに行くのはアプリ側だ（FaviconStore.swift の冒頭参照）
+    // 拾うのは在り処だけ。画像の実体をここで fetch すると
+    // CORS で死ぬので、取りに行くのはアプリ側。(FaviconStore.swift の冒頭参照)
     private static let faviconLinkScript = """
     (() => {
         const out = [];
@@ -921,11 +920,11 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     let isPrivate: Bool
 
     // どのプロファイルのタブか。nil なら既定。
-    // 生まれた時に決まり、後から変わらない（置き場が器に焼き付くため）。
+    // 生まれた時に決まり、後から変わらない。 (置き場が器に焼き付くため)
     // プライベートのタブでは常に nil——あちらの置き場が優先される
     let profileID: UUID?
 
-    // サイトごとの記憶を誰の分として持つか（Profile.swift の DataScope）。
+    // サイトごとの記憶を誰の分として持つか。(Profile.swift の DataScope)
     // 許可・例外・「訊かない」を預かるストアは全部これを受け取る
     var scope: DataScope {
         if isPrivate { return .session }
@@ -949,9 +948,9 @@ final class Tab: NSObject, ObservableObject, Identifiable {
 
     // パスキー（WebAuthn）の橋渡し役。実体は PasskeyManager.swift
     private let passkeyBridge = PasskeyBridge()
-    // 位置情報の取次ぎ。タブごとに一人（CLLocationManager を抱える）。
+    // 位置情報の取次ぎ。タブごとに一人。(CLLocationManager を抱える)
     //
-    // passkeyBridge と違って fileprivate なのは、タブを捨てる側（TabManager）から
+    // passkeyBridge と違って fileprivate なのは、タブを捨てる側 (TabManager)から
     // 待たせている依頼を畳みたいからだ。放っておいても dealloc で止まるが、
     // それまでメニューバーの位置情報の矢印が点いたままになる
     fileprivate let geolocation = GeolocationProvider()
@@ -967,7 +966,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // 差し出されたサーバ証明書の控え（ホストごと）。
     //
     // ここにあることは「通した」を意味しない。検証は WebKit に任せたままで、
-    // こちらは提示された一枚を控えておくだけだ。
+    // こちらは提示された一枚を控えておくだけ。
     // 鍵の盤で中身を見せる時と、顛末書の「危険を承知で続行」を
     // 押された時に、見せる材料が無いと話にならない。
     //
@@ -1031,15 +1030,15 @@ final class Tab: NSObject, ObservableObject, Identifiable {
                     }, true);
                 });
 
-                // ── 疑似大画面（シアター）──
+                // ── 疑似大画面 (シアター) ──
                 // X は本物の全画面に入ると、イベント・getter・Promise・
                 // resize・焦点を全て偽装しても約150msでプレイヤーの DOM を
-                // 作り直し、全画面中の要素が消えて強制解除される
-                // （経路はページ側 JS から偽装できない場所にある）。
+                // 作り直し、全画面中の要素が消えて強制解除される。
+                // (経路はページ側 JS から偽装できない場所にある)
                 // なので本物の全画面は使わず、requestFullscreen を横取りして
                 // CSS で要素をウィンドウいっぱいに広げる。ページには何も
                 // 起きていないので、原理的に気付かれない。
-                // ウィンドウ自体の全画面化はアプリ側（skyscraperFullscreen）が担う
+                // ウィンドウ自体の全画面化はアプリ側 (skyscraperFullscreen) が担う
                 const theaterStyle = document.createElement('style');
                 theaterStyle.textContent =
                     '.__skyscraper-theater { position: fixed !important; inset: 0 !important; ' +
@@ -1089,7 +1088,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
 
                 // ── カーソルの自動消灯 ──
                 // 映画館方式：止まって2.5秒で消え、動かせば即座に戻る。
-                // 一時停止中は消さない（コントロール操作の邪魔になる）
+                // 一時停止中は消さない (コントロール操作の邪魔になる)
                 let theaterCursorTimer = null;
                 const theaterCursorHide = () => {
                     if (!theaterTarget) { return; }
@@ -1115,9 +1114,9 @@ final class Tab: NSObject, ObservableObject, Identifiable {
                     theaterScrollY = window.scrollY;
                     element.classList.add('__skyscraper-theater');
                     // position: fixed は、先祖に transform 等を持つ要素が居ると
-                    // ビューポートではなくその先祖基準になる（X はセルの配置に
-                    // transform を使う）。在場中だけ先祖全員の transform ・
-                    // z-index などを無効化して、fixed を本来の意味に戻す
+                    // ビューポートではなくその先祖基準になる。
+                    // （X はセルの配置transform を使う)
+                    // 在場中だけ先祖全員の transform ・ z-index などを無効化して、fixed を本来の意味に戻す。
                     theaterAncestors = [];
                     let node = element.parentElement;
                     while (node && node !== document.documentElement) {
@@ -1132,9 +1131,9 @@ final class Tab: NSObject, ObservableObject, Identifiable {
                     theaterHide();
                     // X は全画面移行の前置きとして動画を一時停止することがある。
                     // 本物の全画面は永遠に来ないので、再開の合図も永遠に来ない。
-                    // 入場時に起こし、直後（移行処理の残り）の一時停止も
+                    // 入場時に起こし、直後 (移行処理の残り) の一時停止も
                     // 1.2 秒だけ見張って起こし直す。
-                    // （その後の一時停止は本人の操作と見なして触らない）
+                    // (その後の一時停止は本人の操作と見なして触らない)
                     const theaterVideo = element.querySelector('video');
                     if (theaterVideo) {
                         const resume = () => { theaterVideo.play().catch(() => {}); };
@@ -1179,12 +1178,11 @@ final class Tab: NSObject, ObservableObject, Identifiable {
                     // X のボタンは fullscreenElement（常に null）を見て毎回
                     // 「入る」を呼ぶので、ここでトグルにする
                     if (theaterTarget) { theaterExit(); } else { theaterEnter(this); }
-                    // 解決を渡すと X が全画面用の組み直しを始めて要素を消すので、
-                    // 永遠に確定しない Promise で黙らせる
+                    // 解決を渡すと X が全画面用の組み直しを始めて要素を消すので、永遠に確定しない Promise で黙らせる
                     return new Promise(() => {});
                 };
 
-                // Esc で退場（X には渡さない）
+                // Esc で退場 (X には渡さない)
                 document.addEventListener('keydown', event => {
                     if (event.key === 'Escape' && theaterTarget) {
                         event.stopImmediatePropagation();
@@ -1202,7 +1200,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
                 // 在場中の DOM 変化の見張り。
                 // ・対象ノードが差し替えで消えたら、道連れにせず畳む
                 // ・新しく生えた・作り直された要素は即座に隠し直す
-                //   （クリックで X が右欄などを再生成しても浮いてこない）
+                //   (クリックで X が右欄などを再生成しても浮いてこない)
                 new MutationObserver(() => {
                     if (!theaterTarget) { return; }
                     if (!theaterTarget.isConnected) { theaterExit(); return; }
@@ -1359,9 +1357,8 @@ final class Tab: NSObject, ObservableObject, Identifiable {
 
     // YouTube の動画広告を読み飛ばすスクリプト。
     // 広告は本編と同じ googlevideo.com から来るので通信では遮断できない。
-    // 代わりにプレイヤーを監視し、広告中（.ad-showing）は広告動画を
-    // 末尾まで早送りしてスキップボタンを押す。
-    // クラス名は YouTube の改修で変わりうる（壊れたらここを直す）
+    // 代わりにプレイヤーを監視し、広告中 (.ad-showing) は広告動画を末尾まで早送りしてスキップボタンを押す。
+    // クラス名は YouTube の改修で変わりうる (壊れたらここを直す)
     private static let youtubeAdSkipScript = WKUserScript(
         source: """
         (() => {
@@ -1373,12 +1370,12 @@ final class Tab: NSObject, ObservableObject, Identifiable {
             const skip = () => {
                 const player = document.querySelector('.html5-video-player');
                 if (!player || !player.classList.contains('ad-showing')) { return; }
-                // 広告動画を末尾まで飛ばす（連続広告でも1本ずつ処理される）
+                // 広告動画を末尾まで飛ばす (連続広告でも1本ずつ処理される)
                 const video = player.querySelector('video');
                 if (video && isFinite(video.duration) && video.duration > 0) {
                     video.currentTime = video.duration;
                 }
-                // スキップボタンが出ていれば押す（名前は世代でよく変わる）
+                // スキップボタンが出ていれば押す (名前は世代でよく変わる)
                 const btn = player.querySelector(
                     '.ytp-skip-ad-button, .ytp-ad-skip-button, .ytp-ad-skip-button-modern'
                 );
@@ -1391,9 +1388,9 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         forMainFrameOnly: true
     )
 
-    // deferLoad が真なら、URL は控えるだけで読み込まない（セッション復元用）。
+    // deferLoad が真なら、URL は控えるだけで読み込まない (セッション復元用)。
     // title は復元直後のサイドバー表示に使う仮の題名
-    // interactionState を渡せば、戻る／進むの履歴ごと引き継ぐ（閉じたタブの復元用）
+    // interactionState を渡せば、戻る／進むの履歴ごと引き継ぐ (閉じたタブの復元用)
     init(url: String? = nil,
          title: String = "",
          deferLoad: Bool = false,
@@ -1442,13 +1439,13 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         // WebKit はこれを明示的に許可しない限り外部からの接続を拒む
         webView.isInspectable = true
         // WKWebView 素の UA だと YouTube などに「古いブラウザ」と誤判定される。
-        // 実機 Safari（macOS 27 / Version 27.0）の UA を名乗って回避する。
+        // 実機 Safari (macOS 27 / Version 27.0) の UA を名乗って回避する。
         // OS 部分の 10_15_7 は Safari 自身が凍結している値なので、これで正しい
         webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Safari/605.1.15"
         // 広告の空枠を隠す。
-        // 通信の遮断自体は拡張機能（uBOL）が受け持つので、
+        // 通信の遮断自体は拡張機能 (uBOL) が受け持つので、
         // こちらは遮られた後に残る国内サイト固有の枠を掃除する。
-        // YouTube には当てない（当てると再生が止まる）。
+        // YouTube には当てない (当てると再生が止まる)。
         // 詳しい分担は AdBlocker.swift の冒頭に書いた
         AdBlocker.shared.apply(to: webView)
         webView.navigationDelegate = self
@@ -1482,7 +1479,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
             name: SleepBlocker.messageHandlerName
         )
         // パスキー：polyfill の注入と、返信付きハンドラの登録。
-        // 横取り対象（navigator.credentials）はページ本来の世界に居るので .page
+        // 横取り対象 (navigator.credentials) はページ本来の世界に居るので .page
         passkeyBridge.webView = webView
         webView.configuration.userContentController.addUserScript(PasskeyBridge.userScript)
         webView.configuration.userContentController.addScriptMessageHandler(
@@ -1499,20 +1496,20 @@ final class Tab: NSObject, ObservableObject, Identifiable {
             name: PasswordFill.messageHandlerName
         )
         // 位置情報：navigator.geolocation の差し替えと、依頼の受け口。
-        // 横取り対象はページ本来の世界に居るので .page（既定）に仕込む。
+        // 横取り対象はページ本来の世界に居るので .page (既定) に仕込む。
         // WebKit 素の実装は公開の許可口を持たず即拒否するだけなので、
         // 丸ごとこちらで受ける。詳しくは Geolocation.swift の冒頭に書いた
         geolocation.webView = webView
         geolocation.scope = scope
-        // HTTP 認証の窓も同じ射程を見る（「訊かない」の印の照合）
+        // HTTP 認証の窓も同じ射程を見る (「訊かない」の印の照合)
         httpAuth.scope = scope
         webView.configuration.userContentController.addUserScript(GeolocationProvider.userScript)
         // 門番は別の世界に、全フレームへ。
-        // こちらはページ側の JS から見えない（見えたら門番にならない）
+        // こちらはページ側の JS から見えない (見えたら門番にならない)
         webView.configuration.userContentController.addUserScript(GeolocationGuard.userScript)
-        // 門番が native にヘッダを訊く口。門番ワールドにしか登録しない（ページからは叩けない）。
+        // 門番が native にヘッダを訊く口。門番ワールドにしか登録しない。(ページからは叩けない)
         // 受け手はタブごとの provider 自身。強参照で持たれるが、
-        // removeAllScriptMessageHandlers で外れるので passkeyBridge と同じ扱いだ
+        // removeAllScriptMessageHandlers で外れるので passkeyBridge と同じ扱い
         webView.configuration.userContentController.addScriptMessageHandler(
             geolocation,
             contentWorld: GeolocationGuard.world,
@@ -1522,7 +1519,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
             WeakScriptMessageHandler(delegate: self),
             name: GeolocationProvider.messageHandlerName
         )
-        // KVO の通知は nonisolated な場（KVO が発火したスレッド）で届く。
+        // KVO の通知は nonisolated な場 (KVO が発火したスレッド) で届く。
         // [weak self] は仕組み上 `weak var self` なので、そのまま Task の中で
         // self? を触ると「並行実行のコードが var を跨いで参照している」扱いになり、
         // Swift 6 ではエラーになる。Task に入る前に let へ落としておく
@@ -1564,7 +1561,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
                     self.detectReaderAvailability()
                     self.refreshFavicon()
                 }
-                // ページ遷移後もミュートを貼り直す（スクリプトはページごとに入れ直るため）
+                // ページ遷移後もミュートを貼り直す (スクリプトはページごとに入れ直るため)
                 if !wv.isLoading, self.isMuted {
                     _ = try? await wv.evaluateJavaScript("window.__skyscraperSetMuted?.(true);")
                 }
@@ -1579,8 +1576,8 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // 最初に何を映すかを決める。
     //
     // 配線（wire）と別にしてあるのは、畳んだタブを起こす時には
-    // 配線だけをやり直し、中身は控えてある interactionState から
-    // 戻すからだ。両方を一つに混ぜると分けられなくなる
+    // 配線だけをやり直し、中身は控えてある interactionState から戻すから。
+    // 両方を一つに混ぜると分けられなくなる
     private func start(url: String?, title: String, deferLoad: Bool,
                        interactionState: Data?, isPopup: Bool) {
         if isPopup {
@@ -1636,13 +1633,13 @@ final class Tab: NSObject, ObservableObject, Identifiable {
 
     // 畳んでよいタブか。
     //
-    // ・ロビー（捨てる中身が無い）
-    // ・window.open() 生まれ（opener の縁が切れる）
+    // ・ロビー (捨てる中身が無い)
+    // ・window.open() 生まれ (opener の縁が切れる)
     // ・音を鳴らしている
     // ・既に畳んである、またはまだ一度も読んでいない
     //
-    // 選択中かどうかはここでは見ない——タブは自分が見られているかを
-    // 知らない。それは TabManager の仕事だ。
+    // 選択中かどうかはここでは見ない——タブは自分が見られているかを知らない。
+    // それは TabManager の仕事。
     //
     // ダウンロード進行中の扱いは未検証だ。WKDownload が器の死後も
     // 生きるなら何も要らないし、死ぬならここに一行足すことになる
@@ -1657,7 +1654,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
 
     // 履歴の控え。
     // 畳んでいる間は WKWebView が空なので、手元の控えを返す。
-    // 閉じたタブの復元（⇧⌘T）がここを見る
+    // 閉じたタブの復元 (⇧⌘T) がここを見る
     var restorableState: Data? {
         pendingInteractionState ?? webView.interactionState as? Data
     }
@@ -1666,7 +1663,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     //
     // WKWebView 一枚につき WebContent プロセスが一つ立つので、
     // 実メモリを返すには器そのものを捨てるしかない
-    //（about:blank を読ませてもプロセスは残る）。
+    // (about:blank を読ませてもプロセスは残る)。
     //
     // 戻る／進むの履歴とスクロール位置は interactionState に控えるが、
     // フォームの打ちかけは戻らない。ここは割り切る
@@ -1708,7 +1705,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
 
         // 空の器を据えて配線し直す。
         // ここで作り直しておけば、tab.webView を見る箇所
-        //（セッション保存・拡張機能・スリープ抑制）は
+        // (セッション保存・拡張機能・スリープ抑制) は
         // Optional を気にせず今まで通り動く
         webView = Tab.makeWebView(nil, dataStore: dataStore)
         wire()
@@ -1720,7 +1717,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         webViewGeneration &+= 1
     }
 
-    // 控えておいた履歴（戻る／進むの連なりとスクロール位置）を流し込む。
+    // 控えておいた履歴 (戻る／進むの連なりとスクロール位置) を流し込む。
     // interactionState は代入した時点で WebKit が読み込みを始めるので、
     // こちらから load() を重ねると同じページを履歴に積み直すことになる
     private func restore(_ state: Data) {
@@ -1741,7 +1738,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         guard let url = Tab.resolveURL(from: urlText) else { return }
         isHome = false
         // 別の行き先へ向かう。前の持ち上げの控えを連れて行かない
-        //（残しておくと、見切り役がこの読み込みを止めに来る）
+        // (残しておくと、見切り役がこの読み込みを止めに来る)
         finishUpgrade()
         // file:// は load(URLRequest:) だと、同じ階層の CSS や画像すら読めない
         //（WebKit がそのファイル一枚ぶんしかサンドボックス拡張を下ろさないため）。
@@ -1780,7 +1777,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         let text = input.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return nil }
 
-        // 絶対パス（/ か ~/ で始まる）が実在するなら file:// として開く。
+        // 絶対パス (/ か ~/ で始まる) が実在するなら file:// として開く。
         // Finder で ⌥⌘C したパスをそのまま貼れる。
         // URL(fileURLWithPath:) は空白入りのパスも正しく扱う。
         // 実在しない場合は検索語に落とすので、
@@ -1808,7 +1805,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
             return .search(text)
         }
 
-        // 空白が無く、ドットを含む（または localhost）ならホスト名とみなす
+        // 空白が無く、ドットを含む (または localhost) ならホスト名とみなす
         let looksLikeHost = !text.contains(" ")
             && (text.contains(".") || text.hasPrefix("localhost"))
         if looksLikeHost, let url = URL(string: "https://" + text) {
@@ -1858,7 +1855,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         return comps.url
     }
 
-    // ── 接続の格（アドレスバーの鍵）──
+    // ── 接続の格 (アドレスバーの鍵)──
 
     // 今このタブが何に繋がっているか。
     // urlText から見るので、番地が変わればそのまま鍵の色に届く。
@@ -1887,7 +1884,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         }
     }
 
-    // 控えてある証明書。無ければ nil（鍵の盤がその旨を出す）
+    // 控えてある証明書。無ければ nil (鍵の盤がその旨を出す)
     func serverTrust(for host: String) -> SecTrust? {
         serverTrusts[host]
     }
@@ -1895,13 +1892,13 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     func goBack()    { webView.goBack() }
     func goForward() { webView.goForward() }
 
-    // ── 戻る／進むの履歴（長押しメニュー用）──
+    // ── 戻る／進むの履歴 (長押しメニュー用)──
 
     // メニューに並べる上限。深いサイトだと数十件になり、
     // 画面の端まで伸びて選べなくなる
     private static let historyMenuLimit = 15
 
-    // どちらも「近い順」で返す（先頭が一つ前・一つ先）。
+    // どちらも「近い順」で返す。(先頭が一つ前・一つ先)
     // WKBackForwardList の backList は古い順なので、こちらで引っくり返す。
     // forwardList は元から近い順なのでそのまま
     var backHistory: [WKBackForwardListItem] {
@@ -1926,8 +1923,8 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         return text.count > 60 ? String(text.prefix(60)) + "…" : text
     }
 
-    // 顛末書が出ている間は WKWebView 側に読み込むものが無い
-    //（commit まで至らなかった読み込みは覚えられていない）。
+    // 顛末書が出ている間は WKWebView 側に読み込むものが無い。
+    // (commit まで至らなかった読み込みは覚えられていない)
     // 控えておいた宛先へ自分で行き直す
     func reload() {
         if let failedURL {
@@ -1936,8 +1933,8 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         }
         webView.reload()
     }
-    // ⇧⌘R：キャッシュを一切当てにせず取り直す（画像・CSS・JS まで全部）。
-    // reload() は検証（If-None-Match 等）で済ませることがあるが、
+    // ⇧⌘R：キャッシュを一切当てにせず取り直す。(画像・CSS・JS まで全部)
+    // reload() は検証 (If-None-Match 等) で済ませることがあるが、
     // こちらは WebKit のキャッシュを無視してオリジンに取りに行く
     func reloadFromOrigin() {
         if let failedURL {
@@ -1957,9 +1954,9 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         webView.evaluateJavaScript("window.__skyscraperSetMuted?.(\(isMuted));")
     }
 
-    // リーダーモードが使えるページかを判定する（読み込み完了時に呼ぶ）。
+    // リーダーモードが使えるページかを判定する。(読み込み完了時に呼ぶ)
     // 判定器がバンドルに無い場合は detectJS が "false;" になり、
-    // ボタンは永遠に出ない（静かに無効化）
+    // ボタンは永遠に出ない (静かに無効化)
     private func detectReaderAvailability() {
         webView.evaluateJavaScript(Reader.detectJS) { [weak self] result, error in
             if let error {
@@ -1992,7 +1989,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         }
     }
 
-    // 疑似大画面の出入り。ページ側（skyscraperFullscreen）から合図が来て、
+    // 疑似大画面の出入り。ページ側 (skyscraperFullscreen) から合図が来て、
     // ウィンドウの全画面化も連動させる
     func setVideoFullscreen(_ active: Bool) {
         guard active != isVideoFullscreen else { return }
@@ -2004,7 +2001,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         }
     }
 
-    // ズーム（ページの拡大率を 50%〜300% の範囲で変える）
+    // ズーム (ページの拡大率を 50%〜300% の範囲で変える)
     func zoomIn()    { setZoom(webView.pageZoom + 0.1) }
     func zoomOut()   { setZoom(webView.pageZoom - 0.1) }
     func zoomReset() { setZoom(1.0) }
@@ -2012,10 +2009,10 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         webView.pageZoom = min(max(value, 0.5), 3.0)
     }
 
-    // ── ページ内検索（⌘F）──
+    // ── ページ内検索 (⌘F)──
 
     // 検索バーを出して入力欄に焦点を移す。
-    // 既に出ている場合も全選択し直す（Safari と同じ）
+    // 既に出ている場合も全選択し直す (Safari と同じ)
     func showFindBar() {
         isFindBarVisible = true
         findFocusTrigger += 1
@@ -2024,7 +2021,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     func hideFindBar() {
         isFindBarVisible = false
         findNotFound = false
-        // WebKit が付けた強調（＝選択）を解いておく
+        // WebKit が付けた強調 (＝選択)を解いておく
         webView.evaluateJavaScript("window.getSelection()?.removeAllRanges();",
                                    completionHandler: nil)
     }
@@ -2040,7 +2037,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     }
 
     // WKWebView の検索は一致の有無しか返さない
-    //（何件中の何件目かは取れない）ので、
+    // (何件中の何件目かは取れない) ので、
     // 見つからなかった時だけ入力欄の色を落として知らせる
     func find(_ text: String, backwards: Bool = false) {
         guard !text.isEmpty else {
@@ -2048,7 +2045,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
             return
         }
         // WKFindConfiguration は Sendable ではないので、
-        // Task の中で組む（外で作って渡すとキャプチャで引っ掛かる）
+        // Task の中で組む (外で作って渡すとキャプチャで引っ掛かる)
         Task { @MainActor [weak self] in
             guard let self else { return }
             let configuration = WKFindConfiguration()
@@ -2058,7 +2055,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
                 let result = try await self.webView.find(text, configuration: configuration)
                 self.findNotFound = !result.matchFound
             } catch {
-                // 検索そのものが失敗した（ページが無い・破棄された等）。
+                // 検索そのものが失敗した。(ページが無い・破棄された等)
                 // 利用者から見れば「見つからない」と同じなので、そう見せる
                 print("Find failed: \(error.localizedDescription)")
                 self.findNotFound = true
@@ -2220,7 +2217,7 @@ extension Tab {
     }
 
     // ページの座標（CSS ピクセル、ビューポートの左上が原点、下向き）を
-    // 画面の座標（下から上）へ移す。
+    // 画面の座標 (下から上) へ移す。
     //
     // 上端と下端の両方を渡す。下端だけでは、一覧を上へ返す時に
     // 欄の頭がどこにあるか分からず、欄そのものを覆ってしまう。
@@ -2339,7 +2336,7 @@ extension Tab: WKNavigationDelegate {
         let url = action.request.url?.absoluteString
 
         // WKWebView が自分では開けないスキーム
-        //（mailto: / tel: / zoommtg: / itms-apps: など）。
+        // (mailto: / tel: / zoommtg: / itms-apps: など)。
         // load しても何も起きないので、macOS の振り分けに渡す。
         //
         // リンクを踏んだ時限定なのが肝だ。これを外すと、
@@ -2365,10 +2362,10 @@ extension Tab: WKNavigationDelegate {
         // ── https 優先 ──
         //
         // 主フレームの GET だけを見る。
-        // 副フレーム（埋め込みの iframe）まで差し替えると、http でしか
+        // 副フレーム (埋め込みの iframe) まで差し替えると、http でしか
         // 出さない埋め込みが軒並み消える。POST を差し替えないのは、
-        // ここで .cancel して load し直すと本文が落ちるからだ
-        //（打ち込んだフォームが黙って空になる）
+        // ここで .cancel して load し直すと本文が落ちるから。
+        // (打ち込んだフォームが黙って空になる)
         if let target = action.request.url,
            action.targetFrame?.isMainFrame == true,
            (action.request.httpMethod ?? "GET").uppercased() == "GET" {
@@ -2408,7 +2405,7 @@ extension Tab: WKNavigationDelegate {
             guard !Task.isCancelled, let self else { return }
             // 待っている間に別の読み込みが始まっていたら手を出さない。
             // 宛先まで見比べるのは、控えが差し替わっただけの場合に
-            // 新しい方を巻き添えで止めないためだ
+            // 新しい方を巻き添えで止めないため。
             guard let pending = self.pendingUpgrade,
                   pending.secure == secure
             else { return }
@@ -2442,13 +2439,13 @@ extension Tab: WKNavigationDelegate {
         webView.load(URLRequest(url: plain))
     }
 
-    // ブラウザが表示できない応答（PDF以外のファイルなど）はダウンロードに回す
+    // ブラウザが表示できない応答 (PDF以外のファイルなど) はダウンロードに回す
     func webView(_ webView: WKWebView,
                  decidePolicyFor response: WKNavigationResponse,
                  decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
         // Permissions-Policy ヘッダを控える。下の判断には関与しない。
-        // 枠（iframe）の応答もここを通る（isForMainFrame が false）ので、
-        // 門番（Geolocation.swift）が枠ごとのヘッダを引ける
+        // 枠 (iframe) の応答もここを通る (isForMainFrame が false) ので、
+        // 門番 (Geolocation.swift) が枠ごとのヘッダを引ける
         if let http = response.response as? HTTPURLResponse {
             geolocation.recordPolicy(from: http, isMainFrame: response.isForMainFrame)
         }
@@ -2465,17 +2462,16 @@ extension Tab: WKNavigationDelegate {
         print("NavigationResponse not showable: url=\(response.response.url?.absoluteString ?? "?") "
               + "mime=\(mime) mainFrame=\(response.isForMainFrame) disposition=\(disposition)")
 
-        // サブフレーム（広告・計測の iframe など）の変な応答で
+        // サブフレーム (広告・計測の iframe など) の変な応答で
         // 保存パネルを出さない。黙って握り潰す
         guard response.isForMainFrame else {
             decisionHandler(.cancel)
             return
         }
 
-        // HTML 文書なのに「表示不可」判定の場合（Content-Disposition:
-        // attachment 付きの応答などで起きる）。文書はダウンロードではなく
-        // 表示に倒す（youtube.com で www.youtube.com.html の保存パネルが
-        // 出る不具合の対処）
+        // HTML 文書なのに「表示不可」判定の場合 (Content-Disposition:
+        // attachment 付きの応答などで起きる)。文書はダウンロードではなく表示に倒す。
+        // (youtube.com で www.youtube.com.html の保存パネルが出る不具合の対処)
         let lowered = (response.response.mimeType ?? "").lowercased()
         if lowered == "text/html" || lowered == "application/xhtml+xml" {
             decisionHandler(.allow)
@@ -2513,7 +2509,7 @@ extension Tab: WKNavigationDelegate {
             return
         }
         // クライアント証明書は WebKit の既定処理のまま。
-        // 選ばせる相手（キーチェーンの識別情報）が別の話になる
+        // 選ばせる相手 (キーチェーンの識別情報) が別の話になる
         guard HTTPAuthPrompter.canHandle(challenge) else {
             completionHandler(.performDefaultHandling, nil)
             return
@@ -2523,7 +2519,7 @@ extension Tab: WKNavigationDelegate {
                 completionHandler(.cancelAuthenticationChallenge, nil)
                 return
             }
-            // 預かるのはこちらの仕事（キーチェーン）なので、
+            // 預かるのはこちらの仕事 (キーチェーン) なので、
             // WebKit には今回の接続限りのものとして渡す
             completionHandler(.useCredential,
                               URLCredential(user: answer.user,
@@ -2537,9 +2533,9 @@ extension Tab: WKNavigationDelegate {
     // 差し出された証明書を、後で見せられるように控えておく係。
     //
     // ここで検証を回し直したりはしない。既定の判断は WebKit に任せたままで、
-    // こちらは提示された一枚を控えるだけだ（後で見せるための材料）。
+    // こちらは提示された一枚を控えるだけ。(後で見せるための材料)
     // SecTrustEvaluateWithError をここで回すと、全ての https 接続で
-    // メインスレッドが検証の往復（OCSP 等）を待つことになる。
+    // メインスレッドが検証の往復 (OCSP 等) を待つことになる。
     //
     // 例外に載っている場所だけは、控えた証明書をそのまま資格情報として返す。
     // 例外は利用者が中身を見た上で自分で作ったもので、
@@ -2575,7 +2571,7 @@ extension Tab: WKNavigationDelegate {
         // 出しっぱなしの一覧を連れて行かない。
         // 小窓は窓の子なので、ページが変わっても自分では消えない
         PasswordSuggestionPanel.shared.hide()
-        // 断った記憶を仕切り直す（「もう一度」で訊き直せるように）
+        // 断った記憶を仕切り直す (「もう一度」で訊き直せるように)
         httpAuth.noteNavigationStarted()
         // 前のページの証明書を残さない。
         // この後ちゃんとチャレンジが飛んでくるので、
@@ -2603,24 +2599,24 @@ extension Tab: WKNavigationDelegate {
         httpAuth.noteNavigationSucceeded()
     }
 
-    // 相手に届く前に転んだ（名前が引けない、繋がらない、証明書で止まった等）。
+    // 相手に届く前に転んだ (名前が引けない、繋がらない、証明書で止まった等)
     // 白紙になるのはほぼこの経路
     func webView(_ webView: WKWebView,
                  didFailProvisionalNavigation navigation: WKNavigation!,
                  withError error: Error) {
         // 持ち上げた先で転んだなら、顛末書より先に落とすかを訊く。
         //
-        // ここを先に見るのが要だ。証明書で止められた場合も同じ経路で来るが、
+        // ここを先に見るのがカギ。証明書で止められた場合も同じ経路で来るが、
         // そのまま report に流すと「危険を承知で続行」（証明書の例外）が
         // 出る。利用者は https を頼んでいない——こちらが勝手に持ち上げて
         // 勝手に転んだだけなのに、例外を作らせるのは筋が通らない
         //
         // 見分けに PageError.make を使うのは、直前の .cancel 自体が
-        // ここへ WebKitErrorDomain 102 として届くからだ。
+        // ここへ WebKitErrorDomain 102 として届くから。
         // 単に -999 を除けるだけだと、持ち上げを始めたその瞬間に
         // 自分の取り消しを「転んだ」と誤読して、https を一度も
         // 叩かないまま平文の確認を出すことになる。
-        // 日常の失敗を見送る規則はあちらに集めてある（PageError.swift）
+        // 日常の失敗を見送る規則はあちらに集めてある (PageError.swift)
         if let pending = pendingUpgrade,
            PageError.make(from: error, fallback: nil) != nil {
             finishUpgrade()
@@ -2727,7 +2723,7 @@ extension Tab: WKNavigationDelegate {
         webView.load(URLRequest(url: failedURL))
     }
 
-    // WebContent プロセスが落ちたとき（WebKit 内部のクラッシュ）の立て直し。
+    // WebContent プロセスが落ちたとき (WebKit 内部のクラッシュ) の立て直し。
     // 放っておくとタブが白紙のままになるので、自動で読み直す
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         Task { @MainActor in
@@ -2737,7 +2733,7 @@ extension Tab: WKNavigationDelegate {
     }
 }
 
-// MARK: - UI の窓口役（target="_blank" などの新規ウィンドウ要求をタブで受ける）
+// MARK: - UI の窓口役 (target="_blank" などの新規ウィンドウ要求をタブで受ける)
 
 extension Tab: WKUIDelegate {
     func webView(_ webView: WKWebView,
@@ -2756,7 +2752,7 @@ extension Tab: WKUIDelegate {
         //
         // navigationAction.modifierFlags も、JS 経由で呼ばれた場合は
         // 空になりうる。この判断はクリック処理の真っ最中に同期で走るので、
-        // 今この瞬間の修飾キー（NSEvent）も併せて見る
+        // 今この瞬間の修飾キー (NSEvent) も併せて見る
         let commandHeld = navigationAction.modifierFlags.contains(.command)
             || NSEvent.modifierFlags.contains(.command)
         // WebKit の buttonNumber は DOM の流儀（0=左 1=中 2=右）
@@ -2767,7 +2763,7 @@ extension Tab: WKUIDelegate {
         let hasTarget = !(requestedURL ?? "").isEmpty && requestedURL != "about:blank"
         let byGesture = (commandHeld || middleClick) && hasTarget
 
-        // リンクを踏んだ結果（target="_blank"）とフォーム送信は利用者の意思。
+        // リンクを踏んだ結果 (target="_blank") とフォーム送信は利用者の意思。
         // 従来通り裏タブで開く
         let byLink = navigationAction.navigationType == .linkActivated
             || navigationAction.navigationType == .formSubmitted
@@ -2781,7 +2777,7 @@ extension Tab: WKUIDelegate {
 
         // ここからは window.open()。
         // WebKit はユーザー操作を伴わない window.open を既定で弾いているので、
-        // ここへ届くのは「クリックに便乗して開かれたもの」だ
+        // ここへ届くのは「クリックに便乗して開かれたもの」
         let opener = PopupAllowList.originKey(for: webView.url)
         guard PopupAllowList.shared.isAllowed(opener, scope: scope) else {
             if let requestedURL {
@@ -2793,7 +2789,7 @@ extension Tab: WKUIDelegate {
 
         // 許可済み。WebKit が用意した configuration で器を作って返す。
         // ここで nil を返して自前でタブを開くと window.opener が繋がらず、
-        // 開いた窓が親に結果を返せない（OAuth のログインが完了しない）
+        // 開いた窓が親に結果を返せない (OAuth のログインが完了しない)
         return openPopup?(configuration)
     }
 
@@ -2806,7 +2802,7 @@ extension Tab: WKUIDelegate {
     }
 
     // macOS ではこれを自分で実装しないと、ファイル選択パネルが出ない
-    // （iOS は自動だが、Mac はアプリ側の責任）
+    // (iOS は自動だが、Mac はアプリ側の責任)
     func webView(_ webView: WKWebView,
                  runOpenPanelWith parameters: WKOpenPanelParameters,
                  initiatedByFrame frame: WKFrameInfo,
@@ -2823,7 +2819,7 @@ extension Tab: WKUIDelegate {
     }
 
     // カメラ・マイクの使用要求。これを実装しないと WebKit は getUserMedia() を
-    // 無条件で拒否する（ページ側には NotAllowedError しか届かず、原因が見えない）。
+    // 無条件で拒否する。(ページ側には NotAllowedError しか届かず、原因が見えない)
     // 判断とサイトごとの記憶は MediaPermissionStore に任せる
     func webView(_ webView: WKWebView,
                  requestMediaCapturePermissionFor origin: WKSecurityOrigin,
@@ -2833,7 +2829,7 @@ extension Tab: WKUIDelegate {
         // WKSecurityOrigin は持ち回さず、ここで必要な文字列だけ抜いておく
         let originKey = MediaPermissionStore.storageOrigin(origin)
         let host = origin.host
-        // 誰の分として覚えるかはタブが決める（プライベートはメモリだけ。MediaPermission.swift）
+        // 誰の分として覚えるかはタブが決める (プライベートはメモリだけ。MediaPermission.swift)
         let scope = self.scope
         Task { @MainActor in
             let decision = await MediaPermissionStore.shared.decide(
@@ -2865,7 +2861,7 @@ extension Tab: WKUIDelegate {
         Task { @MainActor in
             self.requestActivate?()
             await self.jsDialogs.alert(message: message, host: host, in: webView.window)
-            // 途中で抜けてはならない。呼ばない限りページの JS は止まったままだ
+            // 途中で抜けてはならない。呼ばない限りページの JS は止まったまま。
             completionHandler()
         }
     }
@@ -2904,12 +2900,12 @@ extension Tab: WKUIDelegate {
     //
     // これだけは WKUIDelegate に公開の窓口が無い。受け口は
     // _WKUIDelegatePrivate 側にしか無く、実装しなければ WebKit は
-    // 問いを飛ばして無条件に離脱を許す（書きかけの投稿が黙って消える）。
+    // 問いを飛ばして無条件に離脱を許す。(書きかけの投稿が黙って消える)
     //
     // WebKit は respondsToSelector で見てから呼ぶので、非公開の名前を
-    // @objc で名乗るだけでいい（リンクはしない）。将来 WebKit が
-    // この綴りを変えたら、呼ばれなくなるだけで元の振る舞いに戻る——
-    // 落ちはしない。それでも非公開は非公開だ。
+    // @objc で名乗るだけでいい。(リンクはしない)
+    // 将来 WebKit がこの綴りを変えたら、呼ばれなくなるだけで元の振る舞いに戻る——
+    // 落ちはしない。それでも非公開は非公開。
     // 嫌ならこの一つだけ削ればいい（上の三つは公開 API だけで成立する）
     @objc(_webView:runBeforeUnloadConfirmPanelWithMessage:initiatedByFrame:completionHandler:)
     func webView(_ webView: WKWebView,
@@ -2927,7 +2923,7 @@ extension Tab: WKUIDelegate {
 
 // MARK: - タブ全体を束ねる管理役
 
-// セッション（前回終了時のタブ構成）の保存形式
+// セッション (前回終了時のタブ構成) の保存形式
 private struct SessionTab: Codable {
     var url: String     // 空文字はロビー
     var title: String   // 復元直後にサイドバーへ出す仮の題名
@@ -2940,7 +2936,7 @@ private struct SessionTab: Codable {
     // 前回のタブ構成が丸ごと飛ぶ
     var pinned: Bool? = nil
     // どのプロファイルのタブだったか。既定なら鍵ごと無い。
-    // Optional なのは pinned と同じ理由（古い保存を壊さない）
+    // Optional なのは pinned と同じ理由 (古い保存を壊さない)
     var profile: UUID? = nil
 }
 
@@ -2978,7 +2974,7 @@ final class TabManager: NSObject, ObservableObject {
             )
             // スリープ抑制は「今見ているタブ」にだけ効かせる。
             // 見張り側からは誰が選ばれているか分からないので、ここから告げる。
-            // 窓を閉じた時（tearDownTabs で nil になる）もここを通る
+            // 窓を閉じた時 (tearDownTabs で nil になる) もここを通る
             SleepBlocker.shared.noteSelection(selectedTab?.webView, in: self)
             scheduleSave()
         }
@@ -2988,7 +2984,7 @@ final class TabManager: NSObject, ObservableObject {
     //
     // 窓ごとの旗。生まれた瞬間に決まり、後から変わらない。
     //
-    // SwiftUI が @StateObject を自分で作る（TabManager() を直に呼ぶ）ので、
+    // SwiftUI が @StateObject を自分で作る (TabManager() を直に呼ぶ) ので、
     // 引数では渡せない。次に生まれる管理人への預かり所を静的に置く——
     // タブを新しい窓へ渡す pendingAdoption と同じ手だ
     private static var pendingPrivate = false
@@ -3003,14 +2999,14 @@ final class TabManager: NSObject, ObservableObject {
     // onAppear / onDisappear は誤発火しうるので、二重に数えない
     private var holdsPrivateStore = false
 
-    // タブの自動グループ化（Apple Intelligence）。
+    // タブの自動グループ化。(Apple Intelligence)
     // 使えない環境では何もせず、従来のフラット表示のまま動く
     let grouper = TabGrouper()
 
     // タブ検索の盤（⇧⌘A）を出しているか。
     // 盤は窓に一つなので、タブではなくここが持つ
     @Published var isTabSearchVisible = false
-    // 打ち込み欄へ焦点を移す合図（⇧⌘A のたびに増える）。
+    // 打ち込み欄へ焦点を移す合図。(⇧⌘A のたびに増える)
     // 既に出ている時にもう一度押されたら、全選択し直す
     @Published private(set) var tabSearchFocusTrigger = 0
 
@@ -3029,7 +3025,7 @@ final class TabManager: NSObject, ObservableObject {
 
     // この管理人の窓を前に出す。
     //
-    // TabManager 自身は NSWindow を持っていない（持ち主は SwiftUI）ので、
+    // TabManager 自身は NSWindow を持っていない (持ち主は SwiftUI) ので、
     // タブの WebView が載っている窓を借りる。
     // 全タブは ZStack に常時マウントされているので、
     // 畳んだタブでも器自体は窓に居る
@@ -3038,11 +3034,11 @@ final class TabManager: NSObject, ObservableObject {
             ?? tabs.compactMap { $0.webView.window }.first
         window?.makeKeyAndOrderFront(nil)
     }
-    // 各タブのタイトル確定を見張る購読（タブIDごと）
+    // 各タブのタイトル確定を見張る購読 (タブIDごと)
     private var titleWatchers: [UUID: AnyCancellable] = [:]
-    // 各タブの URL 変化を見張る購読（セッション保存の合図）
+    // 各タブの URL 変化を見張る購読 (セッション保存の合図)
     private var urlWatchers: [UUID: AnyCancellable] = [:]
-    // 疑似大画面の出入りで ContentView（サイドバーの表示）を更新させる購読
+    // 疑似大画面の出入りで ContentView (サイドバーの表示) を更新させる購読
     private var fullscreenWatchers: [UUID: AnyCancellable] = [:]
 
     // 閉じたタブの控え一件ぶん。
@@ -3056,7 +3052,7 @@ final class TabManager: NSObject, ObservableObject {
         var profile: UUID?
     }
 
-    // 閉じたタブの復元用スタック（⇧⌘T）
+    // 閉じたタブの復元用スタック(⇧⌘T)
     private var recentlyClosed: [ClosedTab] = []
 
     // ── セッションの保存 ──
@@ -3071,7 +3067,7 @@ final class TabManager: NSObject, ObservableObject {
     static let restoreSessionKey = "skyscraper.restoreSession"
     // 一度に復元する上限。壊れた保存で限りなくタブが開くのを防ぐ
     private static let restoreLimit = 50
-    // 復元が済むまでは保存しない（途中の中途半端な状態で書き潰さないため）
+    // 復元が済むまでは保存しない (途中の中途半端な状態で書き潰さないため)
     private var didRestore = false
     private var saveTask: Task<Void, Never>?
     private var terminationObserver: NSObjectProtocol?
@@ -3096,7 +3092,7 @@ final class TabManager: NSObject, ObservableObject {
     private var idleSweeper: Task<Void, Never>?
     private var memoryPressure: DispatchSourceMemoryPressure?
 
-    // 生きている管理人の名簿（弱参照）。
+    // 生きている管理人の名簿。(弱参照)
     //
     // 以前は「最初の窓が受け持つ」形にしていたが、それだと
     // 二枚目でいくら作業しても一枚目のタブが変わらない限り保存が走らず、
@@ -3138,7 +3134,7 @@ final class TabManager: NSObject, ObservableObject {
         isClosed = true
         // プライベートウィンドウの後始末。
         // 最後の一枚なら、置き場の中身ごと捨てられる。
-        // 閉じたタブの控え（⇧⌘T）もここで消す——
+        // 閉じたタブの控え (⇧⌘T) もここで消す——
         // 窓を閉じた後も URL と履歴が手元に残るのは筋が通らない
         if isPrivate, holdsPrivateStore {
             holdsPrivateStore = false
@@ -3163,9 +3159,8 @@ final class TabManager: NSObject, ObservableObject {
 
         // その上で、一拍おいて本当に片付ける。
         // ページが生きたままだと YouTube 側の都合で再生が戻る余地があるので、
-        // closeTab と同じ水準（about:blank まで）落とす。
-        // 間を置くのは、onDisappear が誤発火して直後に戻ってくる場合に
-        // 中身を失わないためだ
+        // closeTab と同じ水準 (about:blank まで) 落とす。
+        // 間を置くのは、onDisappear が誤発火して直後に戻ってくる場合に中身を失わないため。
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 500_000_000)
             guard let self, self.isClosed else { return }
@@ -3210,7 +3205,7 @@ final class TabManager: NSObject, ObservableObject {
         return pendingRestores.isEmpty ? nil : pendingRestores.removeFirst()
     }
 
-    // まだ開くべき窓が残っているか（ContentView が次の窓を開く合図）
+    // まだ開くべき窓が残っているか (ContentView が次の窓を開く合図)
     static var hasPendingRestores: Bool { !pendingRestores.isEmpty }
 
     // 全窓ぶんをまとめて書く。どの窓で作業してもここを通る
@@ -3271,7 +3266,7 @@ final class TabManager: NSObject, ObservableObject {
 
     // ── セッションの読み書き ──
 
-    // キーが無い（初回起動）場合も復元する。切りたい人が明示的に切る
+    // キーが無い (初回起動) 場合も復元する。切りたい人が明示的に切る
     static var restoresSession: Bool {
         UserDefaults.standard.object(forKey: restoreSessionKey) as? Bool ?? true
     }
@@ -3375,7 +3370,7 @@ final class TabManager: NSObject, ObservableObject {
         tabs.first { $0.id == selectedID }
     }
 
-    // 作ったタブを返すのは拡張機能（tabs.create）のため。他の呼び元は捨てていい
+    // 作ったタブを返すのは拡張機能 (tabs.create) のため。他の呼び元は捨てていい
     @discardableResult
     func addTab(url: String? = nil, profile: UUID? = nil) -> Tab {
         let tab = makeTab(url: url, profile: profile)
@@ -3419,15 +3414,15 @@ final class TabManager: NSObject, ObservableObject {
     // グループ見出し付きのセクション一覧。
     // tabs 配列の並び順は変えず、グループは初出順、
     // どこにも属さないタブは末尾に見出し無しでまとめる。
-    // 割り当てが空（Apple Intelligence 無効・タブが少ない）なら
+    // 割り当てが空 (Apple Intelligence 無効・タブが少ない) なら
     // セクションは一つだけになり、従来と全く同じ見た目になる。
     //
     // ここに置いてあるのが肝だ。以前は VerticalTabStrip の中で組んでいたため、
-    // 送り（⌃Tab）が tabs を直に歩いてしまい、グループ表示中は
+    // 送り (⌃Tab) が tabs を直に歩いてしまい、グループ表示中は
     // 画面上で飛び飛びに見えていた。並び順は一箇所に集める。
     //
     // TabSection がこのファイル内の private 型なので fileprivate にする。
-    // 見るのは同じファイルの VerticalTabStrip と displayOrder だけだ
+    // 見るのは同じファイルの VerticalTabStrip と displayOrder だけ。
     fileprivate var sections: [TabSection] {
         // ピン留めはグループ化の外に置く。
         // 「自分で上に固定したもの」をモデルの都合で
@@ -3462,7 +3457,7 @@ final class TabManager: NSObject, ObservableObject {
         return result
     }
 
-    // 画面に並んでいる順のタブ一覧（見出しを取り除いたもの）
+    // 画面に並んでいる順のタブ一覧 (見出しを取り除いたもの)
     var displayOrder: [Tab] {
         sections.flatMap(\.tabs)
     }
@@ -3474,7 +3469,7 @@ final class TabManager: NSObject, ObservableObject {
                          popupConfiguration: WKWebViewConfiguration? = nil,
                          profile: UUID? = nil) -> Tab {
         // プライベートウィンドウにプロファイルは無い。
-        // 渡されても捨てる（Tab 側でも同じ判断をするが、意図はこちらに書く）
+        // 渡されても捨てる (Tab 側でも同じ判断をするが、意図はこちらに書く)
         let tab = Tab(url: url,
                       title: title,
                       deferLoad: deferLoad,
@@ -3491,7 +3486,7 @@ final class TabManager: NSObject, ObservableObject {
     //
     // 新規に作った時も、他の窓から受け取った時も、必ずここを通す。
     // 張り替え忘れがあると、移した先で ⌘クリックやポップアップが
-    // 黙って効かなくなる（古い窓に連絡が行ってしまう）
+    // 黙って効かなくなる (古い窓に連絡が行ってしまう)
     private func wire(_ tab: Tab) {
         // ⌘クリックされたら、この管理人に連絡が来るようにする
         // 開いた側のプロファイルを継ぐ。値で掴む（let なので変わらない）——
@@ -3530,7 +3525,7 @@ final class TabManager: NSObject, ObservableObject {
             .removeDuplicates()
             .sink { [weak self] _ in self?.scheduleSave() }
         // Tab の @Published は Tab を監視する View しか起こさないので、
-        // サイドバー（manager を監視）のためにここで中継する
+        // サイドバー (manager を監視) のためにここで中継する
         fullscreenWatchers[tab.id] = tab.$isVideoFullscreen
             .removeDuplicates()
             .sink { [weak self] _ in self?.objectWillChange.send() }
@@ -3543,7 +3538,7 @@ final class TabManager: NSObject, ObservableObject {
     // closeTab とは別物だ。あちらは再生を止め、about:blank を流し込み、
     // スクリプトハンドラまで外すが、移動でそれをやると中身が死ぬ。
     // WKWebView はそのまま持ち回すので、移した先で読み込み直しは起きない。
-    // 閉じたタブの控え（⇧⌘T）にも積まない
+    // 閉じたタブの控え (⇧⌘T) にも積まない
     private func detach(_ tab: Tab) -> Tab? {
         guard let idx = tabs.firstIndex(where: { $0.id == tab.id }) else { return nil }
         tabs.remove(at: idx)
@@ -3560,7 +3555,7 @@ final class TabManager: NSObject, ObservableObject {
     }
 
     // 他の窓から渡されたタブを受け取る。
-    // index を渡せばその位置に挿さる（ドラッグで落とされた位置）
+    // index を渡せばその位置に挿さる (ドラッグで落とされた位置)
     func adopt(_ tab: Tab, at index: Int? = nil) {
         wire(tab)
         if let index, index >= 0, index <= tabs.count {
@@ -3579,7 +3574,7 @@ final class TabManager: NSObject, ObservableObject {
     // WKWebView は生成時の websiteDataStore を抱えたままなので、
     // 運んだ先でも元の置き場を使い続ける——
     // 見た目はプライベートなのに中身は永続、またはその逆になる。
-    // これは黙って起きてはいけない種類の食い違いだ
+    // これは黙って起きてはいけない種類の食い違いである。
     func moveTab(_ tab: Tab, to other: TabManager, at index: Int? = nil) {
         guard other !== self, other.isPrivate == isPrivate,
               let detached = detach(tab) else { return }
@@ -3609,7 +3604,7 @@ final class TabManager: NSObject, ObservableObject {
         // 自分の窓の中の話なら、従来通り並べ替える。
         // ただし、落とした先に合わせてピン留めを切り替える——
         // 上の欄へ放り込めば留まり、下へ戻せば解ける。
-        // 境目そのものを操作にするのは Safari も Chrome も同じ流儀だ
+        // 境目そのものを操作にするのは Safari も Chrome も同じ流儀。
         if let dragged = tabs.first(where: { $0.id == id }) {
             // 旗を先に立てる。逆だと normalizePinnedOrder が
             // 落とした位置ごと引っくり返す
@@ -3666,10 +3661,10 @@ final class TabManager: NSObject, ObservableObject {
     //
     // プライベートウィンドウは避ける。外から来たリンクが
     // 跡を残さない窓に落ちると、閉じた瞬間に履歴ごと消える——
-    // 利用者はそんな選択をしていないのにだ。
+    // 利用者はそんな選択をしていないのにである。
     //
-    // 名簿の後ろから探すのは、新しく開いた窓ほど手前にある可能性が高いからだ。
-    // 本当の手前（key window）を引くには NSWindow と管理人を
+    // 名簿の後ろから探すのは、新しく開いた窓ほど手前にある可能性が高いから。
+    // 本当の手前 (key window) を引くには NSWindow と管理人を
     // 紐付ける仕組みが要るが、そこまでの精度は今は要らない
     static var externalURLTarget: TabManager? {
         openWindows.last { !$0.isPrivate }
@@ -3690,7 +3685,7 @@ final class TabManager: NSObject, ObservableObject {
     // 新しい窓へ渡すための預かり所。次に生まれる管理人が引き取る
     private static var pendingAdoption: Tab?
 
-    // 窓を開くのは View の仕事（openWindow が環境にある）なので、
+    // 窓を開くのは View の仕事 (openWindow が環境にある) なので、
     // ここでは合図を送るだけにする
     @Published private(set) var newWindowRequests = 0
 
@@ -3716,9 +3711,9 @@ final class TabManager: NSObject, ObservableObject {
 
     func closeTab(_ tab: Tab) {
         guard let idx = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
-        // 復元用に、閉じるタブを控える（ロビーなら URL は空文字）。控えは最大20件。
+        // 復元用に、閉じるタブを控える。(ロビーなら URL は空文字)控えは最大20件。
         //
-        // 履歴（interactionState）を抜くのは、下で about:blank を流し込む前でなければ
+        // 履歴 (interactionState) を抜くのは、下で about:blank を流し込む前でなければ
         // ならない。後だと白紙ページまで含んだ履歴を掴むことになる
         let restoreURL = tab.isHome ? "" : (tab.webView.url?.absoluteString ?? tab.urlText)
         let restoreState = tab.isHome ? nil : tab.restorableState
@@ -3729,8 +3724,8 @@ final class TabManager: NSObject, ObservableObject {
         if recentlyClosed.count > 20 { recentlyClosed.removeFirst() }
         // 動画・音声の再生を確実に止めてから退去させる。
         // about:blank の読み込みだけでは非同期で、WebView がどこかに
-        // 保持されて生き残った場合に音が鳴り続ける（長時間再生した
-        // YouTube で顕著）。pauseAllMediaPlayback は WebContent プロセスへ
+        // 保持されて生き残った場合に音が鳴り続ける。(長時間再生したYouTube で顕著)
+        // pauseAllMediaPlayback は WebContent プロセスへ
         // 直接「全メディア停止」を送るので、解放のタイミングに依存しない
         tab.webView.stopLoading()
         tab.webView.pauseAllMediaPlayback(completionHandler: nil)
@@ -3787,7 +3782,7 @@ final class TabManager: NSObject, ObservableObject {
     // 安定な仕分けなので、それぞれの中の並びは崩れない。
     //
     // 中身が同じでも代入し直すのは、didSet を通して
-    // サイドバー（manager を見ている）に描き直させるためだ。
+    // サイドバー (manager を見ている) に描き直させるため。
     // Tab の @Published はその Tab を見ている行しか起こさない
     func normalizePinnedOrder() {
         tabs = tabs.filter(\.isPinned) + tabs.filter { !$0.isPinned }
@@ -3878,8 +3873,8 @@ final class TabManager: NSObject, ObservableObject {
 
     func closeSelected() {
         guard let tab = selectedTab else { return }
-        // ピン留めしたタブは ⌘W では閉じない（Safari と同じ）。
-        // 「うっかり閉じない」がピン留めの目的だからだ。
+        // ピン留めしたタブは ⌘W では閉じない。(Safari と同じ)
+        // 「うっかり閉じない」がピン留めの目的だから。
         // 閉じたければ先に留めを外す。
         //
         // closeTab の方には関を設けない——
@@ -3897,7 +3892,7 @@ final class TabManager: NSObject, ObservableObject {
             addTab()
             return
         }
-        // 閉じた後でプロファイルが消されていたら既定へ倒す（restoreSession と同じ理屈）
+        // 閉じた後でプロファイルが消されていたら既定へ倒す (restoreSession と同じ理屈)
         let profile = closed.profile.flatMap { ProfileStore.shared.contains($0) ? $0 : nil }
         let tab = makeTab(url: closed.url.isEmpty ? nil : closed.url,
                           title: closed.title,
@@ -3925,14 +3920,14 @@ final class TabManager: NSObject, ObservableObject {
         }
     }
 
-    // 番号でタブを選ぶ（0始まり）
+    // 番号でタブを選ぶ (0始まり)
     func selectTab(at index: Int) {
         guard tabs.indices.contains(index) else { return }
         selectedID = tabs[index].id
     }
 
     // ドラッグでの並べ替え：draggedID のタブを target の前または後ろに挿す。
-    // グループ表示中は、落とした先のタブと同じグループへ入れる（手動扱い）
+    // グループ表示中は、落とした先のタブと同じグループへ入れる (手動扱い)
     func moveTab(draggedID: String, target: Tab, after: Bool) {
         guard draggedID != target.id.uuidString,
               let from = tabs.firstIndex(where: { $0.id.uuidString == draggedID })
@@ -3943,7 +3938,7 @@ final class TabManager: NSObject, ObservableObject {
         } else {
             tabs.append(moved)
         }
-        // グループが一つも無い（従来表示）なら並び順だけ変える。
+        // グループが一つも無い (従来表示) なら並び順だけ変える。
         // ピン留めしたタブはグループの外に居るので巻き込まない
         if !grouper.assignments.isEmpty, !moved.isPinned {
             grouper.assignManually(moved.id, to: grouper.assignments[target.id])
@@ -3961,7 +3956,7 @@ extension Array {
 
 struct SkyscraperMark: View {
     var color: Color = Deco.gold
-    // 胴を背景色で塗り潰し、背後の飾り（サンバースト等）が透けないようにする
+    // 胴を背景色で塗り潰し、背後の飾り (サンバースト等) が透けないようにする
     var fill: Color = Deco.ink
     var body: some View {
         VStack(spacing: 0) {
@@ -3981,7 +3976,7 @@ struct SkyscraperMark: View {
     }
 }
 
-// MARK: - 新規タブページ（ロビー）
+// MARK: - 新規タブページ (ロビー)
 
 struct NewTabPage: View {
     @ObservedObject var tab: Tab
@@ -4087,11 +4082,11 @@ struct VerticalTabStrip: View {
     @ObservedObject var manager: TabManager
     @ObservedObject var grouper: TabGrouper
 
-    // タブの挿入位置を示す金の横バー（ブックマークと同じ人感センサー方式）
+    // タブの挿入位置を示す金の横バー (ブックマークと同じ人感センサー方式)
     @StateObject private var dropModel = DropIndicatorModel()
 
     // 並び順の組み立ては TabManager に集約した。
-    // 表示（ここ）と送り（⌃Tab）が同じ配列を見るので、構造的にずれない
+    // 表示 (ここ) と送り (⌃Tab) が同じ配列を見るので、構造的にずれない
     private var sections: [TabSection] { manager.sections }
 
     // コンテキストメニュー用：現在あるグループ名の一覧（初出順）
@@ -4180,8 +4175,7 @@ struct VerticalTabStrip: View {
                 .padding(.bottom, manager.isPrivate ? 8 : 12)
 
             // プライベートウィンドウの札。
-            // 普通の窓と見間違えたまま使われるのが一番まずいので、
-            // 帯の一番目に入る場所に置く
+            // 普通の窓と見間違えたまま使われるのが一番まずいので、帯の一番目に入る場所に置く
             if manager.isPrivate {
                 Text("PRIVATE")
                     .font(.system(size: 9, design: .serif))
@@ -4210,7 +4204,7 @@ struct VerticalTabStrip: View {
 
             Spacer(minLength: 0)
 
-            // サイドバー下端のジグザグ罫（New Tab ボタンの仕切り）
+            // サイドバー下端のジグザグ罫 (New Tab ボタンの仕切り)
             Zigzag(teeth: 14)
                 .stroke(Deco.faintGold, lineWidth: 1)
                 .frame(height: 5)
@@ -4268,7 +4262,7 @@ struct VerticalTabStrip: View {
 }
 
 // タブ一行にドラッグ＆ドロップを着せる包み。
-// 上半分に落とせば前、下半分なら後ろに挿さる（ブックマークの左右判定の縦版）
+// 上半分に落とせば前、下半分なら後ろに挿さる (ブックマークの左右判定の縦版)
 private struct DraggableTabRow: View {
     @ObservedObject var manager: TabManager
     @ObservedObject var grouper: TabGrouper
@@ -4317,7 +4311,7 @@ private struct DraggableTabRow: View {
         //
         // GeometryReader を背景に敷いて @State へ書き戻すと、
         // レイアウト計算の真っ最中に状態が変わり、SwiftUI の
-        // 依存グラフが輪になる（AttributeGraph: cycle detected の山）。
+        // 依存グラフが輪になる。 (AttributeGraph: cycle detected の山)
         // onGeometryChange は測定結果を安全な時点で渡すための口だ
         .onGeometryChange(for: CGFloat.self) { proxy in
             proxy.size.height
@@ -4332,7 +4326,7 @@ private struct DraggableTabRow: View {
         // で終了を受け取れる形になっているが、
         //   .onDrag → .draggable への差し替え
         //   .dragConfiguration(DragConfiguration(allowMove: true)) の併用
-        // のどちらを試しても、クロージャが一度も呼ばれなかった（2026-07 実測）。
+        // のどちらを試しても、クロージャが一度も呼ばれなかった。 (2026-07 実測)
         // dragContainer など、まだ足りない土台があると思われる。
         //
         // AppKit の NSDraggingSource まで降りれば
@@ -4347,7 +4341,7 @@ private struct DraggableTabRow: View {
         // .ended が届くようになる——その日の足場だ
         .onDragSessionUpdated { session in
             if case .ended = session.phase {
-                // 窓の外へ落とした場合の処理（未実装）
+                // 窓の外へ落とした場合の処理 (未実装)
             }
         }
         .onDrop(of: [.text], delegate: TabDropDelegate(
@@ -4368,7 +4362,7 @@ private struct DraggableTabRow: View {
     }
 }
 
-// 各タブ行のドロップ（上半分＝前、下半分＝後ろ）
+// 各タブ行のドロップ (上半分＝前、下半分＝後ろ)
 private struct TabDropDelegate: DropDelegate {
     let tab: Tab
     let manager: TabManager
@@ -4430,7 +4424,7 @@ private struct TabStripDropDelegate: DropDelegate {
 
 // 右クリックの「ウィンドウへ移動」に並べる一件。
 // DecoTabRow は管理人も窓も知らずに済むよう、見出しと動作だけを受け取る
-//（onSelect / onClose と同じ流儀）
+// (onSelect / onClose と同じ流儀)
 struct TabMoveTarget: Identifiable {
     let id: ObjectIdentifier
     let label: String
@@ -4463,7 +4457,7 @@ struct DecoTabRow: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            // 絵札（ファビコン）。
+            // ファビコン。
             // 枠の色がピン留めを兼ねる——金なら留めてある。
             //
             // 以前はここに金の菱形を置いて、押すと留めが外れる作りだった。
@@ -4490,7 +4484,7 @@ struct DecoTabRow: View {
             (tab.pageTitle.isEmpty ? Text("New Tab") : Text(verbatim: tab.pageTitle))
                 .font(.system(size: 12, design: .serif))
                 // 畳んでいる間は一段沈める。
-                // 選べないわけではない（押せば起きる）ので、消したりはしない
+                // 選べないわけではない (押せば起きる) ので、消したりはしない
                 .foregroundColor(tab.isUnloaded
                                  ? Deco.faintGold
                                  : (isSelected ? Deco.cream : Deco.dimGold))
@@ -4603,15 +4597,15 @@ struct NavButton: View {
     }
 }
 
-// 押しっぱなしで履歴のメニューを出すボタン（戻る／進む）。
+// 押しっぱなしで履歴のメニューを出すボタン (戻る／進む)。
 //
 // SwiftUI だけでは組めない。Button に長押しのジェスチャを重ねると、
-// 指を離した拍子に本来の動作（戻る）も一緒に走るし、
+// 指を離した拍子に本来の動作 (戻る) も一緒に走るし、
 // Menu は押した瞬間に開いてしまって「短く押せば戻る」が成立しない。
 // 押してから離すまでの一部始終を自分で握るために AppKit まで降りる——
-// アドレスバー（AddressField）と同じ判断だ。
+// アドレスバー (AddressField) と同じ判断だ。
 //
-// 見た目は NavButton に合わせてある（13pt の記号・金・24×24）。
+// 見た目は NavButton に合わせてある。 (13pt の記号・金・24×24)
 // 並べて置いても差は出ない
 final class HoldNavButtonView: NSView {
     // 短く押した時の動作（戻る／進む）
@@ -4625,12 +4619,12 @@ final class HoldNavButtonView: NSView {
         didSet { imageView.contentTintColor = tint }
     }
 
-    // 「押しっぱなし」と見なすまでの間（秒）
+    // 「押しっぱなし」と見なすまでの間 (秒)
     private let holdDelay: TimeInterval = 0.35
 
     private let imageView = NSImageView()
     private var holdTimer: Timer?
-    // この押下はメニューが食った（離しても戻らない）
+    // この押下はメニューが食った (離しても戻らない)
     private var consumed = false
 
     init(symbol: String) {
@@ -4655,7 +4649,7 @@ final class HoldNavButtonView: NSView {
 
     override var intrinsicContentSize: NSSize { NSSize(width: 24, height: 24) }
 
-    // 窓が手前に無い時の一発目も拾う（道具帯のボタンはそうあるべきだ）
+    // 窓が手前に無い時の一発目も拾う (道具帯のボタンはそうあるべきだと考える)
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     private var tint: NSColor {
@@ -4667,7 +4661,7 @@ final class HoldNavButtonView: NSView {
         consumed = false
         holdTimer?.invalidate()
         // モードに .common を使う。既定の .default だけだと、
-        // 追跡中（eventTracking）に入った途端に時計が止まる
+        // 追跡中 (eventTracking) に入った途端に時計が止まる
         let timer = Timer(timeInterval: holdDelay,
                           target: self,
                           selector: #selector(holdFired),
@@ -4681,12 +4675,12 @@ final class HoldNavButtonView: NSView {
         holdTimer?.invalidate()
         holdTimer = nil
         guard !isDisabled, !consumed else { return }
-        // 押した後で外へ逃げて離した場合は何もしない（AppKit の作法）
+        // 押した後で外へ逃げて離した場合は何もしない (AppKit の作法)
         guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
         onClick()
     }
 
-    // 右クリックでも同じメニューを出す（Safari と同じ）
+    // 右クリックでも同じメニューを出す (Safari と同じ)
     override func rightMouseDown(with event: NSEvent) {
         guard !isDisabled else { return }
         showMenu()
@@ -4758,7 +4752,7 @@ struct BookmarkBar: View {
     @ObservedObject var manager: TabManager
     @EnvironmentObject var store: BookmarkStore
     @State private var showingManager = false
-    // 挿入位置の金の縦バー。信号が途切えたら自動で消える（人感センサー方式）
+    // 挿入位置の金の縦バー。信号が途切えたら自動で消える (人感センサー方式)
     @StateObject private var indicatorModel = DropIndicatorModel()
 
     var body: some View {
@@ -4797,7 +4791,7 @@ struct BookmarkBar: View {
     }
 
     // この件数を越えたら、全件を引けるメニューも出す。
-    // 数えるのは帯に立つ数（フォルダは中身が何件でも一つ）だ
+    // 数えるのは帯に立つ数 (フォルダは中身が何件でも一つ)
     private static let overflowThreshold = 8
 
     // 描く直前に階層へ組み直す。
@@ -4811,8 +4805,8 @@ struct BookmarkBar: View {
     // 素の HStack は、中身が求める幅をそのまま親へ差し出す。
     // ブックマークが八十件もあれば「この帯には数千ポイント要る」と
     // 申告し、それが BrowserPane → ウィンドウまで押し上げられる。
-    // 結果、縦タブの帯は幅ゼロまで潰され、帯自体も画面の外へ出る
-    //（件数を増やした途端に盤全体が崩れるのはこれが原因だ）。
+    // 結果、縦タブの帯は幅ゼロまで潰され、帯自体も画面の外へ出る。
+    // (件数を増やした途端に盤全体が崩れるのはこれが原因)
     // ScrollView は差し出された幅を素直に受けるので、何件あっても崩れない。
     //
     // fixedSize で縦だけを固めるのは、横スクロールの器が
@@ -4874,14 +4868,14 @@ struct DropIndicator: Equatable {
 }
 
 // 挿入バーの自動消灯モデル。
-// 「立てろ」の信号（dropUpdated）が来続ける間は点いたまま、
+// 「立てろ」の信号 (dropUpdated) が来続ける間は点いたまま、
 // 信号が途絶えたら0.25秒で勝手に消える。「消せ」の信号には一切頼らない。
 @MainActor
 final class DropIndicatorModel: ObservableObject {
     @Published var indicator: DropIndicator? = nil
     private var generation = 0
 
-    // バーを立てる／立て直す。呼ばれるたびに寿命が延長される
+    // バーを立てる/立て直す。呼ばれるたびに寿命が延長される
     func show(_ new: DropIndicator) {
         if indicator != new { indicator = new }
         generation += 1
@@ -4903,7 +4897,7 @@ final class DropIndicatorModel: ObservableObject {
     }
 }
 
-// ブックマークバーの一項目（左右判定付きドラッグ＆ドロップ）
+// ブックマークバーの一項目 (左右判定付きドラッグ＆ドロップ)
 struct BookmarkBarItem: View {
     let bm: Bookmark
     @ObservedObject var tab: Tab
@@ -4937,7 +4931,7 @@ struct BookmarkBarItem: View {
         .contextMenu {
             Button("Delete", role: .destructive) { store.remove(bm) }
         }
-        // 幅を測っておく（左右判定に使う）
+        // 幅を測っておく (左右判定に使う)
         .background(
             GeometryReader { geo in
                 Color.clear
@@ -4964,7 +4958,7 @@ struct BookmarkBarItem: View {
     }
 }
 
-// 各項目のドロップ（左半分＝前、右半分＝後ろ）
+// 各項目のドロップ (左半分＝前、右半分＝後ろ)
 struct BookmarkDropDelegate: DropDelegate {
     let bm: Bookmark
     let store: BookmarkStore
@@ -5060,10 +5054,10 @@ struct BookmarkManager: View {
                                 .overlay(Rectangle().stroke(Deco.faintGold, lineWidth: 0.5))
                                 .frame(width: 130)
 
-                            // フォルダの道筋。スラッシュ区切りで階層になる
-                            //（"仕事/参考"）。空にすれば帯の直下へ戻る。
+                            // フォルダの道筋。スラッシュ区切りで階層になる。
+                            // ("仕事/参考") 空にすれば帯の直下へ戻る。
                             // 同じ名前を打てばそのフォルダに入る——
-                            // フォルダは実体を持たず、道筋の一致で束ねているからだ
+                            // フォルダは実体を持たず、道筋の一致で束ねているから。
                             TextField("Folder", text: Binding(
                                 get: { (bm.folder ?? []).joined(separator: "/") },
                                 set: { $bm.folder.wrappedValue = Self.folderPath(from: $0) }
@@ -5147,22 +5141,22 @@ struct BookmarkManager: View {
     }
 }
 
-// MARK: - アドレスバー本体（AppKit 直書き）
+// MARK: - アドレスバー本体 (AppKit 直書き)
 
 // SwiftUI の TextField は macOS 26 で AppKit の NSTextField として階層に
 // 現れず、first responder の動きも観測不能になったため、「クリックで全選択」を
-// SwiftUI 側から確実に実装する手段が無い（TapGesture・イベントモニタ・
-// hitTest ・リトライすべて検証済みで不成立）。
+// SwiftUI 側から確実に実装する手段が無い。
+// (TapGesture・イベントモニタ・hitTest ・リトライすべて検証済みで不成立)
 // アドレスバーだけ NSTextField に置き換えて、クリックの一部始終を自前で握る。
 
 // フォーカスを得るクリックで全選択する NSTextField。
 // mouseDown がここに届く＝フィールドエディタがまだ無い＝未編集、なので
 // フォーカスを立てて全選択し、クリック自体は飲み込む
-// （super に流すとカーソル配置が選択を壊す）。
+// (super に流すとカーソル配置が選択を壊す)
 // 編集中のクリックはフィールドエディタが直接受けるためここには来ない。
 // レースもリトライも無い、決定論的な実装。
 final class ClickSelectTextField: NSTextField {
-    // 編集の開始／終了を親（SwiftUI 側）へ知らせる
+    // 編集の開始/終了を親 (SwiftUI 側) へ知らせる
     var onEditingChanged: ((Bool) -> Void)?
 
     // ユーザーが実際にこの欄へ関わったか。
@@ -5173,13 +5167,13 @@ final class ClickSelectTextField: NSTextField {
 
     // 利用者が自分の意思でこの欄に関わっているか。
     // 受け身でフォーカスが回ってきただけの状態は「編集中」ではないので、
-    // 外（タブ）からの URL 反映を止めてはいけない
+    // 外 (タブ) からの URL 反映を止めてはいけない
     var isEngaged: Bool { engaged }
 
     override func mouseDown(with event: NSEvent) {
         // 未編集、または「静かなフォーカス」中の最初のクリック：
         // フォーカスを立てて全選択し、クリック自体は飲み込む
-        // （super に流すとカーソル配置が選択を壊す）
+        // (super に流すとカーソル配置が選択を壊す)
         if currentEditor() == nil || !engaged {
             focusAndSelectAll()
             return
@@ -5200,11 +5194,10 @@ final class ClickSelectTextField: NSTextField {
         let ok = super.becomeFirstResponder()
         if ok {
             if engaged {
-                // ユーザー操作（クリック・⌘L）は engaged が先に立っている
+                // ユーザー操作 (クリック・⌘L) は engaged が先に立っている
                 onEditingChanged?(true)
             } else {
-                // 受け身でフォーカスが回ってきた場合（タブ切り替えで直前の
-                // first responder だった WebView が隠れた等）。
+                // 受け身でフォーカスが回ってきた場合。(タブ切り替えで直前の first responder だった WebView が隠れた等)
                 // NSTextField 既定の全選択は解いてカーソルだけにする。
                 // ここで編集開始を名乗ると、新しいタブのアドレスバーに
                 // 前のタブの URL が残りっぱなしになるので黙っている
@@ -5214,7 +5207,7 @@ final class ClickSelectTextField: NSTextField {
         return ok
     }
 
-    // 受け身のフォーカスのまま打ち始めた場合も、そこからは本人の編集だ。
+    // 受け身のフォーカスのまま打ち始めた場合も、そこからは本人の編集。
     // 以後は外からの上書きを拒む
     override func textDidChange(_ notification: Notification) {
         super.textDidChange(notification)
@@ -5228,7 +5221,7 @@ final class ClickSelectTextField: NSTextField {
     // abortEditing は textDidEndEditing を通らないので、編集終了の通知は手動で流す
     func resetForTabSwitch() {
         // 編集中でなければ abortEditing には触らない。
-        // あの中で AppKit が入力メソッド（別プロセス・Default QoS）とやり取りするので、
+        // あの中で AppKit が入力メソッド (別プロセス・Default QoS) とやり取りするので、
         // メインスレッドが格下の返事を待つ形になり、
         // Xcode の Thread Performance Checker が優先度の逆転を警告する。
         // 待ちが起きているのは Apple 側の中なのでこちらからは直せないが、
@@ -5252,8 +5245,7 @@ struct AddressField: NSViewRepresentable {
     // タブの印。変わったら「別のタブに移った」ので編集を仕切り直す
     let tabToken: UUID
     // タブ本人が持つ URL。切り替え直後はこちらを正とする
-    //（上の text は親の @State なので、切り替わった一回目は
-    // まだ前のタブの URL が入っている）
+    // (上の text は親の @State なので、切り替わった一回目はまだ前のタブの URL が入っている)
     let tabURL: String
     // ⌘L の合図。値が変わったらフォーカスして全選択する
     let focusTrigger: Int
@@ -5264,7 +5256,7 @@ struct AddressField: NSViewRepresentable {
     let onSubmit: () -> Void
     let onEditingChanged: (Bool) -> Void
     // ↑↓ で候補を選ぶ。候補が出ていない時は false を返してもらい、
-    // AppKit 既定の動き（単行の欄では何も起きない）に任せる
+    // AppKit 既定の動き (単行の欄では何も起きない) に任せる
     let onMove: (Int) -> Bool
     // Esc。候補が出ていればそれを閉じるだけに留め、
     // 二度目で既定の「打ちかけを捨てて URL に戻す」へ落とす
@@ -5304,9 +5296,9 @@ struct AddressField: NSViewRepresentable {
         coordinator.parent = self
         // タブが切り替わった：編集を破棄して、新しいタブの URL を強制反映する。
         //
-        // ここで text（親の @State）を映してはいけない。
+        // ここで text (親の @State) を映してはいけない。
         // 切り替わった一回目の body 評価の時点では、親の @State は
-        // まだ前のタブの URL を持っている（更新は onChange 経由で後から届く）。
+        // まだ前のタブの URL を持っている。(更新は onChange 経由で後から届く)
         // それを書き込むと、直後に受け身のフォーカスが回ってきた場合に
         // 「編集中は上書きしない」の規則に守られて、前のタブの URL が
         // 新しいタブに居座る。タブ本人が持つ tabURL を正とする
@@ -5317,7 +5309,7 @@ struct AddressField: NSViewRepresentable {
             // 合図の数えはタブごとなので、切り替えでは必ず値が飛ぶ。
             // そのまま比べると、切り替えそのものを ⌘L と誤解して
             // 焦点を奪い、前のタブの URL を抱えたまま編集中にしてしまう。
-            // 逆に、新規タブが生まれながらに求めた焦点（⌘T など）は
+            // 逆に、新規タブが生まれながらに求めた焦点 (⌘T など) は
             // この控えとの差として残るので、下の ⌘L 処理で叶う
             if let previous = coordinator.lastTabToken {
                 coordinator.seenFocusTriggers[previous] = coordinator.lastFocusTrigger
@@ -5330,18 +5322,18 @@ struct AddressField: NSViewRepresentable {
                 field.resetForTabSwitch()
             }
             field.stringValue = tabURL
-            // 親の控えも揃えておく（描画中の更新になるので次の回に回す）
+            // 親の控えも揃えておく (描画中の更新になるので次の回に回す)
             if text != tabURL {
                 let newText = tabURL
                 DispatchQueue.main.async { coordinator.parent.text = newText }
             }
         } else if !field.isEngaged, field.stringValue != text {
             // 本人が編集している間だけ外の値を弾く。
-            // 受け身のフォーカス（currentEditor は居るが engaged ではない）で
+            // 受け身のフォーカス (currentEditor は居るが engaged ではない) で
             // 弾くと、ページ遷移やタブ切り替えの結果が映らなくなる
             field.stringValue = text
         }
-        // ⌘L：フォーカスして全選択（engaged も立つので直後のクリックはカーソル配置）
+        // ⌘L：フォーカスして全選択 (engaged も立つので直後のクリックはカーソル配置)
         if coordinator.lastFocusTrigger != focusTrigger {
             coordinator.lastFocusTrigger = focusTrigger
             coordinator.seenFocusTriggers[tabToken] = focusTrigger
@@ -5350,8 +5342,7 @@ struct AddressField: NSViewRepresentable {
             }
         }
         // 候補を選び終えた：編集を畳む。
-        // タブ切り替えと同じ仕切り直しで足りる（打ちかけを捨て、
-        // engaged を下ろし、編集終了を親へ知らせる）。
+        // タブ切り替えと同じ仕切り直しで足りる。(打ちかけを捨て、engaged を下ろし、編集終了を親へ知らせる)
         // ⌘L の合図と違ってタブごとに数える必要はない——
         // 候補一覧も欄も、窓に一つしか無いため
         if coordinator.lastEndEditingTrigger != endEditingTrigger {
@@ -5369,8 +5360,7 @@ struct AddressField: NSViewRepresentable {
         var lastTabToken: UUID?
         // タブごとの「消化済みの ⌘L の数え」。
         // 欄は窓に一つしか無いので、ここでタブ別に覚えておかないと
-        // 切り替えと ⌘L を見分けられない（中身は Int 一つなので、
-        // 閉じたタブの分が残っても実害は無い）
+        // 切り替えと ⌘L を見分けられない (中身は Int 一つなので、閉じたタブの分が残っても実害は無い)
         var seenFocusTriggers: [UUID: Int] = [:]
 
         init(_ parent: AddressField) {
@@ -5389,8 +5379,8 @@ struct AddressField: NSViewRepresentable {
         // Return で確定、↑↓ で候補選び、Esc で候補を閉じる。
         // それ以外のキー操作は既定に任せる。
         //
-        // かな漢字変換の最中は、この窓口自体が呼ばれない
-        //（変換候補の選択と確定はフィールドエディタが先に食う）。
+        // かな漢字変換の最中は、この窓口自体が呼ばれない。
+        // (変換候補の選択と確定はフィールドエディタが先に食う)
         // 変換中の ↑↓ で候補一覧が動く心配は要らない
         func control(_ control: NSControl, textView: NSTextView,
                      doCommandBy commandSelector: Selector) -> Bool {
@@ -5417,7 +5407,7 @@ struct AddressField: NSViewRepresentable {
 //
 // 行の当たり判定に Button を使わないのは、押した拍子に
 // first responder が欄から奪われるため。そうなると欄が編集終了を名乗り、
-// 候補が消えてから押した先の処理が走る（＝何も起きない）。
+// 候補が消えてから押した先の処理が走る。(＝何も起きない)
 // onTapGesture は焦点を動かさないので、順番の心配が要らない
 struct SuggestionList: View {
     let suggestions: [AddressSuggestion]
@@ -5483,9 +5473,9 @@ struct SuggestionList: View {
 // Return で次、⇧Return で前、Esc で閉じる
 struct FindField: NSViewRepresentable {
     @Binding var text: String
-    // 値が変わったら焦点を移して全選択する（⌘F の合図）
+    // 値が変わったら焦点を移して全選択する (⌘F の合図)
     let focusTrigger: Int
-    let onSubmit: (Bool) -> Void   // 真なら後方検索（⇧Return）
+    let onSubmit: (Bool) -> Void   // 真なら後方検索 (⇧Return)
     let onCancel: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -5728,7 +5718,7 @@ struct PasswordNoticeBar: View {
         }
     }
 
-    // 利用者名。空（名前欄の無いログイン）の時は何も出さない
+    // 利用者名。空 (名前欄の無いログイン)の時は何も出さない
     @ViewBuilder
     private func account(_ username: String) -> some View {
         if !username.isEmpty {
@@ -5766,10 +5756,10 @@ struct BrowserPane: View {
     @ObservedObject var manager: TabManager
     @EnvironmentObject var store: BookmarkStore
     @State private var addressText: String = ""
-    // アドレスバーを編集中か（AddressField からの通知で更新）
+    // アドレスバーを編集中か (AddressField からの通知で更新)
     @State private var addressEditing = false
     // 打った文字から組み立てた候補と、今どれを選んでいるか。
-    // 先頭（0 番）は必ず「Return を押したら何が起きるか」なので、
+    // 先頭 (0 番) は必ず「Return を押したら何が起きるか」なので、
     // 候補を見ずに打ち続ける限り、これまでと同じ動きになる
     @State private var suggestions: [AddressSuggestion] = []
     @State private var suggestionIndex = 0
@@ -5781,7 +5771,7 @@ struct BrowserPane: View {
     // 窓ごとの @State ではなく UserDefaults に置くのは、
     // 帯そのものが窓をまたいで同じ中身だから——片方の窓だけ
     // 出ている状態は、見た目の統一より混乱の方が大きい。
-    // メニュー側（BrowserCommands）も同じ鍵を見ている
+    // メニュー側 (BrowserCommands) も同じ鍵を見ている
     @AppStorage("bookmarkBarVisible") private var showsBookmarkBar = true
 
     // 編集中で、かつ出すものがある時だけ垂らす
@@ -5791,22 +5781,22 @@ struct BrowserPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // アドレスバーとブックマークバーは、疑似大画面（動画が
-            // ウィンドウを占有）中は隠して、全面を Web の中身に明け渡す
+            // アドレスバーとブックマークバーは、
+            // 疑似大画面(動画がウィンドウを占有) 中は隠して、
+            // 全面を Web の中身に明け渡す
             if !tab.isVideoFullscreen {
             // ── アドレスバー ──
             HStack(spacing: 10) {
                 historyButtons
                 NavButton(system: "arrow.clockwise", disabled: false)           { tab.reload() }
 
-                // アドレスバーは AppKit 直書き（AddressField）。
-                // 確定は delegate の insertNewline でのみ行い、target/action は
-                // 使わない（action は編集終了でも発火し、ページをクリックした
-                // だけで再読み込みが走る事故の再演になるため）。
-                // クリックでの全選択（Safari と同じ挙動）は AddressField 内の
+                // アドレスバーは AppKit 直書き。 (AddressField)
+                // 確定は delegate の insertNewline でのみ行い、
+                // target/action は使わない。
+                // (action は編集終了でも発火し、ページをクリックしただけで再読み込みが走る事故の再演になるため)
+                // クリックでの全選択 (Safari と同じ挙動) は AddressField 内の
                 // AppKit 実装が決定論的に行う。編集終了時は打ちかけを捨てて
-                // 現在の URL に戻す（Return 確定時は submitAddress が先に
-                // urlText を更新しているので影響なし）
+                // 現在の URL に戻す (Return 確定時は submitAddress が先に urlText を更新しているので影響なし)
                 addressBar
 
                 trailingControls
@@ -5821,7 +5811,7 @@ struct BrowserPane: View {
             // 「自分の上端」を差し出す手は効かず、一覧の下端が行の下端に
             // 揃えられて上へ伸び、二行目からタイトルバーに切られていた。
             //
-            // fixedSize が要るのは、overlay の子には親（＝アドレスバー行）の
+            // fixedSize が要るのは、overlay の子には親 (＝アドレスバー行) の
             // 高さしか差し出されないため。そのままだと数十ポイントに
             // 押し込められて、行が潰れる。
             //
@@ -5850,7 +5840,7 @@ struct BrowserPane: View {
                 BookmarkBar(tab: tab, manager: manager)
             }
 
-            // ── ページ内検索バー（⌘F）──
+            // ── ページ内検索バー (⌘F)──
             // タブごとに作り直す。使い回すと、前のタブで編集中だった
             // フィールドエディタが残って打ちかけの語が混ざる
             if tab.isFindBarVisible {
@@ -5880,8 +5870,8 @@ struct BrowserPane: View {
                 ForEach(manager.tabs) { t in
                     // 顛末書を出している間は WebView を伏せる。
                     // 上に重ねて隠すのではなく引っ込めるのは、AppKit のビューと
-                    // SwiftUI の重なり順を当てにしないため（ロビーと同じ手）。
-                    // loadError を選択中のタブ（tab）から読むのは、
+                    // SwiftUI の重なり順を当てにしないため。(ロビーと同じ手)
+                    // loadError を選択中のタブ (tab) から読むのは、
                     // BrowserPane が見張っているのがそれだけだから——
                     // 条件に t.id == tab.id が入っているので同じものを指す
                     let showsWeb = t.id == tab.id && !t.isHome && tab.loadError == nil
@@ -5890,8 +5880,8 @@ struct BrowserPane: View {
                         .allowsHitTesting(showsWeb)
                         // 器を作り直したら、こちらの器も組み直させる。
                         //
-                        // updateNSView は WKWebView の親子関係に一切触らない
-                        //（全画面再生を壊さないための判断。詳しくは WebView の中）。
+                        // updateNSView は WKWebView の親子関係に一切触らない。
+                        // (全画面再生を壊さないための判断。詳しくは WebView の中)
                         // だから中身を差し替えても、そこには何も届かない。
                         // .id を変えて makeNSView からやり直させる——
                         // 器ごと新しく作るので、付け替えをめぐる上の話とは土俵が違う
@@ -5934,7 +5924,7 @@ struct BrowserPane: View {
         // 打つそばから組み立て直す。
         // 編集中かどうかで絞らないのは、受け身の焦点のままいきなり
         // 打ち始めた場合、編集開始の知らせが一拍遅れて届くため
-        //（出す・出さないは showsSuggestions が持つ）
+        // (出す・出さないは showsSuggestions が持つ)
         .onChange(of: addressText) { _, _ in
             refreshSuggestions()
         }
@@ -5946,7 +5936,7 @@ struct BrowserPane: View {
     }
 
     // 窓の題名。プライベートウィンドウはタイトルバーでも分かるようにする。
-    // Mission Control や Dock の窓一覧に出るのはこれだ
+    // Mission Control や Dock の窓一覧に出るのはこれ
     private var windowTitle: String {
         let base = tab.pageTitle.isEmpty ? "Skyscraper" : tab.pageTitle
         return manager.isPrivate ? String(localized: "\(base) \u{2014} Private") : base
@@ -5955,7 +5945,7 @@ struct BrowserPane: View {
     // ── 戻る／進む ──
     //
     // 短く押せば普段どおり。押しっぱなし（か右クリック）で履歴の一覧が垂れる。
-    // 一覧を作るのはメニューを開く直前だけだ——
+    // 一覧を作るのはメニューを開く直前だけ——
     // 描き直しのたびに WKBackForwardList をなぞる理由は無い
     @ViewBuilder
     private var historyButtons: some View {
@@ -5995,7 +5985,7 @@ struct BrowserPane: View {
     // 鍵は欄の外に置かれた別のボタンではなく、同じ一枚の札の上にある
     private var addressBar: some View {
         HStack(spacing: 8) {
-            // 接続の格を示す鍵。押すとサイトの調書が垂れる（SiteInfo.swift）
+            // 接続の格を示す鍵。押すとサイトの調書が垂れる (SiteInfo.swift)
             SiteSecurityButton(tab: tab)
 
             AddressField(
@@ -6050,7 +6040,7 @@ struct BrowserPane: View {
             .help(tab.isReaderActive ? "Hide Reader" : "Show Reader")
         }
 
-        // 星ボタン：現在のページを登録／解除
+        // 星ボタン：現在のページを登録/解除
         Button {
             store.toggle(title: tab.pageTitle, url: tab.urlText)
         } label: {
@@ -6098,7 +6088,7 @@ struct BrowserPane: View {
         targetTab.load()
     }
 
-    // 候補を実行する（Return でも、行を押した時でも通る）
+    // 候補を実行する (Return でも、行を押した時でも通る)
     private func choose(_ suggestion: AddressSuggestion) {
         let targetTab = manager.selectedTab ?? tab
         switch suggestion.kind {
@@ -6137,7 +6127,7 @@ struct BrowserPane: View {
         suggestionIndex = 0
     }
 
-    // ↑↓。端まで来たら巻き戻す（候補は数行なので、行き止まりより回った方が速い）
+    // ↑↓。端まで来たら巻き戻す (候補は数行なので、行き止まりより回った方が速い)
     private func moveSelection(_ offset: Int) -> Bool {
         guard showsSuggestions else { return false }
         let count = suggestions.count
@@ -6289,7 +6279,7 @@ struct TranslationPanel: View {
             .lineLimit(1)
     }
 
-    // ── 訳文（もしくは途中経過）──
+    // ── 訳文 (もしくは途中経過)──
 
     @ViewBuilder
     private var result: some View {
@@ -6394,7 +6384,7 @@ struct ContentView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            // 疑似大画面中はサイドバーも隠す（復帰は Esc。⌘1〜⌘9 は効く）
+            // 疑似大画面中はサイドバーも隠す (復帰は Esc。⌘1〜⌘9 は効く)
             if manager.selectedTab?.isVideoFullscreen != true {
                 VerticalTabStrip(manager: manager, grouper: manager.grouper)
             }
@@ -6414,7 +6404,7 @@ struct ContentView: View {
         .animation(.easeOut(duration: 0.18), value: translator.isPresented)
         .frame(minWidth: 900, minHeight: 600)
         .background(Deco.ink)
-        // タブ検索の盤（⇧⌘A）。
+        // タブ検索の盤。(⇧⌘A)
         // 盤は全ての窓のタブを並べるが、出すのは押された窓だけだ
         .overlay {
             if manager.isTabSearchVisible {
@@ -6438,7 +6428,7 @@ struct ContentView: View {
             // openWindow は環境の値なので、ここで渡すしか無い
             IncomingURL.registerWindowOpener { openWindow(id: "browser") }
             // 窓が無い間に積まれた分を引き取る。
-            // プライベートウィンドウは受け取らない（選ばれていない契約だ）
+            // プライベートウィンドウは受け取らない
             if manager.acceptsExternalURL {
                 IncomingURL.drain(into: manager)
             }

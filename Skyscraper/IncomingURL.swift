@@ -2,7 +2,7 @@
 //  IncomingURL.swift
 //  Skyscraper
 //
-//  他のアプリから渡された URL を受け取る係。ExternalScheme.swift の裏返しだ。
+//  他のアプリから渡された URL を受け取る係。ExternalScheme.swift の裏返し。
 //  あちらは「WKWebView が開けないものを外へ出す」、こちらは「外から来たものを中で開く」。
 //
 //  既定のブラウザというのは、要するに「他のアプリから URL を投げつけられる係」だ。
@@ -20,14 +20,13 @@
 //  Info.plist の CFBundleDocumentTypes に public.html が入っているのは、
 //  Finder で .html を開くためだけではない。
 //  システム設定の「デフォルトの Web ブラウザ」一覧は、http / https を扱えるだけでは
-//  載せてくれず、HTML 書類を開けると名乗っているアプリに絞っている（macOS 11 以降）。
-//  一度外したら一覧から消えた。既定には設定できるのに一覧に出ない、という
-//  半端な状態になる。外すな。
+//  載せてくれず、HTML 書類を開けると名乗っているアプリに絞っている (macOS 11 以降)。
+//  一度外したら一覧から消えた。既定には設定できるのに一覧に出ない、という半端な状態になる。外してはいけない。
 //
 //  ── 窓が一枚も無い時 ──
 //  アプリを終了した状態でリンクを押されると、URL が先に届いて窓がまだ無い。
 //  openWindow は View の環境にしか居ないのでここからは呼べない。
-//  そこでセッション復元（pendingRestores）と同じ手を使う——
+//  そこでセッション復元 (pendingRestores) と同じ手を使う——
 //  預かり所に積んでおき、窓が生まれた時に ContentView から引き取らせる。
 //
 
@@ -38,7 +37,7 @@ enum IncomingURL {
     // 窓の誕生を待っている宛先。窓さえあれば経由しない
     private static var pending: [URL] = []
 
-    // 窓を開かせるための連絡先（ContentView が入れる）。
+    // 窓を開かせるための連絡先 (ContentView が入れる)。
     // openWindow は環境の値なので、こちらから掴みには行けない
     private static var windowOpener: (() -> Void)?
 
@@ -56,8 +55,9 @@ enum IncomingURL {
 
     // http / https と、手元の HTML 書類を引き受ける。
     //
-    // file:// は Info.plist で public.html を名乗った分だけ届く（Finder のダブルクリック、
-    // 「このアプリケーションで開く」）。拡張子の照合はここではしない——
+    // file:// は Info.plist で public.html を名乗った分だけ届く。
+    // (Finder のダブルクリック、「このアプリケーションで開く」)
+    // 拡張子の照合はここではしない——
     // 何を渡すかは LaunchServices が宣言を見て決めている。
     // 開くのは Tab.load() で、あちらが loadFileURL で親ディレクトリまで読み取りを許す
     private static func isOpenable(_ url: URL) -> Bool {

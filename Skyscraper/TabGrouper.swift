@@ -7,7 +7,7 @@
 //  処理は完全にオンデバイスで行われ、閲覧内容が外部へ送られることはない。
 //
 //  設計方針：グループ化は「表示層」だけで行う。TabManager.tabs の並び順には
-//  一切手を付けず、タブID → グループ名の対応表（assignments）だけを持つ。
+//  一切手を付けず、タブID → グループ名の対応表 (assignments) だけを持つ。
 //  これにより ZStack 常時マウント・⌘1〜9 の番号選択などの既存挙動を壊さない。
 //
 //  言語まわりの注意：Foundation Models はプロンプトに非対応言語が混ざると
@@ -22,7 +22,7 @@ import WebKit
 import NaturalLanguage
 import FoundationModels
 
-// モデルに出力させる構造（guided generation）。
+// モデルに出力させる構造 (guided generation)。
 // @Generable を付けると、モデルの出力がこの型に確実にデコードされる
 @Generable
 struct TabGroupingResult {
@@ -44,19 +44,19 @@ final class TabGrouper: ObservableObject {
     // タブID → グループ名。載っていないタブは「グループ無し」扱い
     @Published var assignments: [UUID: String] = [:]
 
-    // 手動で割り当てられたタブ（ピン留め）。
+    // 手動で割り当てられたタブ (ピン留め)。
     // 自動再グループ化では一切上書きしない
     @Published private(set) var pinned: Set<UUID> = []
 
-    // モデルが考え中か（再生成ボタンのスピナー表示用）
+    // モデルが考え中か (再生成ボタンのスピナー表示用)
     @Published private(set) var isWorking = false
 
     // デバウンス待ちのタスク。キャンセルしてよいのはこっちだけ
     private var debounce: Task<Void, Never>?
     // 実行中・実行待ちの本体。絶対にキャンセルしない。
-    // （respond を途中で殺すと FoundationModels が
+    // (respond を途中で殺すと FoundationModels が
     //  「Canceled state in response to PrewarmSession」を吐いて結果が捨てられる。
-    //  後発の要求は前の実行の完了を待ってから順番に走る）
+    //  後発の要求は前の実行の完了を待ってから順番に走る)
     private var running: Task<Void, Never>?
 
     // 一度でも Apple 側の言語判定に拒否されたら true。
@@ -76,7 +76,7 @@ final class TabGrouper: ObservableObject {
 
     // タブの増減・タイトル確定のたびに呼ぶ。
     // 2秒のデバウンスを挟み、連続変更では最後の一回だけ実行する。
-    // 既にモデルが考え中の場合は、その完了を待ってから走る（キャンセルはしない）
+    // 既にモデルが考え中の場合は、その完了を待ってから走る (キャンセルはしない)
     func scheduleRegroup(for tabs: [Tab]) {
         guard isAvailable else { return }
         debounce?.cancel()
@@ -87,8 +87,8 @@ final class TabGrouper: ObservableObject {
         }
     }
 
-    // 今すぐ組み直す（再生成ボタン用。デバウンス無し）。
-    // clearingManual に true を渡すと手動割り当て（ピン留め）もご破算にして、
+    // 今すぐ組み直す (再生成ボタン用。デバウンス無し)。
+    // clearingManual に true を渡すと手動割り当て (ピン留め) もご破算にして、
     // まっさらから組み直す
     func regroupNow(tabs: [Tab], clearingManual: Bool = false) {
         guard isAvailable else { return }
@@ -96,7 +96,7 @@ final class TabGrouper: ObservableObject {
         if clearingManual {
             pinned = []
         }
-        // 手動実行は2枚から動く（押したのに無反応、を避ける）
+        // 手動実行は2枚から動く (押したのに無反応、を避ける)
         enqueueRegroup(tabs: tabs, minimumTabs: 2)
     }
 
@@ -109,7 +109,7 @@ final class TabGrouper: ObservableObject {
         }
     }
 
-    // 手動でグループを割り当てる（nil なら「グループ無し」）。
+    // 手動でグループを割り当てる (nil なら「グループ無し」)。
     // 以降の自動再グループ化でもこの割り当ては維持される
     func assignManually(_ tabID: UUID, to group: String?) {
         let name = group?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -137,7 +137,7 @@ final class TabGrouper: ObservableObject {
         }
 
         // 非対応言語と判定されたタイトルのタブを外す。
-        // 通常は緩い判定（確信度が高いときだけ弾く）で除外しすぎを防ぐが、
+        // 通常は緩い判定 (確信度が高いときだけ弾く) で除外しすぎを防ぐが、
         // 過去に Apple 側で拒否された実績があれば最初から厳しい判定を使う
         let useStrict = preferStrictFilter
         let candidates = eligible.filter { isSupportedLanguage($0.pageTitle, strict: useStrict) }
@@ -205,7 +205,7 @@ final class TabGrouper: ObservableObject {
             """)
 
         // 既存のグループ名をヒントとして渡す。
-        // 名前の揺れ（同じ内容なのに毎回別名になる）を抑える
+        // 名前の揺れ (同じ内容なのに毎回別名になる) を抑える
         let existingNames = Array(Set(assignments.values)).sorted()
         let hint = existingNames.isEmpty
             ? ""
@@ -216,7 +216,7 @@ final class TabGrouper: ObservableObject {
             generating: TabGroupingResult.self
         )
 
-        // 手動割り当て（ピン留め）を土台に、自動の結果を重ねる
+        // 手動割り当て (ピン留め) を土台に、自動の結果を重ねる
         var newAssignments = assignments.filter { pinned.contains($0.key) }
         for group in response.content.groups {
             let name = group.name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -232,7 +232,7 @@ final class TabGrouper: ObservableObject {
     }
 
     // @ハンドル・URLなど、言語判定を狂わせるノイズを取り除く。
-    // 言語判定（isSupportedLanguage）とモデルへの送信文の両方で
+    // 言語判定 (isSupportedLanguage) とモデルへの送信文の両方で
     // 必ずこれを通し、判定対象と実際に送る文を一致させる
     private func sanitize(_ text: String) -> String {
         var cleaned = text
@@ -245,9 +245,9 @@ final class TabGrouper: ObservableObject {
         return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    // タイトルの言語がモデルの対応言語かどうか（sanitize 済みの文で判定）。
-    // strict = false：確信度が高く非対応と分かったときだけ弾く（通常運転）
-    // strict = true ：非対応が最有力なら弾く（拒否された実績があるとき）
+    // タイトルの言語がモデルの対応言語かどうか (sanitize 済みの文で判定)。
+    // strict = false：確信度が高く非対応と分かったときだけ弾く(通常運転)
+    // strict = true ：非対応が最有力なら弾く (拒否された実績があるとき)
     private func isSupportedLanguage(_ text: String, strict: Bool) -> Bool {
         let cleaned = sanitize(text)
         guard !cleaned.isEmpty else { return true }

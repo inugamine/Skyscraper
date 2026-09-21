@@ -2,11 +2,11 @@
 //  Translator.swift
 //  Skyscraper
 //
-//  選択した文字列を Apple 純正の翻訳エンジン（Translation フレームワーク）で訳す。
+//  選択した文字列を Apple 純正の翻訳エンジン (Translation フレームワーク)で訳す。
 //  処理は端末内で完結し、原文が外部へ送られることはない。
 //
 //  Apple Intelligence とは無関係に動く。設定でオフにしていても、
-//  対応していない機種でも翻訳は使える（Safari の翻訳と同じ土台）。
+//  対応していない機種でも翻訳は使える (Safari の翻訳と同じ土台)。
 //
 //  設計上の要：TranslationSession は自前で作れない。
 //  イニシャライザが公開されておらず、SwiftUI の
@@ -115,7 +115,7 @@ final class Translator: ObservableObject {
     // MARK: - 入口
 
     // 選択された文字列を受け取って翻訳を始める。
-    // 実際に走るのは .translationTask が発火した後（perform(with:) の中）
+    // 実際に走るのは .translationTask が発火した後 (perform(with:) の中)
     func translate(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -145,8 +145,8 @@ final class Translator: ObservableObject {
 
     // ページで選択されている文字列を取ってきて訳す。
     //
-    // 拾えるのはメインフレームの選択だけだ。埋め込み（iframe 内の
-    // コメント欄など）の選択は window.getSelection() には現れない。
+    // 拾えるのはメインフレームの選択だだけ。
+    // 埋め込み (iframe 内のコメント欄など)の選択は window.getSelection() には現れない。
     // 全フレームを回るには WKFrameInfo を集めて一つずつ評価する必要があるが、
     // 常用する場面が思い当たらないので今は追わない。
     //
@@ -175,7 +175,7 @@ final class Translator: ObservableObject {
         }
     }
 
-    // 同じ原文をもう一度訳す（言語を変えた後など）
+    // 同じ原文をもう一度訳す (言語を変えた後など)
     func retry() {
         guard !sourceText.isEmpty else { return }
         requestSession()
@@ -200,7 +200,7 @@ final class Translator: ObservableObject {
         isPresented = false
     }
 
-    // 訳文を書き出す（コピー用）
+    // 訳文を書き出す (コピー用)
     var translatedText: String? {
         if case .done(let text) = phase { return text }
         return nil
@@ -215,7 +215,7 @@ final class Translator: ObservableObject {
         phase = .preparing
 
         // 手で選ばれていればそれを優先。どちらも無ければ source は nil にして
-        // フレームワーク側の判定に任せる（間違った source を渡すより安全）
+        // フレームワーク側の判定に任せる (間違った source を渡すより安全)
         let source = manualSourceLanguage ?? detectedLanguage
         let target = targetLanguage
 
@@ -228,7 +228,7 @@ final class Translator: ObservableObject {
         }
     }
 
-    // MARK: - 実行（セッションは .translationTask から注入される）
+    // MARK: - 実行 (セッションは .translationTask から注入される)
 
     func perform(with session: TranslationSession) async {
         let text = sourceText
@@ -316,7 +316,7 @@ final class Translator: ObservableObject {
         }
     }
 
-    // 言語の表示名（利用者の言語で）。取れなければコードをそのまま出す
+    // 言語の表示名 (利用者の言語で)。取れなければコードをそのまま出す
     static func displayName(of language: Locale.Language) -> String {
         guard let code = language.languageCode?.identifier else { return "—" }
         return Locale.current.localizedString(forLanguageCode: code) ?? code

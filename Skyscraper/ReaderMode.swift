@@ -3,21 +3,21 @@
 //  Skyscraper
 //
 //  リーダーモード。
-//  判定と本文抽出は Mozilla の Readability（Firefox のリーダービューと同じ
-//  実装・Apache 2.0）に任せ、表示はアール・デコ調のオーバーレイで行う。
+//  判定と本文抽出は Mozilla の Readability (Firefox のリーダービューと同じ実装・Apache 2.0)に任せ、
+//  表示はアール・デコ調のオーバーレイで行う。
 //  ページ自体は裏に残したまま被せるだけなので、戻るのは剥がすだけで済む。
 //
 //  Readability.js / Readability-readerable.js はバンドル同梱のリソースから
-//  読む。無ければリーダーモードは静かに無効になる（ボタンが出ないだけ）。
+//  読む。無ければリーダーモードは静かに無効になる (ボタンが出ないだけ)。
 //
 
 import Foundation
 
 enum Reader {
 
-    // 本文抽出器（約90KB）。ボタンが押されたときだけページに注入する
+    // 本文抽出器 (約90KB)。ボタンが押されたときだけページに注入する
     static let readabilityJS: String = load("Readability")
-    // 「このページはリーダー表示に向くか」の判定器（小さいので毎ページ評価する）
+    // 「このページはリーダー表示に向くか」の判定器 (小さいので毎ページ評価する)
     static let readerableJS: String = load("Readability-readerable")
 
     private static func load(_ name: String) -> String {
@@ -45,8 +45,7 @@ enum Reader {
 
     // ── 入場 ──
     // Readability を注入し、document の複製から本文を抽出して
-    // オーバーレイに流し込む（複製に対して走らせるのは、Readability が
-    // 解析中に DOM を壊す造りのため。本家も同じ注意書きをしている）。
+    // オーバーレイに流し込む (複製に対して走らせるのは、Readability が解析中に DOM を壊す造りのため。本家も同じ注意書きをしている)。
     // 成功なら true を返す
     static var enterJS: String {
         guard !readabilityJS.isEmpty else { return "false;" }
@@ -109,8 +108,7 @@ enum Reader {
 
     // ── 装い ──
     // ロビーと同じ闇と金。本文はセリフ体のクリーム、罫の中央にダイヤを一粒。
-    // 注意: この CSS は JS のテンプレートリテラル（バッククォート）に
-    // 流し込むので、バッククォートと ${ は使わないこと
+    // 注意: この CSS は JS のテンプレートリテラル (バッククォート) に流し込むので、バッククォートと ${ は使わないこと
     private static let css = """
     #__skyscraper-reader {
         position: fixed; inset: 0;

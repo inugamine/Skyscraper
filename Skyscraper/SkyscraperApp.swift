@@ -65,7 +65,7 @@ struct SkyscraperApp: App {
 
     init() {
         // 前回消し残したプロファイルの置き場を片付ける。
-        // WebView が一つも生まれる前なら、誰も掴んでいない（Profile.swift）
+        // WebView が一つも生まれる前なら、誰も掴んでいない (Profile.swift)
         Task { await ProfileStore.shared.purgePendingRemovals() }
 
         // 拡張機能を読み込む。
@@ -95,7 +95,7 @@ struct SkyscraperApp: App {
             BrowserCommands(bookmarks: bookmarks)
         }
 
-        // 設定画面（⌘, で開く。Sparkle のダイアログが案内する「設定」の実体）
+        // 設定画面 (⌘, で開く。Sparkle のダイアログが案内する「設定」の実体)
         Settings {
             SettingsView(updater: updater, bookmarks: bookmarks)
         }
@@ -105,10 +105,10 @@ struct SkyscraperApp: App {
 // メニュー本体。
 // @FocusedValue は View か Commands の中でしか使えないので、
 // App から切り出して独立した Commands にしてある。
-// manager が nil になるのは、どの窓にも focus が無い時（設定画面だけ開いている等）
+// manager が nil になるのは、どの窓にも focus が無い時 (設定画面だけ開いている等)
 struct BrowserCommands: Commands {
     // ブックマークは窓をまたいで一つなので、focus ではなく App から直に受け取る。
-    // 見張る必要は無い（メニューからは入れるだけで、中身を読まない）
+    // 見張る必要は無い (メニューからは入れるだけで、中身を読まない)
     let bookmarks: BookmarkStore
 
     @FocusedValue(\.tabManager) private var manager: TabManager?
@@ -246,7 +246,7 @@ struct BrowserCommands: Commands {
                 .disabled(manager == nil)
             Divider()
             // ピン留め。札の文言が今の状態で変わるので、
-            // 管理人を見張る View（PinTabCommand）に包んである。
+            // 管理人を見張る View (PinTabCommand) に包んである。
             // @FocusedValue は値を渡すだけで、中身の変化を見張らない——
             // ここで直に三項演算子を書くと、留めた後も
             // 「Pin Tab」のまま古びる

@@ -8,7 +8,7 @@
 //  承諾する形でしか通さない。外から NSWorkspace を叩いても permErr で蹴られる。
 //  だから、この口はアプリの中に無ければ意味がない。
 //
-//  Info.plist の CFBundleURLTypes で http / https を扱えると名乗っているのが前提だ。
+//  Info.plist の CFBundleURLTypes で http / https を扱えると名乗っているのが前提。
 //  名乗っていないアプリがここを呼んでも、システムは相手にしない。
 //
 
@@ -24,14 +24,14 @@ enum DefaultBrowser {
     // 今この Skyscraper が既定か。
     //
     // 番地で照合する。同じバンドルIDの写しが幾つも転がっている場合
-    //（DMG の残骸、ゴミ箱の中、書庫の中）、
+    // (DMG の残骸、ゴミ箱の中、書庫の中)、
     // 「Skyscraper が既定」でも「この Skyscraper が既定」とは限らない
     static var isCurrent: Bool {
         guard let handler = NSWorkspace.shared.urlForApplication(toOpen: probe) else { return false }
         return handler.standardizedFileURL == Bundle.main.bundleURL.standardizedFileURL
     }
 
-    // 今の既定の名前（「Comet」など）。設定画面に出す。
+    // 今の既定の名前 (「Comet」など)。設定画面に出す。
     // displayName(atPath:) は Finder の設定次第で .app を残すので、自分で落とす
     static var currentName: String? {
         guard let handler = NSWorkspace.shared.urlForApplication(toOpen: probe) else { return nil }

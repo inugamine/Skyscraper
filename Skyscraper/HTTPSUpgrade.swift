@@ -18,7 +18,7 @@
 //
 //  持ち上げない相手も決めてある。手元の開発サーバや宅内の機械は
 //  そもそも TLS を立てていないことが多く、毎回 443 を殴りに行っても
-//  待たされるだけで何の得も無い（下の isExempt を見ろ）。
+//  待たされるだけで何の得も無い (下の isExempt を見ること)。
 //
 
 import AppKit
@@ -32,7 +32,7 @@ final class HTTPSFirstStore: ObservableObject {
     // 設定画面のトグルと共有する鍵。既定は「持ち上げる」
     static let enabledKey = "skyscraper.httpsFirst"
 
-    // https では繋がらないと分かった場所（"host:port"）。
+    // https では繋がらないと分かった場所 ("host:port")。
     //
     // UserDefaults にも書かない。アプリを終えば消える——
     // 証明書の例外と同じ考え方だ。「一度落としたら以後ずっと平文」は、
@@ -52,7 +52,7 @@ final class HTTPSFirstStore: ObservableObject {
     // 平文のまま通すことにした場所の一覧（設定画面の表示用）
     var places: [String] { plainAllowed.sorted() }
 
-    // 鍵は "host:port"。プロファイルならその印を前置きする（DataScope）。
+    // 鍵は "host:port"。プロファイルならその印を前置きする。(DataScope)
     // プライベートは既定と同じ鍵——この控えは元からメモリだけで、終えば消える
     private static func key(_ url: URL, scope: DataScope) -> String {
         scope.key("\(url.host()?.lowercased() ?? ""):\(url.port ?? 80)")
@@ -62,7 +62,7 @@ final class HTTPSFirstStore: ObservableObject {
 
     // この行き先を https に持ち上げるか。
     //
-    // 判断はここ一箇所に閉じ込める。呼ぶ側（Tab の decidePolicyFor）に
+    // 判断はここ一箇所に閉じ込める。呼ぶ側 (Tab の decidePolicyFor) に
     // 条件を散らすと、除外を足した時にどこかが取り残される
     func shouldUpgrade(_ url: URL, scope: DataScope) -> Bool {
         guard isEnabled,
@@ -132,7 +132,7 @@ final class HTTPSFirstStore: ObservableObject {
         plainAllowed.removeAll()
     }
 
-    // あるプロファイルの分を丸ごと忘れる（プロファイルを消す時）
+    // あるプロファイルの分を丸ごと忘れる (プロファイルを消す時)
     func forgetProfile(_ id: UUID) {
         let prefix = DataScope.prefix(for: id)
         plainAllowed = plainAllowed.filter { !$0.hasPrefix(prefix) }

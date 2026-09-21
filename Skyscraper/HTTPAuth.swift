@@ -10,13 +10,12 @@
 //  401 の本文が残る（何を求められているのかさえ分からない）。
 //  ここで窓を出し、答えを WebKit へ返す。
 //
-//  預け先は既存の PasswordStore（キーチェーン）。フォームのログインと
+//  預け先は既存の PasswordStore (キーチェーン)。フォームのログインと
 //  同じ棚に載るので、設定画面の一覧からまとめて管理できる。
 //  realm ごとの区別は付けていない——本来 realm は kSecAttrSecurityDomain に
 //  入れる属性だが、そこは既に「Skyscraper が預けたもの」の印として
 //  使っており、鍵の形を変えると今預けてあるものが一切引けなくなる。
-//  同じホストで realm を使い分けるサーバは稀なので、場所（ホスト・
-//  スキーム・ポート）単位で足りると判断した。
+//  同じホストで realm を使い分けるサーバは稀なので、場所 (ホスト・スキーム・ポート) 単位で足りると判断した。
 //
 
 import AppKit
@@ -31,7 +30,7 @@ final class HTTPAuthPrompter {
     }
 
     // 保存すると言われた中身。ただし打った時点ではまだ正しいか分からないので、
-    // 読み込みが実るまで手元に置く（間違いをキーチェーンに焼き付けない）
+    // 読み込みが実るまで手元に置く (間違いをキーチェーンに焼き付けない)
     private struct PendingSave {
         let host: String
         let scheme: String
@@ -40,7 +39,7 @@ final class HTTPAuthPrompter {
         let password: String
     }
 
-    // この器で通した資格情報（場所ごと）。
+    // この器で通した資格情報 (場所ごと)。
     // 同じページの画像や CSS にも一枚ずつチャレンジが飛んでくるので、
     // 一度答えたら以後は黙って使い回す
     private var accepted: [String: Answer] = [:]
@@ -50,17 +49,17 @@ final class HTTPAuthPrompter {
     // 今まさに窓を出している場所と、その答えを待っている者たち。
     // 一枚のページから同時に何本もチャレンジが来ても、窓は一つで済ませる
     private var waiting: [String: [CheckedContinuation<Answer?, Never>]] = [:]
-    // 実ったら預ける約束（場所ごと）
+    // 実ったら預ける約束 (場所ごと)
     private var pendingSaves: [String: PendingSave] = [:]
 
     // このタブの記憶の射程。wire() でタブから入れられる。
-    // 「このサイトでは訊かない」の印を、誰の分として見るか（Profile.swift）
+    // 「このサイトでは訊かない」の印を、誰の分として見るか (Profile.swift)
     var scope: DataScope = .default
 
     // MARK: - 出入口
 
     // ここで扱える種類か。
-    // サーバ証明書（ServerTrust）は別の係が受ける（CertificateTrust.swift）。
+    // サーバ証明書 (ServerTrust) は別の係が受ける (CertificateTrust.swift)。
     // クライアント証明書は WebKit に任せる——
     // 選ばせる相手（キーチェーンの識別情報）が別の話になる
     static func canHandle(_ challenge: URLAuthenticationChallenge) -> Bool {
@@ -75,7 +74,7 @@ final class HTTPAuthPrompter {
     }
 
     // 新しい読み込みが始まった。断りの記憶は仕切り直す
-    //（「もう一度」で訊き直せるようにするため）
+    // (「もう一度」で訊き直せるようにするため)
     func noteNavigationStarted() {
         declined.removeAll()
     }
