@@ -5145,6 +5145,21 @@ struct BookmarkManager: View {
                 }
                 .buttonStyle(.plain)
 
+                // 他所へ渡す口。取り込みと対にして並べる。
+                // 棚が空の時は押しても断られるだけなので、ここで隠す
+                if !store.bookmarks.isEmpty {
+                    Button { BookmarkExport.chooseFile(from: store) } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "square.and.arrow.up").font(.system(size: 11))
+                            Text("Export…").font(.system(size: 12, design: .serif)).tracking(1)
+                        }
+                        .foregroundColor(Deco.gold)
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .overlay(Hexagon(inset: 7).stroke(Deco.faintGold, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                }
+
                 Spacer()
 
                 if !store.bookmarks.isEmpty {

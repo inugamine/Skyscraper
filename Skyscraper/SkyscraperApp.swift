@@ -165,6 +165,9 @@ struct BrowserCommands: Commands {
             Button("Import Bookmarks…") {
                 BookmarkImport.chooseFile(into: bookmarks)
             }
+            Button("Export Bookmarks…") {
+                BookmarkExport.chooseFile(from: bookmarks)
+            }
         }
         CommandGroup(replacing: .printItem) {
             Button("Print…") {

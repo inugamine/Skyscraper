@@ -1161,6 +1161,16 @@
         }
       }
     },
+    "Choose where to save the bookmarks file." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ブックマークファイルの保存先を選んでください。"
+          }
+        }
+      }
+    },
     "Clear" : {
       "localizations" : {
         "en" : {
@@ -1863,6 +1873,16 @@
         }
       }
     },
+    "Export" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "書き出す"
+          }
+        }
+      }
+    },
     "Export as PDF…" : {
       "localizations" : {
         "en" : {
@@ -1875,6 +1895,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "PDF として書き出す…"
+          }
+        }
+      }
+    },
+    "Export Bookmarks…" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ブックマークを書き出す"
+          }
+        }
+      }
+    },
+    "Export…" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "書き出す…"
           }
         }
       }
@@ -3091,6 +3131,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "まだ何も預かっていません。保存する前に必ず確認します。"
+          }
+        }
+      }
+    },
+    "Nothing was exported." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "何も書き出されませんでした。"
           }
         }
       }
@@ -5214,6 +5264,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "利用者名かパスワードが違っています。"
+          }
+        }
+      }
+    },
+    "There are no bookmarks to export." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "書き出せるブックマークがありません。"
           }
         }
       }
