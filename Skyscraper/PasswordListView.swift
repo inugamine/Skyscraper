@@ -30,6 +30,10 @@ struct PasswordListView: View {
     // 取り込みの結果と、取り込んだファイルの置き場所
     @State private var importNote: String?
     @State private var importedFile: URL?
+    // 書き出しの確認・結果と、書き出したファイルの置き場所
+    @State private var confirmingExport = false
+    @State private var exportNote: String?
+    @State private var exportedFile: URL?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -112,9 +116,34 @@ struct PasswordListView: View {
                 .padding(.top, 10)
             }
 
+            if let exportNote {
+                note(exportNote, symbol: "arrow.up.doc")
+            }
+
+            // 書き出した直後に捨てさせるわけにはいかない (これから他所で読ませる物)。
+            // ゴミ箱の代わりに置き場所を示し、後で片付けられるようにしておく
+            if let file = exportedFile {
+                HStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 11))
+                        .foregroundColor(Deco.gold)
+                    Text("That file holds the passwords in plain text. Delete it once the other browser has taken them in.")
+                        .font(.system(size: 10, design: .serif))
+                        .foregroundColor(Deco.dimGold)
+                        .fixedSize(horizontal: false, vertical: true)
+                    button("Show in Finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([file])
+                    }
+                    Spacer()
+                }
+                .padding(.top, 10)
+            }
+
             HStack(spacing: 12) {
                 button("Import…") { chooseFile() }
+                // 空の時は出さない。中身の無いファイルを書かせても仕方がない
                 if !logins.isEmpty {
+                    button("Export…") { confirmingExport = true }
                     button("Delete All") { confirmingDeleteAll = true }
                 }
                 Spacer()
@@ -138,6 +167,16 @@ struct PasswordListView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("They are removed from the keychain and cannot be brought back.")
+        }
+        // 順番は 警告 → 本人確認 → 置き場所 (Safari と同じ)。
+        // 本人確認を最後に回すと、置き場所を選ばせた後で弾くことになる
+        .confirmationDialog("Export every saved password?",
+                            isPresented: $confirmingExport,
+                            titleVisibility: .visible) {
+            Button("Export…") { exportAll() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The file will hold the passwords in plain text. Anyone who can open it can read them.")
         }
     }
 
@@ -247,6 +286,8 @@ struct PasswordListView: View {
 
         authNote = nil
         importedFile = nil
+        exportNote = nil
+        exportedFile = nil
         do {
             let result = try PasswordImport.run(from: file)
             importNote = result.skipped == 0
@@ -271,6 +312,30 @@ struct PasswordListView: View {
         }
     }
 
+    // MARK: - 書き出し
+
+    private func exportAll() {
+        importNote = nil
+        importedFile = nil
+        exportNote = nil
+        exportedFile = nil
+
+        verifyOwner(reason: String(localized: "export the saved passwords"),
+                    refusal: String(localized: "Cannot verify who you are, so nothing is exported.")) {
+            do {
+                // 取り消されたら何も言わない
+                guard let outcome = try PasswordExport.chooseFileAndWrite(store.allLogins()) else { return }
+                let result = outcome.result
+                exportNote = result.skipped == 0
+                    ? String(localized: "Wrote \(result.exported) passwords.")
+                    : String(localized: "Wrote \(result.exported) passwords; the keychain did not return \(result.skipped).")
+                exportedFile = outcome.file
+            } catch {
+                exportNote = error.localizedDescription
+            }
+        }
+    }
+
     // MARK: - 中身
 
     private func reload() {
@@ -284,24 +349,37 @@ struct PasswordListView: View {
         revealedPassword = ""
     }
 
-    // Touch ID か、無ければアカウントのパスワードで本人確認する。
-    // 端末が生体認証を持たない場合も deviceOwnerAuthentication なら通る
     private func reveal(_ login: SavedLogin) {
+        verifyOwner(reason: String(localized: "show the saved password"),
+                    refusal: String(localized: "Cannot verify who you are, so the password is not shown.")) {
+            guard let password = store.password(for: login) else {
+                authNote = String(localized: "The keychain did not return the password.")
+                return
+            }
+            revealedPassword = password
+            revealed = login
+        }
+    }
+
+    // Touch ID か、無ければアカウントのパスワードで本人確認する。
+    // 端末が生体認証を持たない場合も deviceOwnerAuthentication なら通る。
+    // 見せる時と書き出す時の二箇所で使う
+    private func verifyOwner(reason: String,
+                             refusal: String,
+                             then proceed: @escaping @MainActor @Sendable () -> Void) {
         authNote = nil
 
         let context = LAContext()
-        let reason = String(localized: "show the saved password")
         var error: NSError?
 
         guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
-            // 本人確認の手立てが無い機械では、確かめようがないので見せない。
+            // 本人確認の手立てが無い機械では、確かめようがないので通さない。
             // 「確かめられないから素通し」にすると、席を外した隙が穴になる。
             //
             // ここで一番多いのは、署名されていないビルドで動かしている場合。
             // LocalAuthentication は署名の無いアプリを相手にしない
             print("PasswordListView: authentication unavailable — \(String(describing: error))")
-            authNote = String(localized: "Cannot verify who you are, so the password is not shown.")
-                + " (" + (error?.localizedDescription ?? "—") + ")"
+            authNote = refusal + " (" + (error?.localizedDescription ?? "—") + ")"
             return
         }
 
@@ -315,12 +393,7 @@ struct PasswordListView: View {
                     }
                     return
                 }
-                guard let password = store.password(for: login) else {
-                    authNote = String(localized: "The keychain did not return the password.")
-                    return
-                }
-                revealedPassword = password
-                revealed = login
+                proceed()
             }
         }
     }
