@@ -38,6 +38,14 @@ enum PasswordFill {
         return "window.__skyscraperFill(\(user), \(secret));"
     }
 
+    // 生成したパスワードを新しい欄へ入れる。
+    // 戻り値は { ok: Bool, username: String, current: String }
+    // (その時点で打たれていた利用者名と、変更の画面なら今のパスワード)
+    static func fillNewScript(password: String) -> String? {
+        guard let secret = jsonString(password) else { return nil }
+        return "window.__skyscraperFillNew(\(secret));"
+    }
+
     private static func jsonString(_ value: String) -> String? {
         guard let data = try? JSONSerialization.data(withJSONObject: [value]),
               let array = String(data: data, encoding: .utf8)
@@ -75,6 +83,40 @@ enum PasswordFill {
             Array.prototype.slice
                 .call(document.querySelectorAll('input[type="password"]'))
                 .filter(visible);
+
+        const autocompleteTokens = (el) =>
+            (el.getAttribute('autocomplete') || '').toLowerCase().split(/\\s+/);
+
+        // 新しいパスワードを入れる欄 (新規登録と変更の画面)。
+        //
+        // autocomplete="new-password" が付いていればそれを信じる。
+        // 付いていない時は欄の数で当てる：
+        //   二つ   … 新規登録 (パスワードと確認)。両方が新しい
+        //   三つ以上 … 変更 (今の・新しい・確認)。先頭を除いた残りが新しい
+        //   一つ   … ログインと見分けが付かないので、新しいとはみなさない
+        // ログインの欄で生成を勧めると、押した拍子に正しい鍵が消える
+        const newPasswordFields = () => {
+            const fields = passwordFields();
+            const marked = fields.filter(
+                (f) => autocompleteTokens(f).indexOf('new-password') >= 0
+            );
+            if (marked.length) { return marked; }
+            if (fields.length === 2) { return fields; }
+            if (fields.length >= 3) { return fields.slice(1); }
+            return [];
+        };
+
+        // 変更の画面の「今のパスワード」の欄。
+        // 新しい欄があり、残りがちょうど一つの時だけ返す。
+        //
+        // 利用者名の欄が無い変更画面では、この中身が「どのアカウントの変更か」を
+        // 見分ける唯一の手掛かりになる (照合は Swift 側が預かりとやる)
+        const currentPasswordField = () => {
+            const fresh = newPasswordFields();
+            if (!fresh.length) { return null; }
+            const rest = passwordFields().filter((f) => fresh.indexOf(f) < 0);
+            return rest.length === 1 ? rest[0] : null;
+        };
 
         // パスワード欄の相棒になる利用者名の欄。
         // 同じ form の中で、パスワード欄より前にある最も近いものを選ぶ
@@ -126,13 +168,16 @@ enum PasswordFill {
         };
 
         // 一覧を出す場所。欄の外枠をそのまま Swift へ渡す
+        // role は 'new' (新しいパスワードの欄) か 'login' (それ以外)。
+        // 'new' の時だけ、Swift 側が生成を勧める
         const offerAt = (el) => {
             const rect = el.getBoundingClientRect();
             post('focus', {
                 x: rect.left,
                 y: rect.top,
                 width: rect.width,
-                height: rect.height
+                height: rect.height,
+                role: newPasswordFields().indexOf(el) >= 0 ? 'new' : 'login'
             });
         };
 
@@ -158,14 +203,21 @@ enum PasswordFill {
 
         // 送信されたらしい合図を捉えて、打たれた中身を控えに送る。
         // 保存を訊くかどうかは Swift 側が決める
+        //
+        // 新しいパスワードの欄を先に見る。変更の画面は「今の → 新しい → 確認」の
+        // 並びなので、頭から拾うと古い方を保存しに行ってしまう
         const report = () => {
             const fields = passwordFields();
-            const pw = fields.filter((f) => f.value)[0];
+            const fresh = newPasswordFields().filter((f) => f.value)[0];
+            const pw = fresh || fields.filter((f) => f.value)[0];
             if (!pw) { return; }
             const user = usernameFor(pw);
+            // 新しい欄から拾った時だけ、今のパスワードも添える
+            const current = fresh ? currentPasswordField() : null;
             post('submit', {
                 username: user ? user.value : '',
-                password: pw.value
+                password: pw.value,
+                current: current ? current.value : ''
             });
         };
 
@@ -208,18 +260,41 @@ enum PasswordFill {
         });
         observer.observe(document.documentElement, { childList: true, subtree: true });
 
-        // Swift から呼ばれる記入口
+        // Swift から呼ばれる記入口。
+        //
+        // 入れるのは「新しい欄」を除いた残りがちょうど一つの時だけ。
+        //   ログインの画面 … 欄が一つ。それが残りの一つ
+        //   変更の画面   … 今・新しい・確認。残りは「今のパスワード」の一つ
+        //   新規登録の画面 … 全部が新しい欄。残りは無いので断る
+        // 残りが二つ以上あるのは見分けが付かない作りだ。この時も断る。
+        // 古い鍵を新しい欄へ流し込むと、気づかないうちに書き換わる
         window.__skyscraperFill = (username, password) => {
-            const fields = passwordFields();
-            if (!fields.length) { return false; }
-            // 入力欄が二つ以上あるのは新規登録か変更の画面。
-            // 古い鍵を勝手に流し込むと、気づかないうちに書き換わる
-            if (fields.length > 1) { return false; }
-            const pw = fields[0];
+            const fresh = newPasswordFields();
+            const current = passwordFields().filter((f) => fresh.indexOf(f) < 0);
+            if (current.length !== 1) { return false; }
+            const pw = current[0];
             const user = usernameFor(pw);
             if (user && username) { setValue(user, username); }
             setValue(pw, password);
             return true;
+        };
+
+        // 生成したパスワードの記入口。新しい欄にだけ入れる (確認欄も含む)。
+        // 今のパスワードの欄には触らない。
+        //
+        // その時点で打たれている利用者名と、変更の画面なら今のパスワードも返す。
+        // Swift 側はこれですぐに預ける
+        window.__skyscraperFillNew = (password) => {
+            const targets = newPasswordFields();
+            if (!targets.length) { return { ok: false, username: '', current: '' }; }
+            for (const field of targets) { setValue(field, password); }
+            const user = usernameFor(targets[0]);
+            const current = currentPasswordField();
+            return {
+                ok: true,
+                username: user ? user.value : '',
+                current: current ? current.value : ''
+            };
         };
 
         if (document.readyState === 'loading') {
@@ -247,4 +322,17 @@ struct PasswordCandidate {
     let port: Int
     let username: String
     let password: String
+}
+
+// 生成して記入した一件の控え。
+// 生成した時点では利用者名がまだ打たれていないことが多いので、
+// 送信を待って、分かった利用者名へ付け替えるのに使う
+struct GeneratedPassword {
+    let host: String
+    let scheme: String
+    let port: Int
+    let password: String
+    // 生成した時に預けた利用者名。
+    // 同じ場所・同じ利用者名の預かりが既にあって預けなかったなら nil
+    let savedAs: String?
 }

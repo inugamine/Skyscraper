@@ -784,6 +784,11 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     private var passwordCandidateTimeout: Task<Void, Never>?
     // 問いを出している間だけ、答えを待つ中身を持つ
     fileprivate var pendingSave: PasswordCandidate?
+    // 生成して記入した一件。送信を待って利用者名を付け替える (PasswordFill.swift)
+    private var generatedPassword: GeneratedPassword?
+    // 「更新」を押されたら捨てる名無しの一件。
+    // 変更の画面で、アカウントが分かる前に生成して預けた分がこれになる
+    private var orphanAfterUpdate: SavedLogin?
 
     // 失敗した宛先。やり直しに使う。
     // WKWebView は commit していない読み込みを覚えていないので、
@@ -2194,12 +2199,16 @@ extension Tab {
                               y: (body["y"] as? Double) ?? 0,
                               width: (body["width"] as? Double) ?? 0,
                               height: (body["height"] as? Double) ?? 0)
-            offerFill(for: origin, at: rect)
+            // 新しいパスワードの欄か。見分けは JS 側 (newPasswordFields)
+            let isNewPassword = (body["role"] as? String) == "new"
+            offerFill(for: origin, at: rect, isNewPassword: isNewPassword)
         case "dismiss":
             PasswordSuggestionPanel.shared.hide()
         case "submit":
-            let username = (body["username"] as? String) ?? ""
+            let typed = (body["username"] as? String) ?? ""
             let password = (body["password"] as? String) ?? ""
+            let current = (body["current"] as? String) ?? ""
+            let username = resolveAccount(for: origin, username: typed, current: current)
             holdCandidate(host: origin.host, scheme: origin.scheme, port: origin.port,
                           username: username, password: password)
         case "gone":
@@ -2213,22 +2222,38 @@ extension Tab {
     // MARK: 記入
 
     // 一件しか預かっていなくても黙って入れない。
-    // 入力欄に焦点が入った時にだけ、その脇へ一覧を出す
+    // 入力欄に焦点が入った時にだけ、その脇へ一覧を出す。
+    //
+    // 新しいパスワードの欄では、預かりの一覧を出さず生成だけを勧める。
+    // そこへ古い鍵を入れても役に立たないし、欄が一つだけの登録画面では
+    // 記入が通ってしまい、古い鍵で口座を作る羽目になる。
+    //
+    // プライベートウィンドウでは生成も勧めない。生成したものは
+    // その場で預ける作りで、跡を残さない窓とは相容れない。
+    // かといって預けずに入れれば、窓を閉じた時に誰も知らないパスワードが残る
     private func offerFill(for origin: (host: String, scheme: String, port: Int),
-                           at cssRect: CGRect) {
-        let logins = PasswordStore.shared.logins(host: origin.host,
-                                                 scheme: origin.scheme,
-                                                 port: origin.port)
+                           at cssRect: CGRect,
+                           isNewPassword: Bool) {
+        let logins = isNewPassword ? [] : PasswordStore.shared.logins(host: origin.host,
+                                                                    scheme: origin.scheme,
+                                                                    port: origin.port)
             .sorted { ($0.modified ?? .distantPast) > ($1.modified ?? .distantPast) }
+        let strong = (isNewPassword && !isPrivate) ? PasswordGenerator.make() : nil
 
-        guard !logins.isEmpty, let window = webView.window else {
+        guard !logins.isEmpty || strong != nil, let window = webView.window else {
             PasswordSuggestionPanel.shared.hide()
             return
         }
 
-        PasswordSuggestionPanel.shared.show(logins: logins,
-                                            anchoredTo: anchor(for: cssRect),
-                                            in: window) { [weak self] login in
+        PasswordSuggestionPanel.shared.show(
+            logins: logins,
+            strongPassword: strong,
+            anchoredTo: anchor(for: cssRect),
+            in: window,
+            onUseStrongPassword: { [weak self] password in
+                self?.useStrongPassword(password, for: origin)
+            }
+        ) { [weak self] login in
             self?.fill(login)
         }
     }
@@ -2272,6 +2297,118 @@ extension Tab {
         }
     }
 
+    // MARK: 生成
+
+    // 生成したパスワードを新しい欄 (確認欄も含む) へ入れ、入ったら預ける。
+    // 預けるのは入ったのを確かめてから——入らなかった鍵を預けても無駄な一件が残るだけだ
+    private func useStrongPassword(_ password: String,
+                                   for origin: (host: String, scheme: String, port: Int)) {
+        guard let script = PasswordFill.fillNewScript(password: password) else { return }
+        webView.evaluateJavaScript(script, in: nil, in: PasswordFill.world) { [weak self] result in
+            var filled = false
+            var username = ""
+            var current = ""
+            switch result {
+            case .success(let value):
+                let reply = value as? [String: Any]
+                filled = (reply?["ok"] as? Bool) ?? (reply?["ok"] as? NSNumber)?.boolValue ?? false
+                username = (reply?["username"] as? String) ?? ""
+                current = (reply?["current"] as? String) ?? ""
+            case .failure(let error):
+                print("Tab: strong password fill failed — \(error)")
+            }
+            // Task に入る前に let へ落とす (wire の見張りと同じ理屈)
+            guard filled, let self else { return }
+            Task { @MainActor in
+                let account = self.resolveAccount(for: origin, username: username, current: current)
+                self.keepGeneratedPassword(password, username: account, for: origin)
+            }
+        }
+    }
+
+    // 打たれた利用者名が空の時、今のパスワードからアカウントを当てる。
+    //
+    // 利用者名の欄が無い変更画面のためのものだ。今のパスワードと中身が
+    // 一致する預かりがちょうど一件なら、その利用者名を返す。
+    // 二件以上当たる (同じパスワードを使い回している) 時は決め打ちしない——
+    // 違うアカウントの鍵を書き換えるくらいなら、名無しのまま訊く方がましだ
+    private func resolveAccount(for origin: (host: String, scheme: String, port: Int),
+                                username: String, current: String) -> String {
+        guard username.isEmpty, !current.isEmpty else { return username }
+        let store = PasswordStore.shared
+        let matches = store.logins(host: origin.host, scheme: origin.scheme, port: origin.port)
+            .filter { !$0.username.isEmpty && store.password(for: $0) == current }
+        return matches.count == 1 ? matches[0].username : username
+    }
+
+    // 生成した一件を預ける。
+    //
+    // 生成した瞬間に預けるのは、送信の検知が外れても作ったパスワードを
+    // 失わないため。検知が外れたまま登録が通ると、誰も知らないパスワードの
+    // 口座が残る。
+    //
+    // ただし、同じ場所・同じ利用者名の預かりが既にあるなら上書きしない。
+    // それはパスワード変更の画面で、サイトが変更を受け付ける前に
+    // 預かりを書き換えると、変更が失敗した時に今使えている鍵を失う。
+    // この時は送信を待って、いつもの「更新しますか」に任せる
+    private func keepGeneratedPassword(_ password: String, username: String,
+                                       for origin: (host: String, scheme: String, port: Int)) {
+        let store = PasswordStore.shared
+        let taken = store.logins(host: origin.host, scheme: origin.scheme, port: origin.port)
+            .contains { $0.username == username }
+
+        var savedAs: String?
+        if !taken, store.save(host: origin.host, scheme: origin.scheme, port: origin.port,
+                              username: username, password: password) {
+            savedAs = username
+        }
+        generatedPassword = GeneratedPassword(host: origin.host, scheme: origin.scheme,
+                                              port: origin.port, password: password,
+                                              savedAs: savedAs)
+    }
+
+    // 送信された中身が、生成して既に預けた一件か。
+    // そうなら問いは出さずに片付け、必要なら利用者名を付け替えて true を返す。
+    // false なら、いつもの問いに任せる
+    private func settleGeneratedPassword(with candidate: PasswordCandidate) -> Bool {
+        guard let generated = generatedPassword,
+              generated.host == candidate.host,
+              generated.scheme == candidate.scheme,
+              generated.port == candidate.port,
+              generated.password == candidate.password
+        else { return false }
+        generatedPassword = nil
+
+        // 生成した時に預けなかった (変更の画面)。いつもの「更新しますか」へ
+        guard let savedAs = generated.savedAs else { return false }
+        // 預けた時と同じ利用者名。もう済んでいる
+        guard savedAs != candidate.username else { return true }
+
+        let store = PasswordStore.shared
+        // 付け替え先に別の預かりが既にある。黙って上書きはせず、問いに任せる。
+        //
+        // 変更の画面で、今のパスワードを入れる前に生成した時がこれに当たる。
+        // 生成した時はアカウントが分からず名無しで預けてある。
+        // 「更新」を押されたらその名無しは用済みなので捨てる。
+        // 「今はしない」なら、新しいパスワードの唯一の控えなので残す
+        let taken = store.logins(host: candidate.host, scheme: candidate.scheme, port: candidate.port)
+            .contains { $0.username == candidate.username }
+        if taken {
+            orphanAfterUpdate = SavedLogin(host: candidate.host, scheme: candidate.scheme,
+                                           port: candidate.port, username: savedAs, modified: nil)
+            return false
+        }
+        guard store.save(host: candidate.host, scheme: candidate.scheme, port: candidate.port,
+                         username: candidate.username, password: candidate.password)
+        else { return false }
+
+        // 新しい名前で預け終えてから古い方を捨てる。逆にすると、
+        // 途中で躓いた時に生成したパスワードがどこにも残らない
+        store.delete(SavedLogin(host: candidate.host, scheme: candidate.scheme,
+                                port: candidate.port, username: savedAs, modified: nil))
+        return true
+    }
+
     // MARK: 保存を訊くまで
 
     private func holdCandidate(host: String, scheme: String, port: Int,
@@ -2304,6 +2441,9 @@ extension Tab {
         guard let candidate = passwordCandidate else { return }
         passwordCandidate = nil
 
+        // 生成して既に預けた一件なら、訊かずに片付ける
+        if settleGeneratedPassword(with: candidate) { return }
+
         let store = PasswordStore.shared
         let saved = store.logins(host: candidate.host,
                                  scheme: candidate.scheme,
@@ -2323,8 +2463,14 @@ extension Tab {
 
     func acceptPasswordPrompt() {
         guard let save = pendingSave else { return }
-        PasswordStore.shared.save(host: save.host, scheme: save.scheme, port: save.port,
-                                  username: save.username, password: save.password)
+        let store = PasswordStore.shared
+        let saved = store.save(host: save.host, scheme: save.scheme, port: save.port,
+                               username: save.username, password: save.password)
+        // 更新できたのを確かめてから名無しを捨てる。
+        // 失敗したのに捨てると、新しいパスワードがどこにも残らない
+        if saved, let orphan = orphanAfterUpdate {
+            store.delete(orphan)
+        }
         dismissPasswordPrompt()
     }
 
@@ -2338,6 +2484,7 @@ extension Tab {
     func dismissPasswordPrompt() {
         pendingSave = nil
         passwordPrompt = nil
+        orphanAfterUpdate = nil
     }
 }
 

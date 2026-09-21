@@ -34,18 +34,36 @@ final class PasswordSuggestionPanel {
     var isVisible: Bool { panel != nil }
 
     // anchor は画面座標での入力欄の外枠 (高さも含む)。
-    // 上へ返す時に欄の上端が要るので、高さを潰して渡してはいけない
+    // 上へ返す時に欄の上端が要るので、高さを潰して渡してはいけない。
+    //
+    // strongPassword を渡すと、一覧の頭に「強いパスワードを使う」の一行が付く。
+    // 新規登録のサイトにはまだ何も預けていないのが普通なので、
+    // その時は預かりが空でも小窓を出す。
+    //
+    // 中身を小窓に見せておくのは、押す前に形を確かめられるように。
+    // 小窓はページの外の窓なので、サイトの JS からは読めない
     func show(logins: [SavedLogin],
+              strongPassword: String? = nil,
               anchoredTo anchor: NSRect,
               in parent: NSWindow,
+              onUseStrongPassword: ((String) -> Void)? = nil,
               onPick: @escaping (SavedLogin) -> Void) {
         hide()
-        guard !logins.isEmpty else { return }
+        let offer = (onUseStrongPassword != nil) ? strongPassword : nil
+        guard !logins.isEmpty || offer != nil else { return }
 
-        let list = PasswordSuggestionList(logins: logins) { [weak self] login in
-            self?.hide()
-            onPick(login)
-        }
+        let list = PasswordSuggestionList(
+            logins: logins,
+            strongPassword: offer,
+            onUseStrongPassword: { [weak self] password in
+                self?.hide()
+                onUseStrongPassword?(password)
+            },
+            onPick: { [weak self] login in
+                self?.hide()
+                onPick(login)
+            }
+        )
 
         let hosting = NSHostingView(rootView: list)
         // 入力欄より狭いと見窄らしいので、欄の幅を下限にする
@@ -154,11 +172,63 @@ final class PasswordSuggestionPanel {
 
 private struct PasswordSuggestionList: View {
     let logins: [SavedLogin]
+    let strongPassword: String?
+    let onUseStrongPassword: (String) -> Void
     let onPick: (SavedLogin) -> Void
 
     @State private var hovered: SavedLogin?
+    @State private var hoveringStrong = false
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let strongPassword {
+                strongRow(strongPassword)
+            }
+
+            if !logins.isEmpty {
+                if strongPassword != nil {
+                    Rectangle()
+                        .fill(Deco.faintGold.opacity(0.4))
+                        .frame(height: 1)
+                }
+                savedList
+            }
+        }
+        .frame(maxWidth: 420, alignment: .leading)
+        .background(Deco.panel2)
+        .overlay(Rectangle().stroke(Deco.faintGold, lineWidth: 1))
+    }
+
+    // 生成したパスワードを勧める一行
+    private func strongRow(_ password: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Image(systemName: "key.fill")
+                    .font(.system(size: 9))
+                Text("Use Strong Password")
+                    .font(.system(size: 12, design: .serif))
+            }
+            .foregroundColor(hoveringStrong ? Deco.cream : Deco.gold)
+
+            Text(verbatim: password)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(Deco.dimGold)
+                .lineLimit(1)
+
+            Text("Saved to the keychain as soon as you choose it.")
+                .font(.system(size: 9, design: .serif))
+                .foregroundColor(Deco.dimGold.opacity(0.8))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(hoveringStrong ? Deco.gold.opacity(0.18) : Color.clear)
+        .contentShape(Rectangle())
+        .onTapGesture { onUseStrongPassword(password) }
+        .onHover { hoveringStrong = $0 }
+    }
+
+    private var savedList: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
                 Image(systemName: "key")
@@ -199,8 +269,5 @@ private struct PasswordSuggestionList: View {
                 .onHover { inside in hovered = inside ? login : nil }
             }
         }
-        .frame(maxWidth: 420, alignment: .leading)
-        .background(Deco.panel2)
-        .overlay(Rectangle().stroke(Deco.faintGold, lineWidth: 1))
     }
 }
