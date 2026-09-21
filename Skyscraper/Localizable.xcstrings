@@ -4165,6 +4165,16 @@
         }
       }
     },
+    "Saved to the keychain as soon as you choose it." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選ぶとすぐにキーチェーンへ保存します。"
+          }
+        }
+      }
+    },
     "Saving passwords" : {
       "comment" : "A row label in the site information popover, about whether Skyscraper offers to save passwords here.",
       "localizations" : {
@@ -5880,6 +5890,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "URL"
+          }
+        }
+      }
+    },
+    "Use Strong Password" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "強いパスワードを使う"
           }
         }
       }

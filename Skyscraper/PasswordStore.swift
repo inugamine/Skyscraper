@@ -144,9 +144,11 @@ final class PasswordStore: ObservableObject {
     }
 
     private static func login(from attributes: [String: Any]) -> SavedLogin? {
-        guard let host = attributes[kSecAttrServer as String] as? String,
-              let username = attributes[kSecAttrAccount as String] as? String
-        else { return nil }
+        guard let host = attributes[kSecAttrServer as String] as? String else { return nil }
+        // 利用者名が空の項目では、キーチェーンが acct の属性そのものを返さない。
+        // ここで弾くと、項目は在るのに一覧からも記入からも書き出しからも消える
+        // (設定画面から消すこともできない)。空の利用者名として扱う
+        let username = attributes[kSecAttrAccount as String] as? String ?? ""
 
         let proto = attributes[kSecAttrProtocol as String] as? String
         let scheme = (proto == (kSecAttrProtocolHTTP as String)) ? "http" : "https"
