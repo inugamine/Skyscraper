@@ -25,6 +25,12 @@
 //  書き出し元の「ブックマークバー」だけは入れ物を作らず、
 //  中身をこちらの帯の直下へ出す。
 //
+//  javascript: で始まる一件——ブックマークレットも預かる。
+//  Instapaper や Pocket の「あとで読む」がこれで、他所のブラウザでは
+//  普通のブックマークと同じ棚に並んでいる。ここで読み捨てると、
+//  書き出した本人には消えた理由が分からない。
+//  押された時の扱いは Bookmarklet.swift に書いた。
+//
 
 import AppKit
 import Foundation
@@ -117,7 +123,7 @@ enum BookmarkImport {
 
             // ── ブックマーク一件 ──
             if let href = group(3) ?? group(4) ?? group(5) {
-                guard let address = webAddress(href) else { return }
+                guard let address = usableAddress(href) else { return }
                 let title = plainText(group(6) ?? "")
                 let path = stack.compactMap { $0 }
                 found.append(Bookmark(title: title.isEmpty ? fallbackTitle(for: address) : title,
@@ -140,22 +146,28 @@ enum BookmarkImport {
         return found
     }
 
-    // 預かるのは web の場所だけ。
-    // Firefox の place: (スマートフォルダ)、Chrome の chrome:// や
-    // javascript: (ブックマークレット)は、こちらで開いても何も起きない
-    private static func webAddress(_ raw: String) -> String? {
+    // 預かるのは web の場所と、ブックマークレットだけ。
+    // Firefox の place: (スマートフォルダ) と Chrome の chrome:// は、
+    // こちらで開いても何も起きないので今まで通り読み捨てる
+    private static func usableAddress(_ raw: String) -> String? {
         let address = decodeEntities(raw).trimmingCharacters(in: .whitespacesAndNewlines)
         // 頭の文字列だけを見る。URLComponents に別けさせないのは、
         // パスに生の日本語が入った URL をあれが黙って nil にし得るため。
         // 取りこぼしていいのは開けない仕組みのものだけだ
         let lowered = address.lowercased()
-        guard lowered.hasPrefix("https://") || lowered.hasPrefix("http://") else { return nil }
-        return address
+        if lowered.hasPrefix("https://") || lowered.hasPrefix("http://") { return address }
+        // javascript: は行き先ではないが、今見ているページの上で走らせられる。
+        // 中身が空のものだけは、押しても何も起きないので棚に置かない
+        if Bookmarklet.source(from: address) != nil { return address }
+        return nil
     }
 
-    // 題の無いブックマークもある。空欄が並ぶよりは場所の名前が出た方がいい
+    // 題の無いブックマークもある。空欄が並ぶよりは場所の名前が出た方がいい。
+    // ブックマークレットには「場所」が無いので、種類の名前で立てる
+    // (綴りをそのまま出すと、帯に JavaScript が一行まるごと並ぶ)
     private static func fallbackTitle(for address: String) -> String {
-        URLComponents(string: address)?.host ?? address
+        if Bookmarklet.isBookmarklet(address) { return String(localized: "Bookmarklet") }
+        return URLComponents(string: address)?.host ?? address
     }
 
     // MARK: - 下ごしらえ

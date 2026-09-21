@@ -694,6 +694,16 @@
         }
       }
     },
+    "Bookmarklet" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ブックマークレット"
+          }
+        }
+      }
+    },
     "Bookmarks" : {
       "localizations" : {
         "en" : {

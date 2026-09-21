@@ -1734,6 +1734,23 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         canGoForward = webView.canGoForward
     }
 
+    // ブックマーク一件を開く。
+    //
+    // javascript: (ブックマークレット) は行き先ではなく命令なので、
+    // 番地を書き換えず、今見ているページの上で走らせる。
+    // どうして番地として扱わないのかは Bookmarklet.swift に書いた
+    func open(bookmark url: String) {
+        guard let script = Bookmarklet.source(from: url) else {
+            urlText = url
+            load()
+            return
+        }
+        // 掴む相手が要る。新規タブの盤を出したまま押した時がこれに当たる。
+        // 何も言わずに見送る——走らせたところで空の器に働きかけるだけだ
+        guard !isHome, webView.url != nil else { return }
+        Bookmarklet.run(script, on: webView)
+    }
+
     func load() {
         guard let url = Tab.resolveURL(from: urlText) else { return }
         isHome = false
@@ -2334,6 +2351,18 @@ extension Tab: WKNavigationDelegate {
         let isLinkClick = action.navigationType == .linkActivated
         let commandHeld = action.modifierFlags.contains(.command)
         let url = action.request.url?.absoluteString
+
+        // javascript: のリンクは、ページが自分自身に働きかけているだけだ。
+        // 外のアプリへ渡す物でも、新しいタブで開く物でもないので、
+        // 何も判断せず WebKit に返す。
+        //
+        // 下の振り分けに流れると担当アプリの居ないスキームとして
+        // 握り潰され、href="javascript:…" の仕掛けが軒並み死ぬ。
+        // (棚のブックマークレットを走らせるのは別の道筋だ——Bookmarklet.swift)
+        if action.request.url?.scheme?.lowercased() == "javascript" {
+            decisionHandler(.allow)
+            return
+        }
 
         // WKWebView が自分では開けないスキーム
         // (mailto: / tel: / zoommtg: / itms-apps: など)。
@@ -4014,8 +4043,7 @@ struct NewTabPage: View {
             HStack(spacing: 12) {
                 ForEach(Array(store.bookmarks.prefix(5))) { bm in
                     Button {
-                        tab.urlText = bm.url
-                        tab.load()
+                        tab.open(bookmark: bm.url)
                     } label: {
                         Text(bm.title)
                             .font(.system(size: 12, design: .serif))
@@ -4848,13 +4876,14 @@ struct BookmarkBar: View {
         .help("All bookmarks")
     }
 
-    // 帯の一件と同じ規則。⌘ を押しながらなら裏の新規タブで開く
+    // 帯の一件と同じ規則。⌘ を押しながらなら裏の新規タブで開く。
+    // ブックマークレットだけは ⌘ を無視する——新しいタブには
+    // 働きかける相手が居らず、開いた先で空振りするだけだからだ
     private func open(_ bm: Bookmark) {
-        if NSEvent.modifierFlags.contains(.command) {
+        if NSEvent.modifierFlags.contains(.command), !Bookmarklet.isBookmarklet(bm.url) {
             manager.addTabInBackground(url: bm.url)
         } else {
-            tab.urlText = bm.url
-            tab.load()
+            tab.open(bookmark: bm.url)
         }
     }
 }
@@ -4912,12 +4941,12 @@ struct BookmarkBarItem: View {
 
     var body: some View {
         Button {
-            // ⌘を押しながらなら、裏の新規タブで開く
-            if NSEvent.modifierFlags.contains(.command) {
+            // ⌘を押しながらなら、裏の新規タブで開く。
+            // ブックマークレットは今見ているページに用があるので ⌘ を無視する
+            if NSEvent.modifierFlags.contains(.command), !Bookmarklet.isBookmarklet(bm.url) {
                 manager.addTabInBackground(url: bm.url)
             } else {
-                tab.urlText = bm.url
-                tab.load()
+                tab.open(bookmark: bm.url)
             }
         } label: {
             Text(bm.title)
@@ -6098,8 +6127,7 @@ struct BrowserPane: View {
             targetTab.urlText = text
             targetTab.load()
         case .bookmark(let url):
-            targetTab.urlText = url
-            targetTab.load()
+            targetTab.open(bookmark: url)
         case .openTab(let id):
             if let target = manager.tabs.first(where: { $0.id == id }) {
                 manager.select(target)

@@ -108,13 +108,23 @@ enum AddressSuggestions {
         let needle = normalized(raw)
 
         // ── ブックマーク ──
+        //
+        // ブックマークレットは題だけで引く。中身は JavaScript なので、
+        // 住所のつもりで突き合わせると "new" や "date" がその都度引っ掛かる。
+        // 一行目との重なりも見ない——あれは行き先の話で、
+        // こちらは行き先を持たないから
         let hits = bookmarks.enumerated().compactMap { index, bm -> (Rank, AddressSuggestion)? in
-            guard normalized(bm.url) != target,
-                  let rank = rank(needle: needle, title: bm.title, url: bm.url, order: index)
+            let isScript = Bookmarklet.isBookmarklet(bm.url)
+            let label = isScript ? String(localized: "Bookmarklet") : display(bm.url)
+            guard isScript || normalized(bm.url) != target,
+                  let rank = rank(needle: needle,
+                                  title: bm.title,
+                                  url: isScript ? "" : bm.url,
+                                  order: index)
             else { return nil }
             return (rank, AddressSuggestion(kind: .bookmark(bm.url),
-                                            title: bm.title.isEmpty ? display(bm.url) : bm.title,
-                                            detail: display(bm.url)))
+                                            title: bm.title.isEmpty ? label : bm.title,
+                                            detail: label))
         }
 
         // ── 開いているタブ ──
