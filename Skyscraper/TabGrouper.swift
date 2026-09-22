@@ -154,6 +154,11 @@ final class TabGrouper: ObservableObject {
         do {
             try await performGrouping(candidates: candidates)
         } catch let error as LanguageModelSession.GenerationError {
+            // 窓からあふれた場合は目印を付けて記録する (今は記録だけ)
+            if case .exceededContextWindowSize = error {
+                print("TabGrouper: failed: context window exceeded (candidates: \(candidates.count))")
+                return
+            }
             // 緩い判定をすり抜けたタイトルが拒否された場合、
             // 以降のために学習した上で、厳しい判定で絞り直して一度だけやり直す
             guard case .unsupportedLanguageOrLocale = error else {
@@ -197,12 +202,13 @@ final class TabGrouper: ObservableObject {
                 : "\(idx): \(title) (\(host))"
         }.joined(separator: "\n")
 
-        let session = LanguageModelSession(instructions: """
+        let instructions = Instructions("""
             あなたはブラウザのタブを整理する係です。
             与えられたタブ一覧を、話題やサイトの種類ごとに2〜5個のグループへ分けてください。
             グループ名は短く付けてください。
             どのグループにも合わないタブは無理に入れず、省いて構いません。
             """)
+        let session = LanguageModelSession(instructions: instructions)
 
         // 既存のグループ名をヒントとして渡す。
         // 名前の揺れ (同じ内容なのに毎回別名になる) を抑える
@@ -211,8 +217,10 @@ final class TabGrouper: ObservableObject {
             ? ""
             : "\n既にあるグループ名（内容が合うなら再利用してください）: \(existingNames.joined(separator: "、"))"
 
+        let promptText = "次のタブをグループ分けしてください:\n\(listing)\(hint)"
+
         let response = try await session.respond(
-            to: "次のタブをグループ分けしてください:\n\(listing)\(hint)",
+            to: promptText,
             generating: TabGroupingResult.self
         )
 
@@ -245,6 +253,33 @@ final class TabGrouper: ObservableObject {
         return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    // 言語判定に渡す下駄 (事前確率)。モデルの対応言語を重めにする。
+    // "Home - Instapaper" のような短い英語の題がカタルーニャ語 (ca 0.64) と
+    // 読み違えられ、毎回外されていた (2026-09 実測)。迷う程度の短い題は
+    // 対応言語側に倒し、文字種から明らかな外国語は下駄では覆らない想定。
+    // 中国語だけは NLLanguage が簡体・繁体に分かれるので両方に付ける
+    private lazy var languageHints: [NLLanguage: Double] = {
+        var hints: [NLLanguage: Double] = [:]
+        for language in SystemLanguageModel.default.supportedLanguages {
+            guard let code = language.languageCode?.identifier else { continue }
+            if code == "zh" {
+                hints[.simplifiedChinese] = 1.0
+                hints[.traditionalChinese] = 1.0
+            } else {
+                hints[NLLanguage(rawValue: code)] = 1.0
+            }
+        }
+        return hints
+    }()
+
+    // 下駄を履かせた判定器を作り、sanitize 済みの文を読ませる
+    private func makeRecognizer(for text: String) -> NLLanguageRecognizer {
+        let recognizer = NLLanguageRecognizer()
+        recognizer.languageHints = languageHints
+        recognizer.processString(sanitize(text))
+        return recognizer
+    }
+
     // タイトルの言語がモデルの対応言語かどうか (sanitize 済みの文で判定)。
     // strict = false：確信度が高く非対応と分かったときだけ弾く(通常運転)
     // strict = true ：非対応が最有力なら弾く (拒否された実績があるとき)
@@ -252,8 +287,7 @@ final class TabGrouper: ObservableObject {
         let cleaned = sanitize(text)
         guard !cleaned.isEmpty else { return true }
 
-        let recognizer = NLLanguageRecognizer()
-        recognizer.processString(cleaned)
+        let recognizer = makeRecognizer(for: cleaned)
         guard let (language, confidence) = recognizer.languageHypotheses(withMaximum: 1).first else {
             return true
         }
