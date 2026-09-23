@@ -4140,8 +4140,9 @@ struct SkyscraperMark: View {
                 .overlay(Triangle().stroke(color, lineWidth: 1))
                 .frame(width: 3, height: 16)
             tier(18, 18)
-            tier(34, 24)
-            tier(52, 28)
+            // 胴は縦長の一本柱。高さは以前の二段 (24 + 28) の合計にして、
+            // ビル全体の背丈とサンバーストとの位置関係を変えない
+            tier(34, 52)
             tier(74, 22)
         }
     }
