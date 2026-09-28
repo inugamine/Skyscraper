@@ -7,6 +7,29 @@
     <language>en</language>
 
     <item>
+      <title>Version 1.26</title>
+      <pubDate>Mon, 28 Sep 2026 20:00:24 +0900</pubDate>
+      <sparkle:version>26</sparkle:version>
+      <sparkle:shortVersionString>1.26</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>Skyscraper 1.26</h2>
+        <ul>
+          <li>プロファイル分離に対応しました。</li>
+          <li>あとで読むサービスである Instapaper のブックマークレットに対応しました。</li>
+          <li>ブックマークエディターからもブックマークをインポートできるようになりました。</li>
+          <li>ブックマークがエクスポートできるようになりました。</li>
+          <li>パスワードもエクスポートできるようになりました。</li>
+          <li>Apple Foundation Models を活用した機能を強化しました。</li>
+          <li>新規タブのデザインを一部変更しました。</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://github.com/inugamine/Skyscraper/releases/download/v1.26/Skyscraper-1.26.zip"
+        sparkle:edSignature="7ljTBYeg8jC/4ikZitM9Hiho9vD1PL677WDtrxh7+sHSYl9Azr8TavAVeDp8lQwEaDuxvICoiYmM9mWR1ALbAg=="
+        length="13329418"
+        type="application/octet-stream" />
+    </item>    <item>
       <title>Version 1.25</title>
       <pubDate>Sat, 12 Sep 2026 16:28:11 +0900</pubDate>
       <sparkle:version>25</sparkle:version>
