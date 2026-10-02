@@ -309,10 +309,10 @@ final class DownloadItem: ObservableObject, Identifiable {
         observers.removeAll()
         let progress = download.progress
         observers.append(
-            progress.observe(\.fractionCompleted, options: [.initial, .new]) { [weak self] p, _ in
+            progress.observe(\.fractionCompleted, options: [.initial, .new]) { @Sendable [weak self] p, _ in
                 let got = p.completedUnitCount
                 let all = p.totalUnitCount
-                Task { @MainActor in
+                Task { @MainActor [weak self] in
                     guard let self else { return }
                     self.received = got
                     // 総量は最初の応答のものを信じる。
@@ -512,8 +512,9 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
                 onProgress: { bytes in
                     Task { @MainActor in item.received = bytes }
                 },
-                onFinish: { [weak self] error in
-                    Task { @MainActor in self?.resumeDidEnd(item, error: error) }
+                onFinish: { error in
+                    // 受け持ちはアプリに一つきりで、最後まで生きている。弱く持つ理由が無い
+                    Task { @MainActor in self.resumeDidEnd(item, error: error) }
                 })
             item.downloader = downloader
             downloader.start(request: request)

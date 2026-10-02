@@ -242,7 +242,7 @@ final class ProfileStore: ObservableObject {
         _ = WKWebsiteDataStore.default()
 
         let known = Set(profiles.map(\.id))
-        let onDisk = (try? await WKWebsiteDataStore.allDataStoreIdentifiers) ?? []
+        let onDisk = await WKWebsiteDataStore.allDataStoreIdentifiers
         let orphans = onDisk.filter { !known.contains($0) }
         let targets = Array(Set(pendingRemovals + orphans))
         guard !targets.isEmpty else { return }

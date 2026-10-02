@@ -40,9 +40,10 @@ import SwiftUI
 
 // 絵札の持ち期限と枚数の上限。
 //
-// クラスの外に出してあるのは、間引きを主スレッドの外で回すため。
-// @MainActor の型の中に置くと、static let でさえ主スレッド縛りになる
-private enum FaviconLimits {
+// 間引き (prune) は主スレッドの外で回るので nonisolated にしておく。
+// このプロジェクトは既定の隔離が MainActor なので、何も書かなければ
+// クラスの外に置いても static let ごと主スレッド縛りになる
+nonisolated private enum FaviconLimits {
     // これを過ぎた絵札は起動時の間引きで捨てる。
     // 次に訪れた時に取り直されるので、失われるものは無い
     static let maxAge: TimeInterval = 60 * 60 * 24 * 30

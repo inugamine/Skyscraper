@@ -266,7 +266,7 @@ extension LinkHoverDisplay {
 // 残っている穴：全ての文字が一つの体系で揃った偽装
 // (キリル文字だけで綴った "аррӏе" のような類) は、
 // 体系の混在が起きないので抜ける。そこまで見るには同形異義の対応表が要る。
-enum HostGuard {
+nonisolated enum HostGuard {
     struct Verdict {
         // 帯に出すホスト (疑わしければ符号化されている)
         var host: String
