@@ -997,6 +997,15 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // 持ち上げた先の返事を待つ猶予（秒）
     private static let upgradeGrace: Double = 5
 
+    // 主フレームが最後に向かった宛先。
+    // 応答の中身が抜けて届いた時、どこを読み直すかはこれで知る
+    // (その時点の webView.url は前のページを指していることがある)
+    private var lastMainFrameRequest: URL?
+
+    // Service Worker を剥がして読み直した宛先。
+    // 同じ宛先でもう一度抜け殻が来たら諦める (読み直しを繰り返さないため)
+    private var serviceWorkerRetry: URL?
+
     private static let mediaStateMessageHandlerName = "skyscraperMediaState"
     private static let fullscreenMessageHandlerName = "skyscraperFullscreen"
     private static let mediaPlaybackObserverScript = WKUserScript(
@@ -2567,6 +2576,9 @@ extension Tab: WKNavigationDelegate {
             }
         }
 
+        if action.targetFrame?.isMainFrame == true {
+            lastMainFrameRequest = action.request.url
+        }
         decisionHandler(.allow)
     }
 
@@ -2619,10 +2631,16 @@ extension Tab: WKNavigationDelegate {
     func webView(_ webView: WKWebView,
                  decidePolicyFor response: WKNavigationResponse,
                  decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        // WebKit が中身 (URLResponse) を付けずに判断を求めてくることがある。
+        // ヘッダ上 response は nonnull なので、Swift は nil を想定しておらず
+        // 型を調べた瞬間に落ちる (EXC_BAD_ACCESS address=0x0 を実際に踏んだ)。
+        // KVC 経由で Optional として受け取り、以降はこの raw だけを触る
+        let raw = response.value(forKey: "response") as? URLResponse
+
         // Permissions-Policy ヘッダを控える。下の判断には関与しない。
         // 枠 (iframe) の応答もここを通る (isForMainFrame が false) ので、
         // 門番 (Geolocation.swift) が枠ごとのヘッダを引ける
-        if let http = response.response as? HTTPURLResponse {
+        if let http = raw as? HTTPURLResponse {
             geolocation.recordPolicy(from: http, isMainFrame: response.isForMainFrame)
         }
 
@@ -2631,12 +2649,37 @@ extension Tab: WKNavigationDelegate {
             return
         }
 
-        // 何がダウンロード判定されたのかを必ず残す（誤判の追跡用）
-        let mime = response.response.mimeType ?? "(nil)"
-        let disposition = (response.response as? HTTPURLResponse)?
-            .value(forHTTPHeaderField: "Content-Disposition") ?? "(none)"
-        print("NavigationResponse not showable: url=\(response.response.url?.absoluteString ?? "?") "
-              + "mime=\(mime) mainFrame=\(response.isForMainFrame) disposition=\(disposition)")
+        // 中身の無い応答。youtube.com を開くとこれが来る。
+        // サイトの Service Worker が返した応答が、WebKit の中で壊れて届いている
+        // (直前に "Unexpectedly missing certificate info" が出て、
+        //  後始末で remoteWorkerProcess が名前を出す)。
+        // .allow しても WebKit 自身が読み込みを打ち切るので白紙になり、
+        // .download に回すと www.youtube.com.html の保存パネルが出る。
+        //
+        // 主フレームなら、そのサイトの Service Worker の登録を剥がして読み直す。
+        // サイトは次の訪問でまた登録し直すので、失う物は無い。
+        // 枠なら黙って握り潰す
+        guard let raw else {
+            print("NavigationResponse: no URLResponse attached "
+                  + "mainFrame=\(response.isForMainFrame) "
+                  + "target=\(lastMainFrameRequest?.absoluteString ?? "?")")
+            decisionHandler(.cancel)
+            if response.isForMainFrame, let target = lastMainFrameRequest {
+                Task { @MainActor in await self.retryWithoutServiceWorker(target) }
+            }
+            return
+        }
+        if response.isForMainFrame {
+            serviceWorkerRetry = nil
+        }
+
+        // 何がダウンロード判定されたのかを必ず残す (誤判の追跡用)
+        let http = raw as? HTTPURLResponse
+        let mime = raw.mimeType ?? "(nil)"
+        let disposition = http?.value(forHTTPHeaderField: "Content-Disposition") ?? "(none)"
+        print("NavigationResponse not showable: url=\(raw.url?.absoluteString ?? "?") "
+              + "mime=\(mime) mainFrame=\(response.isForMainFrame) disposition=\(disposition) "
+              + "status=\(http.map { String($0.statusCode) } ?? "-")")
 
         // サブフレーム (広告・計測の iframe など) の変な応答で
         // 保存パネルを出さない。黙って握り潰す
@@ -2646,15 +2689,39 @@ extension Tab: WKNavigationDelegate {
         }
 
         // HTML 文書なのに「表示不可」判定の場合 (Content-Disposition:
-        // attachment 付きの応答などで起きる)。文書はダウンロードではなく表示に倒す。
-        // (youtube.com で www.youtube.com.html の保存パネルが出る不具合の対処)
-        let lowered = (response.response.mimeType ?? "").lowercased()
+        // attachment 付きの応答などで起きる)。文書はダウンロードではなく表示に倒す
+        let lowered = (raw.mimeType ?? "").lowercased()
         if lowered == "text/html" || lowered == "application/xhtml+xml" {
             decisionHandler(.allow)
             return
         }
 
         decisionHandler(.download)
+    }
+
+    // 宛先のサイトの Service Worker の登録を剥がして、読み直す。
+    // 剥がしても抜け殻が来たら、それ以上は追わない (ログだけ残す)
+    private func retryWithoutServiceWorker(_ target: URL) async {
+        guard serviceWorkerRetry != target else {
+            print("Tab: still no response after dropping service workers url=\(target.absoluteString)")
+            serviceWorkerRetry = nil
+            return
+        }
+        serviceWorkerRetry = target
+
+        // 置き場はタブのもの (プロファイル・プライベートを取り違えないため)
+        let store = webView.configuration.websiteDataStore
+        let types: Set<String> = [WKWebsiteDataTypeServiceWorkerRegistrations]
+        let host = target.host()?.lowercased() ?? ""
+        // 記録の displayName は登録可能ドメイン (youtube.com) で来る
+        let records = await store.dataRecords(ofTypes: types).filter {
+            let name = $0.displayName.lowercased()
+            return host == name || host.hasSuffix("." + name)
+        }
+        print("Tab: dropping service workers \(records.map(\.displayName)) "
+              + "and reloading url=\(target.absoluteString)")
+        await store.removeData(ofTypes: types, for: records)
+        webView.load(URLRequest(url: target))
     }
 
     // ナビゲーションがダウンロードに化けた場合
