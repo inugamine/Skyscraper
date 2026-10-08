@@ -7,6 +7,23 @@
     <language>en</language>
 
     <item>
+      <title>Version 1.28</title>
+      <pubDate>Thu, 08 Oct 2026 20:55:00 +0900</pubDate>
+      <sparkle:version>28</sparkle:version>
+      <sparkle:shortVersionString>1.28</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>Skyscraper 1.28</h2>
+        <ul>
+          <li>⇧⌘W で ウインドウを閉じることができるようになりました</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://github.com/inugamine/Skyscraper/releases/download/v1.28/Skyscraper-1.28.zip"
+        sparkle:edSignature="I5POorW0REVnbBrV/UBHC4Fr0oAFoUpsNEcKecprFea5Thq4ENKcshrMJ0ZS/wKIhAx3PTzsA+kk6+5IJtKRDg=="
+        length="13346656"
+        type="application/octet-stream" />
+    </item>    <item>
       <title>Version 1.27</title>
       <pubDate>Fri, 02 Oct 2026 19:14:18 +0900</pubDate>
       <sparkle:version>27</sparkle:version>
