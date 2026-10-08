@@ -52,6 +52,28 @@ private struct PinTabCommand: View {
     }
 }
 
+// File メニューの「閉じたタブを開き直す」(⇧⌘T)。
+//
+// 閉じたタブと閉じた窓の、後に閉じた方を戻す (TabManager.reopenLastClosed)。
+// 窓が一枚も無くても、閉じた窓の控えがあれば押せるようにしたい。
+// 控えの増減を見張るために View に切り出す (PinTabCommand と同じ理屈)。
+// 窓を開くのも View の仕事なので、openWindow もここで受ける
+private struct ReopenClosedCommand: View {
+    let manager: TabManager?
+    @ObservedObject private var closedWindows = ClosedWindowStore.shared
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("Reopen Closed Tab") {
+            if TabManager.reopenLastClosed(in: manager) {
+                openWindow(id: "browser")
+            }
+        }
+        .keyboardShortcut("t", modifiers: [.command, .shift])
+        .disabled(manager == nil && closedWindows.windows.isEmpty)
+    }
+}
+
 @main
 struct SkyscraperApp: App {
     // AppKit の代理人。他のアプリから投げられた URL を受けるためだけに居る。
@@ -135,9 +157,11 @@ struct BrowserCommands: Commands {
             Button("Close Tab") { manager?.closeSelected() }
                 .keyboardShortcut("w", modifiers: .command)
                 .disabled(manager == nil)
-            Button("Reopen Closed Tab") { manager?.reopenClosed() }
-                .keyboardShortcut("t", modifiers: [.command, .shift])
+            // 窓ごと閉じる。ロビー以外のタブがあれば確認を挟む (WindowClosing.swift)
+            Button("Close Window") { manager?.closeWindow() }
+                .keyboardShortcut("w", modifiers: [.command, .shift])
                 .disabled(manager == nil)
+            ReopenClosedCommand(manager: manager)
             Button("Open Location") { manager?.selectedTab?.focusAddressBar() }
                 .keyboardShortcut("l", modifiers: .command)
                 .disabled(manager == nil)

@@ -24,6 +24,7 @@ struct SettingsView: View {
     @AppStorage(TabManager.autoUnloadKey) private var autoUnloadMinutes = 30
     @AppStorage(HTTPSFirstStore.enabledKey) private var prefersHTTPS = true
     @AppStorage(GeolocationStore.enabledKey) private var allowsLocation = true
+    @AppStorage(CloseWindowConfirmation.enabledKey) private var confirmsWindowClose = true
     @State private var showingPasswords = false
     @State private var showingExtensions = false
     @State private var pane: Pane = .general
@@ -352,6 +353,25 @@ struct SettingsView: View {
 
         // ══ タブ ══
         sectionHeader("Tabs")
+
+        // ── ⇧⌘W の確認 ──
+        //
+        // 盤の「次回から確認しない」はこの入り切りを倒すだけだ。
+        // 専用の「リセット」の札を置かず、ここを入れ直せば元に戻る
+        Toggle(isOn: $confirmsWindowClose) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Ask before closing a window")
+                    .font(.system(size: 12, design: .serif))
+                    .foregroundColor(Deco.cream)
+                Text("When ⇧⌘W would close open tabs, Skyscraper asks first. Turn this back on after choosing “Don't ask again” to be asked again.")
+                    .font(.system(size: 10, design: .serif))
+                    .foregroundColor(Deco.dimGold)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .toggleStyle(.switch)
+        .tint(Deco.gold)
+        .padding(.bottom, 14)
 
         // ── 未使用タブの解放 ──
         //

@@ -3273,9 +3273,13 @@ final class TabManager: NSObject, ObservableObject {
     // 全タブは ZStack に常時マウントされているので、
     // 畳んだタブでも器自体は窓に居る
     func focusHostWindow() {
-        let window = selectedTab?.webView.window
+        hostWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    // この管理人が載っている窓。focusHostWindow と ⇧⌘W が使う
+    var hostWindow: NSWindow? {
+        selectedTab?.webView.window
             ?? tabs.compactMap { $0.webView.window }.first
-        window?.makeKeyAndOrderFront(nil)
     }
     // 各タブのタイトル確定を見張る購読 (タブIDごと)
     private var titleWatchers: [UUID: AnyCancellable] = [:]
@@ -3284,19 +3288,17 @@ final class TabManager: NSObject, ObservableObject {
     // 疑似大画面の出入りで ContentView (サイドバーの表示) を更新させる購読
     private var fullscreenWatchers: [UUID: AnyCancellable] = [:]
 
-    // 閉じたタブの控え一件ぶん。
-    // interactionState には戻る／進むの履歴が丸ごと入っているので、
-    // 開き直したタブでそのまま戻れる
-    private struct ClosedTab {
-        var url: String        // 空文字はロビー
-        var title: String
-        var interactionState: Data?
-        // どのプロファイルのタブだったか。開き直した時に同じ置き場へ戻す
-        var profile: UUID?
-    }
-
-    // 閉じたタブの復元用スタック(⇧⌘T)
+    // 閉じたタブの復元用スタック(⇧⌘T)。
+    // 一件ぶんの形 (ClosedTab) は閉じた窓の控えと共用なので、WindowClosing.swift に移した
     private var recentlyClosed: [ClosedTab] = []
+
+    // この窓の名札。閉じた窓の控えに「誰が閉じたか」を書くのに使う。
+    // ObjectIdentifier にしないのは、解放後に同じ番地が使い回されると
+    // 別の窓が他人の控えを取り下げてしまうから
+    let windowID = UUID()
+
+    // ⇧⌘W の問いを出している最中か。連打で盤を重ねない
+    private var isConfirmingClose = false
 
     // ── セッションの保存 ──
     //
@@ -3361,6 +3363,9 @@ final class TabManager: NSObject, ObservableObject {
 
     func markOpen() {
         isClosed = false
+        // onDisappear の誤発火で閉じた窓の控えを積んでいたら取り下げる。
+        // 生きている窓を ⇧⌘T でもう一枚生やさないため
+        ClosedWindowStore.shared.withdraw(owner: windowID)
         // onDisappear の誤発火で数から抜けていたら戻す。
         // 置き場そのものはこちらが強く持っているので死んでいない
         if isPrivate, !holdsPrivateStore {
@@ -3374,6 +3379,10 @@ final class TabManager: NSObject, ObservableObject {
 
     func markClosed() {
         guard !Self.isTerminating else { return }
+        // 窓ごと開き直す (⇧⌘T) ための控え。
+        // 下の tearDownTabs が about:blank を流し込む前に取る。
+        // プライベートウィンドウは控えない——下で閉じたタブの控えを消すのと同じ理屈だ
+        if !isPrivate { recordClosedWindow() }
         isClosed = true
         // プライベートウィンドウの後始末。
         // 最後の一枚なら、置き場の中身ごと捨てられる。
@@ -3534,6 +3543,13 @@ final class TabManager: NSObject, ObservableObject {
         if let handed = Self.pendingAdoption {
             Self.pendingAdoption = nil
             adopt(handed)
+            return
+        }
+        // ⇧⌘T で開き直す窓なら、控えておいたタブで始める。
+        // これも復元の待ち行列には手を付けない
+        if !isPrivate, let reopened = Self.pendingReopen {
+            Self.pendingReopen = nil
+            reopen(reopened)
             return
         }
         // プライベートウィンドウは前回の続きから始めない。
@@ -3958,12 +3974,7 @@ final class TabManager: NSObject, ObservableObject {
         //
         // 履歴 (interactionState) を抜くのは、下で about:blank を流し込む前でなければ
         // ならない。後だと白紙ページまで含んだ履歴を掴むことになる
-        let restoreURL = tab.isHome ? "" : (tab.webView.url?.absoluteString ?? tab.urlText)
-        let restoreState = tab.isHome ? nil : tab.restorableState
-        recentlyClosed.append(ClosedTab(url: restoreURL,
-                                        title: tab.pageTitle,
-                                        interactionState: restoreState,
-                                        profile: tab.profileID))
+        recentlyClosed.append(closedRecord(of: tab))
         if recentlyClosed.count > 20 { recentlyClosed.removeFirst() }
         // 動画・音声の再生を確実に止めてから退去させる。
         // about:blank の読み込みだけでは非同期で、WebView がどこかに
@@ -4145,6 +4156,97 @@ final class TabManager: NSObject, ObservableObject {
         selectedID = tab.id
     }
 
+    // 閉じる一枚ぶんの控え。閉じたタブと閉じた窓の両方がここを通る。
+    // 履歴 (interactionState) は about:blank を流し込む前に抜くこと——
+    // 後だと白紙ページまで含んだ履歴を掴む
+    private func closedRecord(of tab: Tab) -> ClosedTab {
+        ClosedTab(url: tab.isHome ? "" : (tab.webView.url?.absoluteString ?? tab.urlText),
+                  title: tab.pageTitle,
+                  interactionState: tab.isHome ? nil : tab.restorableState,
+                  profile: tab.profileID,
+                  pinned: tab.isPinned)
+    }
+
+    // ── 窓ごと閉じる (⇧⌘W) と、開き直す (⇧⌘T) ──
+
+    // 次に生まれる管理人に渡す、開き直す窓の控え。
+    // pendingAdoption と同じ預かり所の手だ
+    private static var pendingReopen: ClosedWindow?
+
+    // ⇧⌘W。新規タブの盤しか無い窓は黙って閉じる——
+    // 失う物が無いのに問いを挟んでも、手間が増えるだけだ
+    func closeWindow() {
+        guard !isConfirmingClose, let window = hostWindow else { return }
+        guard tabs.contains(where: { !$0.isHome }) else {
+            window.performClose(nil)
+            return
+        }
+        isConfirmingClose = true
+        let canReopen = !isPrivate
+        Task { @MainActor [weak self] in
+            let closes = await CloseWindowConfirmation.ask(in: window, canReopen: canReopen)
+            self?.isConfirmingClose = false
+            // performClose を通すのは、赤い丸を押した時と同じ道を歩かせるため。
+            // onDisappear → markClosed で控えが積まれ、タブも片付く
+            if closes { window.performClose(nil) }
+        }
+    }
+
+    // 閉じる窓の控えを積む (markClosed から呼ぶ)。
+    // 新規タブの盤しか無い窓は積まない。開き直しても空の盤が出るだけだ
+    private func recordClosedWindow() {
+        guard tabs.contains(where: { !$0.isHome }) else { return }
+        let index = tabs.firstIndex { $0.id == selectedID } ?? 0
+        let records = tabs.map { closedRecord(of: $0) }
+        ClosedWindowStore.shared.record(ClosedWindow(owner: windowID,
+                                                     tabs: records,
+                                                     selectedIndex: index))
+    }
+
+    // 控えておいた窓を、この窓の中身として組み直す (restoreSession から呼ぶ)。
+    // 全部を眠らせたまま並べ、選ばれていた一枚だけが init の最後で起きる。
+    // セッション復元と同じ段取りだ
+    private func reopen(_ closed: ClosedWindow) {
+        for entry in closed.tabs {
+            // 閉じた後でプロファイルが消されていたら既定へ倒す (restoreSession と同じ理屈)
+            let profile = entry.profile.flatMap { ProfileStore.shared.contains($0) ? $0 : nil }
+            let tab = makeTab(url: entry.url.isEmpty ? nil : entry.url,
+                              title: entry.title,
+                              deferLoad: true,
+                              interactionState: entry.interactionState,
+                              profile: profile)
+            tab.isPinned = entry.pinned
+            tabs.append(tab)
+        }
+        guard !tabs.isEmpty else {
+            addTab()
+            return
+        }
+        selectedID = tabs[safe: closed.selectedIndex]?.id ?? tabs.first?.id
+        normalizePinnedOrder()
+    }
+
+    // ⇧⌘T の振り分け。閉じたタブと閉じた窓のうち、後に閉じた方を開き直す。
+    // 窓を開くのは View の仕事なので、真を返したら呼び元が一枚開くこと。
+    //
+    // 窓が一枚も無くても呼ばれる (manager が nil)。その時は窓の控えだけを見る
+    static func reopenLastClosed(in manager: TabManager?) -> Bool {
+        // プライベートウィンドウからは自分のタブだけを戻す。
+        // 跡を残さない窓から、普通の窓の控えを掘り起こすのは筋が違う
+        if let manager, manager.isPrivate {
+            manager.reopenClosed()
+            return false
+        }
+        let lastTab = manager?.recentlyClosed.last
+        if let window = ClosedWindowStore.shared.latest,
+           lastTab.map({ window.closedAt > $0.closedAt }) ?? true {
+            pendingReopen = ClosedWindowStore.shared.popLast()
+            return true
+        }
+        manager?.reopenClosed()
+        return false
+    }
+
     // ── プロファイルの削除 ──
 
     // この窓にあるそのプロファイルのタブを全部閉じる。
@@ -4161,6 +4263,8 @@ final class TabManager: NSObject, ObservableObject {
         for manager in openWindows {
             manager.closeTabs(inProfile: id)
         }
+        // 閉じた窓の控えからも抜く (窓が残っていなくても控えは残っている)
+        ClosedWindowStore.shared.forgetProfile(id)
     }
 
     // 番号でタブを選ぶ (0始まり)

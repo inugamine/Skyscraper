@@ -156,11 +156,8 @@ extension TabManager: WKWebExtensionWindow {
         isPrivate
     }
 
-    // 実体の NSWindow。タブの WebView が載っている窓を借りる。
-    // TabManager 自身は窓を持っていない（持ち主は SwiftUI）
-    private var hostWindow: NSWindow? {
-        selectedTab?.webView.window ?? tabs.first?.webView.window
-    }
+    // 実体の NSWindow は TabManager.hostWindow (ContentView.swift) を借りる。
+    // 以前はここに private で同じものを持っていたが、⇧⌘W も使うので一つにまとめた
 
     func frame(for context: WKWebExtensionContext) -> CGRect {
         hostWindow?.frame ?? .zero
