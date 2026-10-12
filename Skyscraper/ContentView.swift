@@ -6394,6 +6394,9 @@ struct BrowserPane: View {
         // 拡張が無ければ何も出ないので、幅を食わない
         WebExtensionActionBar(tab: tab)
 
+        // 家の Cast 端末で再生するボタン。YouTube の動画ページでだけ現れる (Cast.swift)
+        CastButton(tab: tab)
+
         // リーダーモードボタン。本文のあるページでだけ現れる
         if tab.isReaderAvailable {
             Button {

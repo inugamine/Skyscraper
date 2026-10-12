@@ -14,6 +14,12 @@
 	<string>Skyscraper needs microphone access so that websites you allow can use the microphone.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Skyscraper needs your location so that websites you allow can use it.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Skyscraper looks for Google Cast devices on your network so that you can play YouTube videos on them.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_googlecast._tcp</string>
+	</array>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

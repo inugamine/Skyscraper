@@ -42,6 +42,30 @@
         }
       }
     },
+    "NSHumanReadableCopyright" : {
+      "comment" : "Copyright (human-readable)",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : ""
+          }
+        }
+      }
+    },
+    "NSLocalNetworkUsageDescription" : {
+      "comment" : "Privacy - Local Network Usage Description",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Skyscraper looks for Google Cast devices on your network so that you can play YouTube videos on them."
+          }
+        }
+      }
+    },
     "NSLocationWhenInUseUsageDescription" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -55,18 +79,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "許可した Web サイトが現在地を利用できるようにするため、Skyscraper は位置情報を必要とします。"
-          }
-        }
-      }
-    },
-    "NSHumanReadableCopyright" : {
-      "comment" : "Copyright (human-readable)",
-      "extractionState" : "extracted_with_value",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : ""
           }
         }
       }
