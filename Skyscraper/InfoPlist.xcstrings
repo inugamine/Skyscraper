@@ -25,6 +25,23 @@
         }
       }
     },
+    "NSAudioCaptureUsageDescription" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skyscraper picks up the sound of the pages you play so that it can send it to your speakers."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再生しているページの音をスピーカーへ送るため、Skyscraper はその音を取り込みます。"
+          }
+        }
+      }
+    },
     "NSCameraUsageDescription" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -62,6 +79,12 @@
           "stringUnit" : {
             "state" : "new",
             "value" : "Skyscraper looks for Google Cast devices on your network so that you can play YouTube videos on them."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "YouTube の動画を Google Cast デバイスで再生できるようにするため、Skyscraper はネットワーク上のデバイスを探します。"
           }
         }
       }

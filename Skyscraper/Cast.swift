@@ -213,6 +213,8 @@ final class CastController: ObservableObject {
         var position: Double = 0
         var duration: Double?
         var updatedAt = Date()
+        // 音を配っている時、元のタブに操れる動画・音声が見つかったか
+        var hasLocalMedia = false
 
         func position(at date: Date) -> Double {
             var value = position
@@ -237,6 +239,8 @@ final class CastController: ObservableObject {
     private struct WeakTab { weak var tab: Tab? }
     private var silencedTabs: [WeakTab] = []
     private weak var sourceTab: Tab?
+    // 音を配っている間、一秒ごとに元のタブを覗く
+    private var ticker: Task<Void, Never>?
 
     private init() {}
 
@@ -282,21 +286,28 @@ final class CastController: ObservableObject {
         sourceTab = tab
         silenceTabs(except: tab)
         watchForMissingPermission()
+        startTicking()
         return true
     }
 
     // MARK: 操作
 
-    // 二段目までは、操作できるのは YouTube アプリへ渡した時だけ
+    // YouTube アプリへ渡した時は端末を、音を配っている時は元のタブを操る
     var canControl: Bool {
         guard let now = nowPlaying else { return false }
-        return now.mode == .youTube && now.mediaSessionID != nil
+        switch now.mode {
+        case .youTube: return now.mediaSessionID != nil
+        case .audio:   return now.hasLocalMedia
+        }
     }
 
     func togglePlayPause() {
         guard let now = nowPlaying else { return }
         let pausing = now.state == .playing || now.state == .buffering
-        sendMedia(pausing ? "PAUSE" : "PLAY")
+        switch now.mode {
+        case .youTube: sendMedia(pausing ? "PAUSE" : "PLAY")
+        case .audio:   runOnSource(pausing ? "m.pause();" : "m.play();")
+        }
         // 返事を待たずに印を変える。本当の状態は MEDIA_STATUS で上書きされる
         nowPlaying?.position = now.position(at: .now)
         nowPlaying?.updatedAt = .now
@@ -305,7 +316,11 @@ final class CastController: ObservableObject {
 
     func seek(to seconds: Double) {
         let target = max(0, seconds)
-        sendMedia("SEEK", ["currentTime": target])
+        switch nowPlaying?.mode {
+        case .youTube?: sendMedia("SEEK", ["currentTime": target])
+        case .audio?:   runOnSource("m.currentTime = \(target);")
+        case nil:       return
+        }
         nowPlaying?.position = target
         nowPlaying?.updatedAt = .now
     }
@@ -399,6 +414,8 @@ final class CastController: ObservableObject {
         link.channel.close()
         // タップを外せば Mac のスピーカーに音が戻る
         link.pipeline?.stop()
+        ticker?.cancel()
+        ticker = nil
         restoreSilencedTabs()
         sourceTab = nil
         nowPlaying = nil
@@ -411,6 +428,20 @@ final class CastController: ObservableObject {
             for tab in manager.tabs where tab !== source && !tab.isMuted {
                 tab.toggleMute()
                 silencedTabs.append(WeakTab(tab: tab))
+            }
+        }
+    }
+
+    // 流している途中で鳴り出したタブも黙らせる。
+    // 一度黙らせたタブを本人が戻したなら、それは本人の意思なので二度は黙らせない
+    private func silenceNewlyPlayingTabs() {
+        guard let source = sourceTab else { return }
+        for manager in TabManager.openWindows {
+            for tab in manager.tabs where tab !== source && !tab.isMuted && tab.isPlayingAudio
+                && !silencedTabs.contains(where: { $0.tab === tab }) {
+                tab.toggleMute()
+                silencedTabs.append(WeakTab(tab: tab))
+                castLog.info("muted a tab that started playing")
             }
         }
     }
@@ -435,6 +466,80 @@ final class CastController: ObservableObject {
             castLog.error("no sound captured — audio recording permission missing?")
             self.lastError = String(localized: "No sound is being captured. Allow Skyscraper in System Settings › Privacy & Security › Screen & System Audio Recording.")
         }
+    }
+
+    // MARK: 音を配っている時の、元のタブの見張りと操作
+
+    private func startTicking() {
+        ticker?.cancel()
+        ticker = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.tick()
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+    }
+
+    private func tick() async {
+        guard nowPlaying?.mode == .audio else { return }
+        silenceNewlyPlayingTabs()
+
+        guard let tab = sourceTab else { return }
+        let result = try? await tab.webView.evaluateJavaScript(Self.mediaStatusScript)
+        // 待っている間に止められていたら何もしない
+        guard nowPlaying?.mode == .audio else { return }
+
+        guard let values = result as? [Any], values.count == 3 else {
+            nowPlaying?.hasLocalMedia = false
+            return
+        }
+        let time = (values[0] as? NSNumber)?.doubleValue ?? 0
+        let duration = (values[1] as? NSNumber)?.doubleValue ?? 0
+        let paused = (values[2] as? NSNumber)?.boolValue ?? true
+
+        nowPlaying?.hasLocalMedia = true
+        nowPlaying?.position = time
+        nowPlaying?.updatedAt = .now
+        // 生配信は長さが Infinity。スクリプト側で 0 にしてある
+        nowPlaying?.duration = duration > 0 ? duration : nil
+        nowPlaying?.state = paused ? .paused : .playing
+    }
+
+    // 元のタブの「操る相手」を決めて m に置く。
+    // 一度決めた相手には印を付けて、止めても別の要素へ乗り換えないようにする。
+    // 次に、鳴っているもの → YouTube の本編 → 一番長いもの の順で探す。
+    // 枠 (iframe) の中の動画には届かない
+    private static let pickMedia = """
+        const all = Array.from(document.querySelectorAll('video, audio'));
+        const m = all.find(e => e.__skyscraperCastTarget)
+          || all.find(e => !e.paused && !e.ended)
+          || document.querySelector('#movie_player video')
+          || all.slice().sort((a, b) => (b.duration || 0) - (a.duration || 0))[0];
+        if (m) { m.__skyscraperCastTarget = true; }
+        """
+
+    // [位置, 長さ, 止まっているか]。相手がいなければ空の配列
+    // (null を返すと async 版の evaluateJavaScript が気難しいので、必ず値を返す)
+    private static let mediaStatusScript = """
+        (() => {
+          \(pickMedia)
+          if (!m) return [];
+          const d = isFinite(m.duration) ? m.duration : 0;
+          return [m.currentTime || 0, d, m.paused];
+        })()
+        """
+
+    private func runOnSource(_ action: String) {
+        guard let tab = sourceTab else { return }
+        let script = """
+            (() => {
+              \(Self.pickMedia)
+              if (!m) return false;
+              \(action)
+              return true;
+            })()
+            """
+        Task { _ = try? await tab.webView.evaluateJavaScript(script) }
     }
 
     private func handle(_ message: CastMessage, _ json: [String: Any], from link: CastLink) {
@@ -1342,9 +1447,9 @@ private struct NowPlayingPanel: View {
                     .lineLimit(2)
             }
 
-            if now.mode == .youTube {
-                youTubeControls
-            } else {
+            transportControls
+
+            if now.mode == .audio {
                 // 音を配っている間は Mac 側が黙る。遅れて鳴るのはそういう仕組み
                 Text("Sending Skyscraper’s sound. Other tabs are muted, and the speaker plays a few seconds behind.")
                     .font(.system(size: 11))
@@ -1363,9 +1468,11 @@ private struct NowPlayingPanel: View {
         }
     }
 
-    // YouTube アプリへ渡した時の操作。位置・長さ・題は端末が教えてくれる
+    // 再生位置と操作。
+    // YouTube アプリへ渡した時は端末が、音を配っている時は元のタブが位置と長さを教えてくれる
+    // (後者はタブの位置なので、スピーカーから聞こえる音より数秒先を指す)
     @ViewBuilder
-    private var youTubeControls: some View {
+    private var transportControls: some View {
         VStack(alignment: .leading, spacing: 8) {
             // 端末は状態が変わった時しか位置を知らせてこないので、
             // 一秒ごとに手元で進めて描く
