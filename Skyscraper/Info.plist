@@ -16,6 +16,8 @@
 	<string>Skyscraper needs your location so that websites you allow can use it.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Skyscraper looks for Google Cast devices on your network so that you can play YouTube videos on them.</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Skyscraper picks up the sound of the pages you play so that it can send it to your speakers.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_googlecast._tcp</string>

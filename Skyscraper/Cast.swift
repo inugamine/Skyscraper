@@ -77,7 +77,18 @@ struct CastDevice: Identifiable, Hashable {
     let id: String          // TXT の id。無ければサービス名
     let name: String        // TXT の fn (Home アプリでの名前)
     let model: String       // TXT の md
+    let capabilities: Int   // TXT の ca (GCKDeviceCapability の印)
     let endpoint: NWEndpoint
+
+    // GCKDeviceCapability の印 (Google の iOS SDK の定義)
+    private static let videoOut = 1 << 0
+    private static let multizoneGroup = 1 << 5
+
+    // 画面がある (YouTube の動画アプリが居つく)。
+    // Home Mini (ca=2052) やグループには居つかない (2026-10 に試して確かめた)
+    var hasScreen: Bool { capabilities & Self.videoOut != 0 && !isGroup }
+    // 複数のスピーカーを束ねた仮の端末
+    var isGroup: Bool { capabilities & Self.multizoneGroup != 0 }
 }
 
 // MARK: - 端末を探す
@@ -92,10 +103,6 @@ final class CastDiscovery: ObservableObject {
     @Published private(set) var isDenied = false
 
     private var browser: NWBrowser?
-
-    // GCKDeviceCapability の印 (Google の iOS SDK の定義)
-    private static let videoOut = 1 << 0
-    private static let multizoneGroup = 1 << 5
 
     // kDNSServiceErr_PolicyDenied。ローカルネットワークの許可が無い時に返る
     private static let policyDenied: Int32 = -65570
@@ -161,14 +168,10 @@ final class CastDiscovery: ObservableObject {
 
             castLog.debug("found \(name, privacy: .public) (\(model, privacy: .public)) ca=\(capabilities)")
 
-            // 画面のある端末だけ。
-            // Home Mini (ca=2052) は音だけ、グループは複数のスピーカーを束ねた仮の端末で、
-            // どちらも YouTube の動画アプリが居つかない (2026-10 に試して確かめた)
-            guard capabilities & Self.videoOut != 0,
-                  capabilities & Self.multizoneGroup == 0 else { continue }
-
+            // 画面の無いスピーカーとグループも並べる。そちらへは音を配る (CastAudio.swift)
             let id = txt["id"] ?? serviceName
-            found[id] = CastDevice(id: id, name: name, model: model, endpoint: result.endpoint)
+            found[id] = CastDevice(id: id, name: name, model: model,
+                                   capabilities: capabilities, endpoint: result.endpoint)
         }
 
         devices = found.values.sorted {
@@ -190,11 +193,20 @@ final class CastController: ObservableObject {
         case idle = "IDLE"
     }
 
+    // 飛ばし方は二通り
+    enum Mode {
+        // 端末の YouTube アプリに動画 ID を渡す。端末が自分で取りに行く (Cast.swift)
+        case youTube
+        // Skyscraper が鳴らしている音を拾って配る (CastAudio.swift)
+        case audio
+    }
+
     // 端末で今流れているもの。
     // 再生位置は「updatedAt の時点で position 秒」とだけ持ち、
     // 間の秒数は画面側で足して進める (端末は状態が変わった時しか知らせてこない)
     struct NowPlaying {
         let device: CastDevice
+        let mode: Mode
         var mediaSessionID: Int?
         var title: String?
         var state: PlayerState = .buffering
@@ -221,34 +233,65 @@ final class CastController: ObservableObject {
     private var link: CastLink?
     private var nextRequestID = 1000
 
+    // 音を配っている間に黙らせた他のタブ。止めた時に音を戻す
+    private struct WeakTab { weak var tab: Tab? }
+    private var silencedTabs: [WeakTab] = []
+    private weak var sourceTab: Tab?
+
     private init() {}
 
-    // 成功したら true。失敗の文言は lastError に置く
-    // startTime は秒。タブで観ていた所から続けるのに使う
+    // このタブとこの端末の組み合わせで、どちらの飛ばし方を使うか。
+    // 画面のある端末 × YouTube の動画ページの時だけ、本物の YouTube アプリへ渡す
+    static func mode(for tab: Tab, device: CastDevice) -> Mode {
+        device.hasScreen && YouTubeVideoID.from(tab.urlText) != nil ? .youTube : .audio
+    }
+
+    // 端末の YouTube アプリで再生する。startTime は秒 (タブで観ていた所から続ける)
     func play(videoID: String, startTime: Double = 0, on device: CastDevice) async -> Bool {
-        guard connectingDeviceID == nil else { return false }
-        connectingDeviceID = device.id
-        lastError = nil
-        defer { connectingDeviceID = nil }
-
-        // 前の端末との繋がりは切る。向こうの再生はそのまま続く
-        end()
-
-        do {
+        await begin(device, mode: .youTube, title: nil, position: startTime) {
             let link = try await CastSession.playYouTube(videoID, startTime: startTime, on: device)
             castLog.info("playing \(videoID, privacy: .public) at \(Int(startTime))s on \(device.name, privacy: .public)")
-            adopt(link, device: device, startTime: startTime)
-            return true
-        } catch {
-            castLog.error("cast failed: \(String(describing: error), privacy: .public)")
-            lastError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-            return false
+            return link
         }
+    }
+
+    // タブの音を拾って端末へ配る。流している間は他のタブを黙らせる
+    func streamAudio(from tab: Tab, to device: CastDevice) async -> Bool {
+        let title = tab.pageTitle.isEmpty ? tab.urlText : tab.pageTitle
+        let host = URL(string: tab.urlText)?.host ?? ""
+
+        let ok = await begin(device, mode: .audio, title: title, position: 0) {
+            let processes = CastAudioSource.webKitProcesses()
+            guard !processes.isEmpty else { throw CastError.noAudio }
+
+            let pipeline = CastAudioPipeline()
+            do {
+                let port = try await pipeline.start(processes: processes)
+                let link = try await CastSession.playStream(path: pipeline.path, port: port,
+                                                            title: title, subtitle: host, on: device)
+                link.pipeline = pipeline
+                castLog.info("streaming audio to \(device.name, privacy: .public) on port \(port)")
+                return link
+            } catch {
+                pipeline.stop()
+                throw error
+            }
+        }
+        guard ok else { return false }
+
+        sourceTab = tab
+        silenceTabs(except: tab)
+        watchForMissingPermission()
+        return true
     }
 
     // MARK: 操作
 
-    var canControl: Bool { nowPlaying?.mediaSessionID != nil }
+    // 二段目までは、操作できるのは YouTube アプリへ渡した時だけ
+    var canControl: Bool {
+        guard let now = nowPlaying else { return false }
+        return now.mode == .youTube && now.mediaSessionID != nil
+    }
 
     func togglePlayPause() {
         guard let now = nowPlaying else { return }
@@ -272,7 +315,8 @@ final class CastController: ObservableObject {
         seek(to: now.position(at: .now) + delta)
     }
 
-    // 端末の YouTube を閉じて、Hub を元の画面に戻す
+    // 端末で起動したアプリを閉じて、元の画面に戻す。
+    // 音を配っていたなら、Mac のスピーカーと黙らせたタブに音が戻る
     func stop() {
         if let link {
             link.channel.send(CastNamespace.receiver, to: CastSession.platform, [
@@ -286,10 +330,33 @@ final class CastController: ObservableObject {
 
     // MARK: 内側
 
-    private func adopt(_ link: CastLink, device: CastDevice, startTime: Double) {
+    // 飛ばす手順の共通の枠。前の繋がりを捨て、繋がったら引き取る
+    private func begin(_ device: CastDevice, mode: Mode, title: String?, position: Double,
+                       _ connect: () async throws -> CastLink) async -> Bool {
+        guard connectingDeviceID == nil else { return false }
+        connectingDeviceID = device.id
+        lastError = nil
+        defer { connectingDeviceID = nil }
+
+        // 前の端末との繋がりは切る。YouTube アプリへ渡した分は向こうで再生が続く
+        end()
+
+        do {
+            let link = try await connect()
+            adopt(link, device: device, mode: mode, title: title, position: position)
+            return true
+        } catch {
+            castLog.error("cast failed: \(String(describing: error), privacy: .public)")
+            lastError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            return false
+        }
+    }
+
+    private func adopt(_ link: CastLink, device: CastDevice, mode: Mode,
+                       title: String?, position: Double) {
         self.link = link
         // 最初の MEDIA_STATUS が届くまでは、頼んだ位置を仮に出しておく
-        nowPlaying = NowPlaying(device: device, position: startTime)
+        nowPlaying = NowPlaying(device: device, mode: mode, title: title, position: position)
 
         link.channel.onMessage = { [weak self, weak link] message, json in
             guard let self, let link, link === self.link else { return }
@@ -309,6 +376,8 @@ final class CastController: ObservableObject {
             }
         }
 
+        guard mode == .youTube else { return }
+
         // mediaSessionId を手に入れるまでは操作できない。
         // 読み込み中は答えが空のことがあるので、間を空けて二度訊く
         sendGetStatus()
@@ -320,7 +389,7 @@ final class CastController: ObservableObject {
         }
     }
 
-    // 繋がりを捨てる。端末の再生には触らない
+    // 繋がりを捨てる。YouTube アプリへ渡した分の再生には触らない
     private func end() {
         guard let link else { return }
         self.link = nil
@@ -328,7 +397,44 @@ final class CastController: ObservableObject {
         link.channel.onMessage = nil
         link.channel.onClose = nil
         link.channel.close()
+        // タップを外せば Mac のスピーカーに音が戻る
+        link.pipeline?.stop()
+        restoreSilencedTabs()
+        sourceTab = nil
         nowPlaying = nil
+    }
+
+    // 拾えるのは Skyscraper 全体の音なので、流しているタブ以外を黙らせる。
+    // 元々黙っていたタブには触らない (戻す時に鳴り出さないように)
+    private func silenceTabs(except source: Tab) {
+        for manager in TabManager.openWindows {
+            for tab in manager.tabs where tab !== source && !tab.isMuted {
+                tab.toggleMute()
+                silencedTabs.append(WeakTab(tab: tab))
+            }
+        }
+    }
+
+    private func restoreSilencedTabs() {
+        for entry in silencedTabs {
+            // 流している間に本人が戻していたら、そのまま
+            if let tab = entry.tab, tab.isMuted { tab.toggleMute() }
+        }
+        silencedTabs.removeAll()
+    }
+
+    // 録音の許可が無いと、タップは動くのに中身が全部無音になる。
+    // しかも macOS は許可を訊いてこないことがある (2026-10 にターミナルで試した時がそう)。
+    // タブは鳴っているのに数秒たっても一度も音が来なければ、設定の場所を案内する
+    private func watchForMissingPermission() {
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            guard let self, let pipeline = self.link?.pipeline,
+                  self.sourceTab?.isPlayingAudio == true,
+                  !pipeline.hasCapturedSound else { return }
+            castLog.error("no sound captured — audio recording permission missing?")
+            self.lastError = String(localized: "No sound is being captured. Allow Skyscraper in System Settings › Privacy & Security › Screen & System Audio Recording.")
+        }
     }
 
     private func handle(_ message: CastMessage, _ json: [String: Any], from link: CastLink) {
@@ -339,9 +445,9 @@ final class CastController: ObservableObject {
             apply(status)
 
         case (CastNamespace.receiver, "RECEIVER_STATUS"?):
-            // YouTube が居なくなった (Hub 側で止められた・別の送り手に取られた)
-            if CastSession.youTubeApp(in: json)?["transportId"] as? String != link.transportID {
-                castLog.info("YouTube left the device")
+            // アプリが居なくなった (端末側で止められた・別の送り手に取られた)
+            if CastSession.app(link.appID, in: json)?["transportId"] as? String != link.transportID {
+                castLog.info("receiver app left the device")
                 end()
             }
 
@@ -352,6 +458,17 @@ final class CastController: ObservableObject {
 
     private func apply(_ status: [String: Any]) {
         guard var now = nowPlaying else { return }
+
+        // 生配信の受け手が自分から投げ出した (届かない・形が読めない)
+        if now.mode == .audio {
+            if status["playerState"] as? String == "IDLE",
+               status["idleReason"] as? String == "ERROR" {
+                castLog.error("stream stopped on the device")
+                lastError = String(localized: "The device stopped playing the sound.")
+                end()
+            }
+            return
+        }
 
         // 自動再生で次の動画に移ると番号が変わる。前の題と長さは捨てる
         if let id = status["mediaSessionId"] as? Int, id != now.mediaSessionID {
@@ -399,15 +516,19 @@ final class CastController: ObservableObject {
     }
 }
 
-// 端末との繋がり一本と、そこで起動した YouTube の札
+// 端末との繋がり一本と、そこで起動したアプリの札
 @MainActor
 private final class CastLink {
+    let appID: String
     let channel: CastChannel
     let transportID: String
     let sessionID: String
     var heartbeat: Task<Void, Never>?
+    // 音を配っている時だけ持つ。繋がりを捨てる時に一緒に止める
+    var pipeline: CastAudioPipeline?
 
-    init(channel: CastChannel, transportID: String, sessionID: String) {
+    init(appID: String, channel: CastChannel, transportID: String, sessionID: String) {
+        self.appID = appID
         self.channel = channel
         self.transportID = transportID
         self.sessionID = sessionID
@@ -416,12 +537,15 @@ private final class CastLink {
 
 // MARK: - 失敗の種類
 
-enum CastError: LocalizedError {
+// 音を配る側 (メインに縛られない CastAudioPipeline) からも投げるので nonisolated
+nonisolated enum CastError: LocalizedError {
     case unreachable
     case timeout
     case closed
     case launchFailed
     case lounge
+    case noAudio
+    case loadFailed
 
     var errorDescription: String? {
         switch self {
@@ -430,6 +554,8 @@ enum CastError: LocalizedError {
         case .closed:       String(localized: "The connection to the device was closed.")
         case .launchFailed: String(localized: "YouTube couldn’t start on the device.")
         case .lounge:       String(localized: "YouTube didn’t accept the request.")
+        case .noAudio:      String(localized: "Couldn’t pick up Skyscraper’s sound.")
+        case .loadFailed:   String(localized: "The device couldn’t play the sound.")
         }
     }
 }
@@ -446,6 +572,8 @@ private enum CastNamespace {
 
 private enum CastSession {
     static let youTubeAppID = "233637DE"
+    // Cast 標準の受け手。URL を渡せば何でも再生する。スピーカーにもグループにも居る
+    static let defaultMediaReceiverID = "CC1AD845"
     static let platform = "receiver-0"
 
     // 再生まで漕ぎ着けたら、繋がりを開いたまま返す。
@@ -455,31 +583,10 @@ private enum CastSession {
         let channel = CastChannel(endpoint: device.endpoint)
         do {
             try await channel.open()
+            let (transport, sessionID) = try await launch(youTubeAppID, on: channel)
 
-            // 1. 端末そのものに挨拶して、YouTube アプリを起動する
-            channel.send(CastNamespace.connection, to: platform, ["type": "CONNECT"])
-            channel.send(CastNamespace.receiver, to: platform, [
-                "type": "LAUNCH",
-                "appId": youTubeAppID,
-                "requestId": channel.nextRequestID(),
-            ])
-
-            // 起動前の様子が先に届くことがあるので、YouTube の transportId が
-            // 載った RECEIVER_STATUS が来るまで待つ
-            let launched = try await channel.wait(timeout: .seconds(20)) { message, json in
-                message.namespace == CastNamespace.receiver
-                    && (json["type"] as? String == "LAUNCH_ERROR"
-                        || CastSession.youTubeApp(in: json)?["transportId"] != nil)
-            }
-            guard let app = youTubeApp(in: launched.json),
-                  let transport = app["transportId"] as? String else {
-                throw CastError.launchFailed
-            }
-            let sessionID = app["sessionId"] as? String ?? ""
-
-            // 2. 起動した YouTube アプリに繋ぎ、screenId を訊く。
+            // 起動した YouTube アプリに screenId を訊く。
             // 起動直後は返事をしないことがあるので、答えるまで数回訊き直す
-            channel.send(CastNamespace.connection, to: transport, ["type": "CONNECT"])
             let asking = Task {
                 for _ in 0..<5 {
                     channel.send(CastNamespace.mdx, to: transport, ["type": "getMdxSessionStatus"])
@@ -497,21 +604,97 @@ private enum CastSession {
                 throw CastError.launchFailed
             }
 
-            // 3. ここから先は HTTP
+            // ここから先は HTTP
             try await YouTubeLounge.play(videoID: videoID, startTime: startTime, screenID: screenID)
 
-            return CastLink(channel: channel, transportID: transport, sessionID: sessionID)
+            return CastLink(appID: youTubeAppID, channel: channel,
+                            transportID: transport, sessionID: sessionID)
         } catch {
             channel.close()
             throw error
         }
     }
 
-    // RECEIVER_STATUS の中から YouTube アプリの札を探す
-    static func youTubeApp(in json: [String: Any]) -> [String: Any]? {
+    // Mac の中の配信口 (CastAudioPipeline) の URL を、標準の受け手に生配信として渡す
+    static func playStream(path: String, port: UInt16, title: String, subtitle: String,
+                           on device: CastDevice) async throws -> CastLink {
+        let channel = CastChannel(endpoint: device.endpoint)
+        do {
+            try await channel.open()
+            // 端末から見える Mac の番地。端末へ繋いだ時の手元側の番地をそのまま使う
+            guard let host = channel.localIPv4 else { throw CastError.unreachable }
+            let url = "http://\(host):\(port)\(path)"
+
+            let (transport, sessionID) = try await launch(defaultMediaReceiverID, on: channel)
+
+            channel.send(CastNamespace.media, to: transport, [
+                "type": "LOAD",
+                "requestId": channel.nextRequestID(),
+                "autoplay": true,
+                "currentTime": 0,
+                "media": [
+                    "contentId": url,
+                    "contentUrl": url,
+                    "streamType": "LIVE",
+                    "contentType": "audio/wav",
+                    "metadata": [
+                        "metadataType": 0,
+                        "title": title,
+                        "subtitle": subtitle,
+                    ] as [String: Any],
+                ] as [String: Any],
+            ])
+
+            let reply = try await channel.wait(timeout: .seconds(20)) { message, json in
+                message.namespace == CastNamespace.media
+                    && ["MEDIA_STATUS", "LOAD_FAILED", "LOAD_CANCELLED", "INVALID_REQUEST"]
+                        .contains(json["type"] as? String ?? "")
+            }
+            guard reply.json["type"] as? String == "MEDIA_STATUS" else {
+                castLog.error("load refused: \(reply.payload, privacy: .public)")
+                throw CastError.loadFailed
+            }
+
+            return CastLink(appID: defaultMediaReceiverID, channel: channel,
+                            transportID: transport, sessionID: sessionID)
+        } catch {
+            channel.close()
+            throw error
+        }
+    }
+
+    // 端末そのものに挨拶してアプリを起動し、そのアプリに繋ぐ。
+    // (transportId, sessionId) を返す
+    private static func launch(_ appID: String,
+                               on channel: CastChannel) async throws -> (String, String) {
+        channel.send(CastNamespace.connection, to: platform, ["type": "CONNECT"])
+        channel.send(CastNamespace.receiver, to: platform, [
+            "type": "LAUNCH",
+            "appId": appID,
+            "requestId": channel.nextRequestID(),
+        ])
+
+        // 起動前の様子が先に届くことがあるので、目当てのアプリの transportId が
+        // 載った RECEIVER_STATUS が来るまで待つ
+        let launched = try await channel.wait(timeout: .seconds(20)) { message, json in
+            message.namespace == CastNamespace.receiver
+                && (json["type"] as? String == "LAUNCH_ERROR"
+                    || CastSession.app(appID, in: json)?["transportId"] != nil)
+        }
+        guard let app = self.app(appID, in: launched.json),
+              let transport = app["transportId"] as? String else {
+            throw CastError.launchFailed
+        }
+
+        channel.send(CastNamespace.connection, to: transport, ["type": "CONNECT"])
+        return (transport, app["sessionId"] as? String ?? "")
+    }
+
+    // RECEIVER_STATUS の中から、指定したアプリの札を探す
+    static func app(_ appID: String, in json: [String: Any]) -> [String: Any]? {
         guard let status = json["status"] as? [String: Any],
               let apps = status["applications"] as? [[String: Any]] else { return nil }
-        return apps.first { $0["appId"] as? String == youTubeAppID }
+        return apps.first { $0["appId"] as? String == appID }
     }
 }
 
@@ -552,7 +735,20 @@ private final class CastChannel {
         let tcp = NWProtocolTCP.Options()
         tcp.connectionTimeout = 8
 
-        connection = NWConnection(to: endpoint, using: NWParameters(tls: tls, tcp: tcp))
+        // IPv4 で繋ぐ。音を配る時に、端末から見える Mac の番地を
+        // URL に書くので、IPv6 のリンクローカル (fe80::…%en0) を掴まないように
+        let parameters = NWParameters(tls: tls, tcp: tcp)
+        if let ip = parameters.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options {
+            ip.version = .v4
+        }
+        connection = NWConnection(to: endpoint, using: parameters)
+    }
+
+    // 端末へ繋いだ時の、手元 (Mac) 側の IPv4 の番地
+    var localIPv4: String? {
+        guard case .hostPort(let host, _)? = connection.currentPath?.localEndpoint,
+              case .ipv4(let address) = host else { return nil }
+        return address.rawValue.map { String($0) }.joined(separator: ".")
     }
 
     func open() async throws {
@@ -932,7 +1128,7 @@ private enum YouTubeLounge {
 
 // MARK: - アドレスバーのボタン
 
-// YouTube の動画を開いている時と、どこかへ飛ばしている間だけ現れる。
+// YouTube の動画を開いている時・タブが鳴っている時・どこかへ飛ばしている間だけ現れる。
 // 飛ばしている間は塗りつぶしの印になり、どのタブからでも操作盤を開ける
 struct CastButton: View {
     @ObservedObject var tab: Tab
@@ -941,7 +1137,7 @@ struct CastButton: View {
 
     var body: some View {
         let casting = controller.nowPlaying != nil
-        if casting || YouTubeVideoID.from(tab.urlText) != nil {
+        if casting || CastPopover.canCast(from: tab) {
             Button {
                 showing.toggle()
             } label: {
@@ -970,6 +1166,13 @@ struct CastButton: View {
 private struct CastPopover: View {
     @ObservedObject var tab: Tab
 
+    // このタブから飛ばせるものがあるか。
+    // YouTube の動画ページなら止まっていても出す (画面のある端末へは YouTube アプリで渡せる)。
+    // それ以外は、音が鳴っている時だけ (音を配るしかないので)
+    static func canCast(from tab: Tab) -> Bool {
+        YouTubeVideoID.from(tab.urlText) != nil || tab.isPlayingAudio
+    }
+
     @ObservedObject private var discovery = CastDiscovery.shared
     @ObservedObject private var controller = CastController.shared
 
@@ -979,8 +1182,8 @@ private struct CastPopover: View {
                 NowPlayingPanel(now: now)
             }
 
-            // 動画のページにいる時だけ、端末の一覧も出す (別の動画を飛ばし直せる)
-            if YouTubeVideoID.from(tab.urlText) != nil {
+            // 飛ばせるものがある時だけ、端末の一覧も出す (別のものを飛ばし直せる)
+            if Self.canCast(from: tab) {
                 if controller.nowPlaying != nil {
                     Rectangle()
                         .fill(Deco.faintGold)
@@ -1038,9 +1241,12 @@ private struct CastPopover: View {
             cast(to: device)
         } label: {
             HStack(spacing: 8) {
-                Image(systemName: "tv")
+                // 印は端末の種類で決める: 画面・スピーカー・グループ
+                Image(systemName: device.hasScreen ? "tv"
+                      : device.isGroup ? "hifispeaker.2" : "hifispeaker")
                     .font(.system(size: 12))
                     .foregroundColor(Deco.gold)
+                    .frame(width: 18)
                 Text(verbatim: device.name)
                     .font(.system(size: 12))
                     .foregroundColor(Deco.cream)
@@ -1057,6 +1263,16 @@ private struct CastPopover: View {
     }
 
     private func cast(to device: CastDevice) {
+        switch CastController.mode(for: tab, device: device) {
+        case .youTube:
+            castYouTube(to: device)
+        case .audio:
+            // タブは鳴らしたまま。その音を拾って配る
+            Task { _ = await controller.streamAudio(from: tab, to: device) }
+        }
+    }
+
+    private func castYouTube(to device: CastDevice) {
         // 押した瞬間の URL から拾う。盤を開いた後に動画を移っていてもずれない
         guard let videoID = YouTubeVideoID.from(tab.urlText) else { return }
         Task {
@@ -1126,6 +1342,31 @@ private struct NowPlayingPanel: View {
                     .lineLimit(2)
             }
 
+            if now.mode == .youTube {
+                youTubeControls
+            } else {
+                // 音を配っている間は Mac 側が黙る。遅れて鳴るのはそういう仕組み
+                Text("Sending Skyscraper’s sound. Other tabs are muted, and the speaker plays a few seconds behind.")
+                    .font(.system(size: 11))
+                    .foregroundColor(Deco.dimGold)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Button {
+                controller.stop()
+            } label: {
+                Label("Stop Casting", systemImage: "stop.circle")
+                    .font(.system(size: 11))
+                    .foregroundColor(Deco.dimGold)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    // YouTube アプリへ渡した時の操作。位置・長さ・題は端末が教えてくれる
+    @ViewBuilder
+    private var youTubeControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
             // 端末は状態が変わった時しか位置を知らせてこないので、
             // 一秒ごとに手元で進めて描く
             TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -1148,15 +1389,6 @@ private struct NowPlayingPanel: View {
             }
             .disabled(!controller.canControl)
             .opacity(controller.canControl ? 1 : 0.4)
-
-            Button {
-                controller.stop()
-            } label: {
-                Label("Stop Casting", systemImage: "stop.circle")
-                    .font(.system(size: 11))
-                    .foregroundColor(Deco.dimGold)
-            }
-            .buttonStyle(.plain)
         }
     }
 
