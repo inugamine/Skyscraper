@@ -14,22 +14,8 @@ import UniformTypeIdentifiers
 import Translation
 
 // MARK: - アール・デコ配色
-
-enum Deco {
-    static let ink       = Color(red: 0x0d/255, green: 0x0d/255, blue: 0x0d/255)
-    static let panel     = Color(red: 0x14/255, green: 0x12/255, blue: 0x10/255)
-    static let panel2    = Color(red: 0x1a/255, green: 0x17/255, blue: 0x12/255)
-    static let field     = Color(red: 0x16/255, green: 0x13/255, blue: 0x10/255)
-    static let gold      = Color(red: 0xc9/255, green: 0xa3/255, blue: 0x4e/255)
-    static let cream     = Color(red: 0xe8/255, green: 0xd9/255, blue: 0xb0/255)
-    static let dimGold   = Color(red: 0x8a/255, green: 0x7a/255, blue: 0x52/255)
-    static let faintGold = Color(red: 0x5a/255, green: 0x4c/255, blue: 0x2a/255)
-    // 警告に使う錆色。
-    // 信号機の赤をそのまま持ち込むと盤全体の色調が壊れるので、
-    // 金の隣に置いても喧嘩しないテラコッタに寄せてある。
-    // 使い道は鍵の警告表示だけ (乱発すれば意味が消える)
-    static let rust      = Color(red: 0xb5/255, green: 0x6a/255, blue: 0x3c/255)
-}
+//
+// 色の実体と配色の切り替えは Theme.swift に移した
 
 // MARK: - 自作シェイプ
 
@@ -5658,11 +5644,9 @@ struct AddressField: NSViewRepresentable {
         let font = serif.flatMap { NSFont(descriptor: $0, size: size) }
             ?? NSFont.systemFont(ofSize: size)
         field.font = font
-        field.textColor = NSColor(Deco.gold)
-        field.placeholderAttributedString = NSAttributedString(
-            string: String(localized: "Search or enter address"),
-            attributes: [.foregroundColor: NSColor(Deco.dimGold), .font: font]
-        )
+        field.applyDecoColors(text: Deco.gold,
+                              placeholder: String(localized: "Search or enter address"),
+                              font: font)
         field.onEditingChanged = { editing in
             DispatchQueue.main.async { context.coordinator.parent.onEditingChanged(editing) }
         }
@@ -5672,6 +5656,10 @@ struct AddressField: NSViewRepresentable {
     func updateNSView(_ field: ClickSelectTextField, context: Context) {
         let coordinator = context.coordinator
         coordinator.parent = self
+        // 配色を切り替えた時の塗り直し (Theme.swift)
+        field.applyDecoColors(text: Deco.gold,
+                              placeholder: String(localized: "Search or enter address"),
+                              font: field.font)
         // タブが切り替わった：編集を破棄して、新しいタブの URL を強制反映する。
         //
         // ここで text (親の @State) を映してはいけない。
@@ -5873,16 +5861,18 @@ struct FindField: NSViewRepresentable {
         let font = serif.flatMap { NSFont(descriptor: $0, size: size) }
             ?? NSFont.systemFont(ofSize: size)
         field.font = font
-        field.textColor = NSColor(Deco.cream)
-        field.placeholderAttributedString = NSAttributedString(
-            string: String(localized: "Find in page"),
-            attributes: [.foregroundColor: NSColor(Deco.dimGold), .font: font]
-        )
+        field.applyDecoColors(text: Deco.cream,
+                              placeholder: String(localized: "Find in page"),
+                              font: font)
         return field
     }
 
     func updateNSView(_ field: ClickSelectTextField, context: Context) {
         context.coordinator.parent = self
+        // 配色を切り替えた時の塗り直し (Theme.swift)
+        field.applyDecoColors(text: Deco.cream,
+                              placeholder: String(localized: "Find in page"),
+                              font: field.font)
         // 編集中の打鍵を潰さないよう、編集していないときだけ外の値を反映する
         if field.currentEditor() == nil, field.stringValue != text {
             field.stringValue = text

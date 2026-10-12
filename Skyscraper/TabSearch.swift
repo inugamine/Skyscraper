@@ -126,16 +126,18 @@ struct TabSearchField: NSViewRepresentable {
         let font = serif.flatMap { NSFont(descriptor: $0, size: size) }
             ?? NSFont.systemFont(ofSize: size)
         field.font = font
-        field.textColor = NSColor(Deco.cream)
-        field.placeholderAttributedString = NSAttributedString(
-            string: String(localized: "Search open tabs"),
-            attributes: [.foregroundColor: NSColor(Deco.dimGold), .font: font]
-        )
+        field.applyDecoColors(text: Deco.cream,
+                              placeholder: String(localized: "Search open tabs"),
+                              font: font)
         return field
     }
 
     func updateNSView(_ field: ClickSelectTextField, context: Context) {
         context.coordinator.parent = self
+        // 配色を切り替えた時の塗り直し (Theme.swift)
+        field.applyDecoColors(text: Deco.cream,
+                              placeholder: String(localized: "Search open tabs"),
+                              font: field.font)
         // 編集中の打鍵を潰さないよう、編集していないときだけ外の値を反映する
         if field.currentEditor() == nil, field.stringValue != text {
             field.stringValue = text

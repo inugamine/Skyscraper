@@ -107,80 +107,90 @@ enum Reader {
     """
 
     // ── 装い ──
-    // ロビーと同じ闇と金。本文はセリフ体のクリーム、罫の中央にダイヤを一粒。
+    // ロビーと同じ地と金。本文はセリフ体のクリーム、罫の中央にダイヤを一粒。
+    // 色は入場の度に今の配色 (Theme.swift) から引く。
     // 注意: この CSS は JS のテンプレートリテラル (バッククォート) に流し込むので、バッククォートと ${ は使わないこと
-    private static let css = """
-    #__skyscraper-reader {
-        position: fixed; inset: 0;
-        background: #0d0d0d;
-        z-index: 2147483647;
-        overflow-y: auto;
-        overscroll-behavior: contain;
+    private static var css: String {
+        let p = DecoThemeStore.shared.theme.palette
+        let ink = DecoPalette.css(p.ink)
+        let panel2 = DecoPalette.css(p.panel2)
+        let gold = DecoPalette.css(p.gold)
+        let cream = DecoPalette.css(p.cream)
+        let dim = DecoPalette.css(p.dimGold)
+        let faint = DecoPalette.css(p.faintGold)
+        return """
+        #__skyscraper-reader {
+            position: fixed; inset: 0;
+            background: \(ink);
+            z-index: 2147483647;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+        }
+        .__sr-column {
+            max-width: 680px;
+            margin: 0 auto;
+            padding: 64px 32px 96px;
+            font-family: Georgia, 'Times New Roman', 'Hiragino Mincho ProN', 'Yu Mincho', serif;
+            color: \(cream);
+            font-size: 17px;
+            line-height: 1.9;
+        }
+        .__sr-title {
+            font-size: 28px; line-height: 1.45;
+            color: \(cream); letter-spacing: 0.04em;
+            margin: 0 0 12px; font-weight: 600;
+        }
+        .__sr-byline {
+            font-size: 13px; color: \(dim);
+            letter-spacing: 0.06em; margin-bottom: 28px;
+        }
+        .__sr-rule {
+            height: 1px; background: \(faint);
+            margin: 0 0 44px; position: relative;
+        }
+        .__sr-rule::after {
+            content: ''; position: absolute;
+            left: 50%; top: -4px; width: 9px; height: 9px;
+            transform: translateX(-50%) rotate(45deg);
+            border: 1px solid \(gold); background: \(ink);
+        }
+        .__sr-body h1, .__sr-body h2, .__sr-body h3, .__sr-body h4 {
+            color: \(cream); letter-spacing: 0.03em; line-height: 1.5;
+            margin: 40px 0 16px;
+        }
+        .__sr-body p { margin: 0 0 1.2em; }
+        .__sr-body a { color: \(gold); }
+        .__sr-body img, .__sr-body video, .__sr-body figure {
+            max-width: 100%; height: auto;
+            margin: 28px auto; display: block;
+        }
+        .__sr-body figure img { margin: 0 auto; }
+        .__sr-body figcaption {
+            font-size: 13px; color: \(dim);
+            text-align: center; margin-top: 10px;
+        }
+        .__sr-body blockquote {
+            margin: 24px 0; padding: 4px 0 4px 20px;
+            border-left: 2px solid \(gold); color: #cbbd97;
+        }
+        .__sr-body pre, .__sr-body code {
+            font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+            font-size: 14px; background: \(panel2); color: \(cream);
+        }
+        .__sr-body pre {
+            padding: 16px; overflow-x: auto;
+            border: 1px solid \(faint); line-height: 1.6;
+        }
+        .__sr-body hr {
+            border: none; height: 1px;
+            background: \(faint); margin: 40px 0;
+        }
+        .__sr-body table {
+            border-collapse: collapse; margin: 24px 0; font-size: 15px;
+        }
+        .__sr-body th, .__sr-body td {
+            border: 1px solid \(faint); padding: 8px 12px;
+        }
+        """
     }
-    .__sr-column {
-        max-width: 680px;
-        margin: 0 auto;
-        padding: 64px 32px 96px;
-        font-family: Georgia, 'Times New Roman', 'Hiragino Mincho ProN', 'Yu Mincho', serif;
-        color: #e8d9b0;
-        font-size: 17px;
-        line-height: 1.9;
-    }
-    .__sr-title {
-        font-size: 28px; line-height: 1.45;
-        color: #e8d9b0; letter-spacing: 0.04em;
-        margin: 0 0 12px; font-weight: 600;
-    }
-    .__sr-byline {
-        font-size: 13px; color: #8a7a52;
-        letter-spacing: 0.06em; margin-bottom: 28px;
-    }
-    .__sr-rule {
-        height: 1px; background: #5a4c2a;
-        margin: 0 0 44px; position: relative;
-    }
-    .__sr-rule::after {
-        content: ''; position: absolute;
-        left: 50%; top: -4px; width: 9px; height: 9px;
-        transform: translateX(-50%) rotate(45deg);
-        border: 1px solid #c9a34e; background: #0d0d0d;
-    }
-    .__sr-body h1, .__sr-body h2, .__sr-body h3, .__sr-body h4 {
-        color: #e8d9b0; letter-spacing: 0.03em; line-height: 1.5;
-        margin: 40px 0 16px;
-    }
-    .__sr-body p { margin: 0 0 1.2em; }
-    .__sr-body a { color: #c9a34e; }
-    .__sr-body img, .__sr-body video, .__sr-body figure {
-        max-width: 100%; height: auto;
-        margin: 28px auto; display: block;
-    }
-    .__sr-body figure img { margin: 0 auto; }
-    .__sr-body figcaption {
-        font-size: 13px; color: #8a7a52;
-        text-align: center; margin-top: 10px;
-    }
-    .__sr-body blockquote {
-        margin: 24px 0; padding: 4px 0 4px 20px;
-        border-left: 2px solid #c9a34e; color: #cbbd97;
-    }
-    .__sr-body pre, .__sr-body code {
-        font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-        font-size: 14px; background: #1a1712; color: #e8d9b0;
-    }
-    .__sr-body pre {
-        padding: 16px; overflow-x: auto;
-        border: 1px solid #5a4c2a; line-height: 1.6;
-    }
-    .__sr-body hr {
-        border: none; height: 1px;
-        background: #5a4c2a; margin: 40px 0;
-    }
-    .__sr-body table {
-        border-collapse: collapse; margin: 24px 0; font-size: 15px;
-    }
-    .__sr-body th, .__sr-body td {
-        border: 1px solid #5a4c2a; padding: 8px 12px;
-    }
-    """
 }

@@ -264,6 +264,27 @@ struct SettingsView: View {
     @ViewBuilder
     private var generalPane: some View {
 
+        // ══ 外観 ══
+        sectionHeader("Appearance")
+
+        // ── 配色 ──
+        //
+        // 押した瞬間に全ての窓が塗り変わる (仕組みは Theme.swift)。
+        // 確認や「適用」の札は置かない——気に入らなければもう一方を押せば戻る
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Color theme")
+                .font(.system(size: 12, design: .serif))
+                .foregroundColor(Deco.cream)
+
+            HStack(spacing: 10) {
+                ForEach(DecoTheme.allCases) { theme in
+                    themeChip(theme)
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(.bottom, 22)
+
         // ══ 既定のブラウザ ══
         defaultBrowserSection
 
@@ -657,6 +678,37 @@ struct SettingsView: View {
         case 60: "After 1 hour"
         default: "After \(minutes) minutes"
         }
+    }
+
+    // 配色を選ぶ六角形の札。
+    // 札の頭に、その配色の地と金で塗った菱形を一粒添えて見本にする。
+    // 今の配色の札だけ縁と文字を金にする (塗りつぶすと見本の菱形が埋もれる)
+    private func themeChip(_ theme: DecoTheme) -> some View {
+        let isCurrent = DecoThemeStore.shared.theme == theme
+        let swatch = theme.palette
+
+        return Button {
+            DecoThemeStore.shared.theme = theme
+        } label: {
+            HStack(spacing: 8) {
+                Rectangle()
+                    .fill(DecoPalette.color(swatch.panel))
+                    .overlay(Rectangle().stroke(DecoPalette.color(swatch.gold), lineWidth: 1))
+                    .frame(width: 8, height: 8)
+                    .rotationEffect(.degrees(45))
+                    .padding(2)
+                Text(theme.title)
+                    .font(.system(size: 11, design: .serif))
+                    .tracking(1)
+                    .foregroundColor(isCurrent ? Deco.gold : Deco.dimGold)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .overlay(Hexagon(inset: 6).stroke(isCurrent ? Deco.gold : Deco.faintGold, lineWidth: 1))
+            .contentShape(Hexagon(inset: 6))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isCurrent ? .isSelected : [])
     }
 
     private func sectionHeader(_ title: LocalizedStringKey) -> some View {
