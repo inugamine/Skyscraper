@@ -7,6 +7,24 @@
     <language>en</language>
 
     <item>
+      <title>Version 1.29</title>
+      <pubDate>Mon, 12 Oct 2026 14:37:01 +0900</pubDate>
+      <sparkle:version>29</sparkle:version>
+      <sparkle:shortVersionString>1.29</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>Skyscraper 1.29</h2>
+        <ul>
+          <li>Google Nest(Home) デバイスに対してのキャスト機能が使えるようになりました。</li>
+          <li>青銅色(?)のカラーテーマを選択できるようになりました。</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://github.com/inugamine/Skyscraper/releases/download/v1.29/Skyscraper-1.29.zip"
+        sparkle:edSignature="rQlCCrPqCBwkGF/M0wXBIwuyjhNSY00BG66NC3RbpPjaMPySQwX5S1iUSRMYfsBc99QtnRVOwAYrRMHSw2m/BA=="
+        length="13455991"
+        type="application/octet-stream" />
+    </item>    <item>
       <title>Version 1.28</title>
       <pubDate>Thu, 08 Oct 2026 20:55:00 +0900</pubDate>
       <sparkle:version>28</sparkle:version>
