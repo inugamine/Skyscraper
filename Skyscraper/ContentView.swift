@@ -469,8 +469,7 @@ final class BookmarkStore: ObservableObject {
 // そこで右クリック位置を控えておき、該当メニュー項目の飛び先を自前の処理に差し替えて、
 // startDownload(using:) で既存のダウンロード経路 (NSSavePanel の流れ) に合流させる。
 final class SkyscraperWebView: WKWebView {
-    // 直近の右クリック位置 (CSS ピクセル・見えている範囲の左上が原点)。
-    // elementFromPoint に渡す前に、JS 側で visualViewport のずれを足す
+    // 直近の右クリック位置 (CSS ピクセル・左上原点)。elementFromPoint に渡す
     private var lastRightClick: CGPoint = .zero
 
     override func rightMouseDown(with event: NSEvent) {
@@ -481,19 +480,6 @@ final class SkyscraperWebView: WKWebView {
         let scale = pageZoom * magnification
         lastRightClick = CGPoint(x: p.x / scale, y: topY / scale)
         super.rightMouseDown(with: event)
-    }
-
-    // ピンチで拡大している間、ビューに映っているのはページの一部だけだ。
-    // その左上がレイアウト上のどこか (visualViewport.offsetLeft/Top) を足して、
-    // elementFromPoint の座標系 (レイアウトの左上が原点) へ戻す
-    private var lastRightClickJS: String {
-        """
-        (() => {
-            const vv = window.visualViewport;
-            return [\(lastRightClick.x) + (vv ? vv.offsetLeft : 0),
-                    \(lastRightClick.y) + (vv ? vv.offsetTop : 0)];
-        })()
-        """
     }
 
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
@@ -516,8 +502,7 @@ final class SkyscraperWebView: WKWebView {
         // クリック位置から親を辿って画像を探す。<img> が無ければ背景画像も見る
         let js = """
         (() => {
-            const [x, y] = \(lastRightClickJS);
-            let el = document.elementFromPoint(x, y);
+            let el = document.elementFromPoint(\(lastRightClick.x), \(lastRightClick.y));
             while (el) {
                 if (el.tagName === 'IMG') { return el.currentSrc || el.src || null; }
                 const bg = window.getComputedStyle(el).backgroundImage || '';
@@ -534,8 +519,7 @@ final class SkyscraperWebView: WKWebView {
     @objc private func downloadLinkAtLastClick(_ sender: Any?) {
         let js = """
         (() => {
-            const [x, y] = \(lastRightClickJS);
-            const el = document.elementFromPoint(x, y);
+            const el = document.elementFromPoint(\(lastRightClick.x), \(lastRightClick.y));
             const a = el ? el.closest('a[href]') : null;
             return a ? a.href : null;
         })();
@@ -2291,12 +2275,11 @@ extension Tab {
     // 上端と下端の両方を渡す。下端だけでは、一覧を上へ返す時に
     // 欄の頭がどこにあるか分からず、欄そのものを覆ってしまう。
     // pageZoom を挟むのを忘れると、拡大しているタブで的外れな場所に出る。
-    //
-    // ピンチで寄っている間 (magnification ≠ 1) は一覧がそもそも出ない。既知、割り切り。
-    // 座標の補正とスクロールで畳む見張りを疑って試したが、どちらも当たらなかった (2026-10)。
-    // 寄ったままログインする場面は稀で、⌘0 か指で戻せば出る
+    // ピンチの magnification も掛け算で重なる。
+    // ずれ (visualViewport.offsetLeft/Top) を足す必要は無い。どこへ寄っても
+    // 欄の真下に出ることを確かめてある (2026-10)
     private func anchor(for cssRect: CGRect) -> NSRect {
-        let zoom = webView.pageZoom
+        let zoom = webView.pageZoom * webView.magnification
 
         func screenPoint(fromTop distance: CGFloat, x: CGFloat) -> NSPoint {
             let viewPoint = NSPoint(
