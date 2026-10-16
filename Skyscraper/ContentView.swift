@@ -2291,10 +2291,12 @@ extension Tab {
     // 上端と下端の両方を渡す。下端だけでは、一覧を上へ返す時に
     // 欄の頭がどこにあるか分からず、欄そのものを覆ってしまう。
     // pageZoom を挟むのを忘れると、拡大しているタブで的外れな場所に出る。
-    // ピンチの magnification も掛け算で重なる。
-    // cssRect は JS 側で visualViewport のずれを引いてある (見えている範囲の左上が原点)
+    //
+    // ピンチで寄っている間 (magnification ≠ 1) は一覧がそもそも出ない。既知、割り切り。
+    // 座標の補正とスクロールで畳む見張りを疑って試したが、どちらも当たらなかった (2026-10)。
+    // 寄ったままログインする場面は稀で、⌘0 か指で戻せば出る
     private func anchor(for cssRect: CGRect) -> NSRect {
-        let zoom = webView.pageZoom * webView.magnification
+        let zoom = webView.pageZoom
 
         func screenPoint(fromTop distance: CGFloat, x: CGFloat) -> NSPoint {
             let viewPoint = NSPoint(
