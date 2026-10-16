@@ -7,6 +7,25 @@
     <language>en</language>
 
     <item>
+      <title>Version 1.30</title>
+      <pubDate>Fri, 16 Oct 2026 21:41:30 +0900</pubDate>
+      <sparkle:version>30</sparkle:version>
+      <sparkle:shortVersionString>1.30</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>Skyscraper 1.30</h2>
+        <ul>
+          <li>トラックパッドのピンチで、ページを拡大・縮小できるようになりました。</li>
+          <li>スマートズーム(トラックパッドの2本指ダブルタップ、Magic Mouse の1本指ダブルタップ)で、触った辺りに寄れるようになりました。システム設定の「スマートズーム」を入れておいてください。</li>
+          <li>⌘0 (実際のサイズ) で、ピンチで拡大した分も元に戻るようになりました。</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://github.com/inugamine/Skyscraper/releases/download/v1.30/Skyscraper-1.30.zip"
+        sparkle:edSignature="kciL0HcaFFi5rsabhFuIxdiABjO+1btZJCZErPU+HtIMYlujUbCFbbAb/OB1cidpw1KbMnPMw1Dt/Kf0HQ6NDg=="
+        length="13456837"
+        type="application/octet-stream" />
+    </item>    <item>
       <title>Version 1.29</title>
       <pubDate>Mon, 12 Oct 2026 14:37:01 +0900</pubDate>
       <sparkle:version>29</sparkle:version>
