@@ -469,15 +469,31 @@ final class BookmarkStore: ObservableObject {
 // そこで右クリック位置を控えておき、該当メニュー項目の飛び先を自前の処理に差し替えて、
 // startDownload(using:) で既存のダウンロード経路 (NSSavePanel の流れ) に合流させる。
 final class SkyscraperWebView: WKWebView {
-    // 直近の右クリック位置 (CSS ピクセル・左上原点)。elementFromPoint に渡す
+    // 直近の右クリック位置 (CSS ピクセル・見えている範囲の左上が原点)。
+    // elementFromPoint に渡す前に、JS 側で visualViewport のずれを足す
     private var lastRightClick: CGPoint = .zero
 
     override func rightMouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
-        // ビューの上下向きとページ拡大率を JS 座標系に合わせる
+        // ビューの上下向きと拡大率を JS 座標系に合わせる。
+        // 拡大率は二段重ね：⌘+ の pageZoom と、ピンチの magnification
         let topY = isFlipped ? p.y : bounds.height - p.y
-        lastRightClick = CGPoint(x: p.x / pageZoom, y: topY / pageZoom)
+        let scale = pageZoom * magnification
+        lastRightClick = CGPoint(x: p.x / scale, y: topY / scale)
         super.rightMouseDown(with: event)
+    }
+
+    // ピンチで拡大している間、ビューに映っているのはページの一部だけだ。
+    // その左上がレイアウト上のどこか (visualViewport.offsetLeft/Top) を足して、
+    // elementFromPoint の座標系 (レイアウトの左上が原点) へ戻す
+    private var lastRightClickJS: String {
+        """
+        (() => {
+            const vv = window.visualViewport;
+            return [\(lastRightClick.x) + (vv ? vv.offsetLeft : 0),
+                    \(lastRightClick.y) + (vv ? vv.offsetTop : 0)];
+        })()
+        """
     }
 
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
@@ -500,7 +516,8 @@ final class SkyscraperWebView: WKWebView {
         // クリック位置から親を辿って画像を探す。<img> が無ければ背景画像も見る
         let js = """
         (() => {
-            let el = document.elementFromPoint(\(lastRightClick.x), \(lastRightClick.y));
+            const [x, y] = \(lastRightClickJS);
+            let el = document.elementFromPoint(x, y);
             while (el) {
                 if (el.tagName === 'IMG') { return el.currentSrc || el.src || null; }
                 const bg = window.getComputedStyle(el).backgroundImage || '';
@@ -517,7 +534,8 @@ final class SkyscraperWebView: WKWebView {
     @objc private func downloadLinkAtLastClick(_ sender: Any?) {
         let js = """
         (() => {
-            const el = document.elementFromPoint(\(lastRightClick.x), \(lastRightClick.y));
+            const [x, y] = \(lastRightClickJS);
+            const el = document.elementFromPoint(x, y);
             const a = el ? el.closest('a[href]') : null;
             return a ? a.href : null;
         })();
@@ -1435,6 +1453,14 @@ final class Tab: NSObject, ObservableObject, Identifiable {
 
         // トラックパッドの2本指スワイプで戻る／進む
         webView.allowsBackForwardNavigationGestures = true
+        // ピンチで拡大・縮小、スマートズーム (トラックパッドの2本指ダブルタップ、
+        // Magic Mouse の1本指ダブルタップ) で段落に寄る。Safari と同じ挙動。
+        //
+        // これは ⌘+ の pageZoom とは別物で、文字組みを組み直さず絵として拡大する。
+        // 読み込み直すと WebKit が等倍に戻す (Safari と同じ)。
+        // スマートズームは システム設定 › トラックパッド／マウス の
+        // 「スマートズーム」が入っている時だけ届く
+        webView.allowsMagnification = true
         // Safari の「開発」メニューから Web インスペクタを繋げるようにする。
         // WebKit はこれを明示的に許可しない限り外部からの接続を拒む
         webView.isInspectable = true
@@ -2021,7 +2047,13 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // ズーム (ページの拡大率を 50%〜300% の範囲で変える)
     func zoomIn()    { setZoom(webView.pageZoom + 0.1) }
     func zoomOut()   { setZoom(webView.pageZoom - 0.1) }
-    func zoomReset() { setZoom(1.0) }
+    // ⌘0 はピンチの拡大も等倍に戻す (Safari と同じ)
+    func zoomReset() {
+        setZoom(1.0)
+        if webView.magnification != 1.0 {
+            webView.setMagnification(1.0, centeredAt: .zero)
+        }
+    }
     private func setZoom(_ value: CGFloat) {
         webView.pageZoom = min(max(value, 0.5), 3.0)
     }
@@ -2258,9 +2290,11 @@ extension Tab {
     //
     // 上端と下端の両方を渡す。下端だけでは、一覧を上へ返す時に
     // 欄の頭がどこにあるか分からず、欄そのものを覆ってしまう。
-    // pageZoom を挟むのを忘れると、拡大しているタブで的外れな場所に出る
+    // pageZoom を挟むのを忘れると、拡大しているタブで的外れな場所に出る。
+    // ピンチの magnification も掛け算で重なる。
+    // cssRect は JS 側で visualViewport のずれを引いてある (見えている範囲の左上が原点)
     private func anchor(for cssRect: CGRect) -> NSRect {
-        let zoom = webView.pageZoom
+        let zoom = webView.pageZoom * webView.magnification
 
         func screenPoint(fromTop distance: CGFloat, x: CGFloat) -> NSPoint {
             let viewPoint = NSPoint(

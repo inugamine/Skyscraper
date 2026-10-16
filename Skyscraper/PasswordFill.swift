@@ -170,11 +170,15 @@ enum PasswordFill {
         // 一覧を出す場所。欄の外枠をそのまま Swift へ渡す
         // role は 'new' (新しいパスワードの欄) か 'login' (それ以外)。
         // 'new' の時だけ、Swift 側が生成を勧める
+        //
+        // ピンチで拡大している時は、見えている範囲の左上 (visualViewport) を
+        // 原点に取り直す。Swift 側はビューの左上から測るため
         const offerAt = (el) => {
             const rect = el.getBoundingClientRect();
+            const vv = window.visualViewport;
             post('focus', {
-                x: rect.left,
-                y: rect.top,
+                x: rect.left - (vv ? vv.offsetLeft : 0),
+                y: rect.top - (vv ? vv.offsetTop : 0),
                 width: rect.width,
                 height: rect.height,
                 role: newPasswordFields().indexOf(el) >= 0 ? 'new' : 'login'
