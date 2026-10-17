@@ -262,7 +262,6 @@ final class CastController: ObservableObject {
     // タブの音を拾って端末へ配る。流している間は他のタブを黙らせる
     func streamAudio(from tab: Tab, to device: CastDevice) async -> Bool {
         let title = tab.pageTitle.isEmpty ? tab.urlText : tab.pageTitle
-        let host = URL(string: tab.urlText)?.host ?? ""
 
         let ok = await begin(device, mode: .audio, title: title, position: 0) {
             let processes = CastAudioSource.webKitProcesses()
@@ -270,11 +269,11 @@ final class CastController: ObservableObject {
 
             let pipeline = CastAudioPipeline()
             do {
-                let port = try await pipeline.start(processes: processes)
-                let link = try await CastSession.playStream(path: pipeline.path, port: port,
-                                                            title: title, subtitle: host, on: device)
+                // 周波数はタップを張ってみないと決まらないので、OFFER より先に用意する
+                try pipeline.prepare(processes: processes)
+                let link = try await CastSession.playMirroring(pipeline, on: device)
                 link.pipeline = pipeline
-                castLog.info("streaming audio to \(device.name, privacy: .public) on port \(port)")
+                castLog.info("streaming audio to \(device.name, privacy: .public)")
                 return link
             } catch {
                 pipeline.stop()
@@ -672,13 +671,15 @@ private enum CastNamespace {
     static let heartbeat  = "urn:x-cast:com.google.cast.tp.heartbeat"
     static let receiver   = "urn:x-cast:com.google.cast.receiver"
     static let media      = "urn:x-cast:com.google.cast.media"
+    static let webrtc     = "urn:x-cast:com.google.cast.webrtc"
     static let mdx        = "urn:x-cast:com.google.youtube.mdx"
 }
 
 private enum CastSession {
     static let youTubeAppID = "233637DE"
-    // Cast 標準の受け手。URL を渡せば何でも再生する。スピーカーにもグループにも居る
-    static let defaultMediaReceiverID = "CC1AD845"
+    // Chrome がスピーカーへ音を流す時の受け手 (Cast Streaming)。
+    // スピーカーにもグループにも、画面のある端末にも居る
+    static let audioMirroringID = "85CDB22F"
     static let platform = "receiver-0"
 
     // 再生まで漕ぎ着けたら、繋がりを開いたまま返す。
@@ -720,47 +721,61 @@ private enum CastSession {
         }
     }
 
-    // Mac の中の配信口 (CastAudioPipeline) の URL を、標準の受け手に生配信として渡す
-    static func playStream(path: String, port: UInt16, title: String, subtitle: String,
-                           on device: CastDevice) async throws -> CastLink {
+    // Chrome の音声ミラーリングの受け手を起動し、OFFER で形式と鍵を伝える。
+    // ANSWER で教わった UDP の口へ、pipeline が音を流し始める (CastAudio.swift)
+    static func playMirroring(_ pipeline: CastAudioPipeline,
+                              on device: CastDevice) async throws -> CastLink {
         let channel = CastChannel(endpoint: device.endpoint)
         do {
             try await channel.open()
-            // 端末から見える Mac の番地。端末へ繋いだ時の手元側の番地をそのまま使う
-            guard let host = channel.localIPv4 else { throw CastError.unreachable }
-            let url = "http://\(host):\(port)\(path)"
+            // UDP の送り先。グループならまとめ役の端末の番地になる
+            guard let host = channel.remoteIPv4 else { throw CastError.unreachable }
 
-            let (transport, sessionID) = try await launch(defaultMediaReceiverID, on: channel)
+            let (transport, sessionID) = try await launch(audioMirroringID, on: channel)
 
-            channel.send(CastNamespace.media, to: transport, [
-                "type": "LOAD",
-                "requestId": channel.nextRequestID(),
-                "autoplay": true,
-                "currentTime": 0,
-                "media": [
-                    "contentId": url,
-                    "contentUrl": url,
-                    "streamType": "LIVE",
-                    "contentType": "audio/wav",
-                    "metadata": [
-                        "metadataType": 0,
-                        "title": title,
-                        "subtitle": subtitle,
-                    ] as [String: Any],
+            let rate = Int(pipeline.outputSampleRate)
+            let keys = pipeline.keys
+            let seqNum = Int.random(in: 1...0x7FFF_FFFF)
+            channel.send(CastNamespace.webrtc, to: transport, [
+                "type": "OFFER",
+                "seqNum": seqNum,
+                "offer": [
+                    "castMode": "mirroring",
+                    "receiverGetStatus": true,
+                    "supportedStreams": [[
+                        "index": 0,
+                        "type": "audio_source",
+                        "codecName": "aac",
+                        "codecParameter": "mp4a.40.2",
+                        "rtpProfile": "cast",
+                        "rtpPayloadType": Int(CastAudioPipeline.rtpPayloadType),
+                        "ssrc": Int(keys.ssrc),
+                        "bitRate": CastAudioPipeline.bitRate,
+                        "timeBase": "1/\(rate)",
+                        "channels": 2,
+                        "sampleRate": rate,
+                        "aesKey": keys.aesKey.hexString,
+                        "aesIvMask": keys.aesIVMask.hexString,
+                        "targetDelay": CastAudioPipeline.targetDelayMilliseconds,
+                        "receiverRtcpEventLog": false,
+                    ] as [String: Any]],
                 ] as [String: Any],
             ])
 
-            let reply = try await channel.wait(timeout: .seconds(20)) { message, json in
-                message.namespace == CastNamespace.media
-                    && ["MEDIA_STATUS", "LOAD_FAILED", "LOAD_CANCELLED", "INVALID_REQUEST"]
-                        .contains(json["type"] as? String ?? "")
+            let reply = try await channel.wait(timeout: .seconds(15)) { message, json in
+                message.namespace == CastNamespace.webrtc
+                    && json["type"] as? String == "ANSWER"
             }
-            guard reply.json["type"] as? String == "MEDIA_STATUS" else {
-                castLog.error("load refused: \(reply.payload, privacy: .public)")
+            guard reply.json["result"] as? String == "ok",
+                  let answer = reply.json["answer"] as? [String: Any],
+                  let udpPort = answer["udpPort"] as? Int else {
+                castLog.error("offer refused: \(reply.payload, privacy: .public)")
                 throw CastError.loadFailed
             }
 
-            return CastLink(appID: defaultMediaReceiverID, channel: channel,
+            try await pipeline.connect(host: host, port: UInt16(udpPort))
+
+            return CastLink(appID: audioMirroringID, channel: channel,
                             transportID: transport, sessionID: sessionID)
         } catch {
             channel.close()
@@ -840,8 +855,8 @@ private final class CastChannel {
         let tcp = NWProtocolTCP.Options()
         tcp.connectionTimeout = 8
 
-        // IPv4 で繋ぐ。音を配る時に、端末から見える Mac の番地を
-        // URL に書くので、IPv6 のリンクローカル (fe80::…%en0) を掴まないように
+        // IPv4 で繋ぐ。音を配る時に、この繋がりの相手の番地へ UDP を送るので、
+        // IPv6 のリンクローカル (fe80::…%en0) を掴まないように
         let parameters = NWParameters(tls: tls, tcp: tcp)
         if let ip = parameters.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options {
             ip.version = .v4
@@ -849,9 +864,9 @@ private final class CastChannel {
         connection = NWConnection(to: endpoint, using: parameters)
     }
 
-    // 端末へ繋いだ時の、手元 (Mac) 側の IPv4 の番地
-    var localIPv4: String? {
-        guard case .hostPort(let host, _)? = connection.currentPath?.localEndpoint,
+    // 繋いだ相手 (端末) の IPv4 の番地。音の UDP もここへ送る
+    var remoteIPv4: String? {
+        guard case .hostPort(let host, _)? = connection.currentPath?.remoteEndpoint,
               case .ipv4(let address) = host else { return nil }
         return address.rawValue.map { String($0) }.joined(separator: ".")
     }
@@ -1450,8 +1465,8 @@ private struct NowPlayingPanel: View {
             transportControls
 
             if now.mode == .audio {
-                // 音を配っている間は Mac 側が黙る。遅れて鳴るのはそういう仕組み
-                Text("Sending Skyscraper’s sound. Other tabs are muted, and the speaker plays a few seconds behind.")
+                // 音を配っている間は Mac 側が黙る
+                Text("Sending Skyscraper’s sound. Other tabs are muted while casting.")
                     .font(.system(size: 11))
                     .foregroundColor(Deco.dimGold)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1559,4 +1574,9 @@ private struct NowPlayingPanel: View {
             ? String(format: "%d:%02d:%02d", h, m, s)
             : String(format: "%d:%02d", m, s)
     }
+}
+
+private extension Data {
+    // OFFER に書く鍵の形 (16 進の小文字)
+    var hexString: String { map { String(format: "%02x", $0) }.joined() }
 }
