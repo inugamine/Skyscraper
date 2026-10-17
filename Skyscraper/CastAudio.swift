@@ -9,19 +9,24 @@
 //  YouTube も YouTube Music も、スピーカー向けの受け手を表に出していない
 //  (スマホのアプリでもキャスト先に出てこない)。だから曲を「渡す」のではなく、
 //  Skyscraper が鳴らした音そのものを「配る」。
-//  Chrome がスピーカーへ飛ばす時も同じ発想で、あちらは Cast Streaming
-//  (暗号化した RTP) を喋っているが、ここではもっと素直な道を取る:
+//  Chrome がスピーカーへ飛ばす時と同じ Cast Streaming を自前で喋る:
 //
 //  1. Core Audio のプロセスタップで、WebKit の裏方 (「Skyscraper Graphics and Media」)
 //     の音だけを横取りする。タップしている間は Mac のスピーカーは黙る
-//  2. AAC (ADTS) に圧縮して、Mac の中に立てた小さな HTTP の口から生配信する
-//  3. 端末では Cast 標準の受け手 (Default Media Receiver) にその URL を渡す
+//  2. AAC (ADTS) に圧縮する
+//  3. 端末で Chrome の音声ミラーリングの受け手 (85CDB22F) を起動し、OFFER で
+//     形式・暗号の鍵・遅らせる時間 (targetDelay) を伝える (Cast.swift)
+//  4. ANSWER で教わった UDP の口へ、AES-CTR で暗号化した RTP を流す。
+//     0.5 秒ごとに RTCP の Sender Report で「この RTP の時刻はこの時計の時刻」と知らせる
 //
-//  ・初めは圧縮しない WAV で配っていたが、2026-10-17 にグループの配り直しで
-//    WAV だけ通らなくなった (Nest Hub は鳴るのに Home Mini が黙る)。
-//    mp3 と AAC は通ったので AAC にした。macOS には mp3 を作る仕組みが無い
-//  ・遅れは単体で 6 秒前後、グループで 3 秒前後 (2026-10 に WAV で測った)。
-//    音楽を流す用で、Mac で動画を観ながら音だけ飛ばすのには向かない
+//  ・遅れは 0.4 秒前後で、グループでも揃う (2026-10-17 に Home Mini・Nest Hub・
+//    グループで測った)。動画と音がほぼ合う
+//  ・ここに至るまでの回り道:
+//    Default Media Receiver に Mac の HTTP の URL を渡す形で始めたが、
+//    受け手は「600 KB 前後溜まってから鳴らす」作りで、WAV (1.5 Mbps) で 3〜6 秒、
+//    AAC (192 kbps) にすると 26 秒も遅れた。しかも 2026-10-17 にグループの配り直しで
+//    WAV だけ通らなくなった (Home Mini が黙る)。時刻で鳴らす Cast Streaming に載せ替えて解決
+//  ・RTP の形・暗号・RTCP は Chromium の openscreen (cast/streaming) に合わせてある
 //  ・拾えるのは Skyscraper 全体の音で、タブ一枚ぶんだけを抜き出す手は無い。
 //    だから流している間は他のタブを黙らせる (CastController の役目)
 //  ・WKWebView の音は Skyscraper 本体ではなく WebKit の裏方プロセスから鳴っている。
@@ -31,10 +36,12 @@
 import AppKit
 import AudioToolbox
 import AVFoundation
+import CommonCrypto
 import CoreAudio
 import Foundation
 import Network
 import os
+import Security
 
 // MARK: - 音の出どころを探す
 
@@ -92,7 +99,24 @@ nonisolated enum CoreAudioProperty {
 
 // MARK: - 拾って配る
 
-// タップ・仮の機器・HTTP の口をひとまとめに持つ。
+// Cast Streaming で送る時の取り決め。OFFER (Cast.swift) と RTP の両方で使う
+nonisolated struct CastStreamingKeys: Sendable {
+    let ssrc: UInt32
+    let aesKey: Data       // 16 バイト
+    let aesIVMask: Data    // 16 バイト
+
+    static func random() -> CastStreamingKeys {
+        func bytes(_ count: Int) -> Data {
+            var data = Data(count: count)
+            data.withUnsafeMutableBytes { _ = SecRandomCopyBytes(kSecRandomDefault, count, $0.baseAddress!) }
+            return data
+        }
+        return CastStreamingKeys(ssrc: UInt32.random(in: 1...0x7FFF_FFFF),
+                                 aesKey: bytes(16), aesIVMask: bytes(16))
+    }
+}
+
+// タップ・AAC への変換・UDP の送り口をひとまとめに持つ。
 //
 // 音は Core Audio の実時間スレッドから届くので、この型はメインに縛らない
 // (nonisolated)。中の状態は queue の上でだけ触る
@@ -101,30 +125,45 @@ nonisolated final class CastAudioPipeline: @unchecked Sendable {
     private static let log = Logger(subsystem: "net.live-on.inugamine.Skyscraper",
                                     category: "CastAudio")
 
-    // URL の道に混ぜる合言葉。LAN の他の誰かが勝手に聴けないように
-    let path = "/" + UUID().uuidString.lowercased() + ".aac"
+    // AAC は 1024 フレームで一包み
+    static let framesPerPacket = 1024
+    static let bitRate = 192_000
+    // 受け手に「これだけ遅らせて鳴らせ」と頼む時間。0.4 秒で取りこぼし無く鳴った
+    static let targetDelayMilliseconds = 400
+    // Chrome と同じ、音声の RTP の種類番号
+    static let rtpPayloadType: UInt8 = 127
+    // 送り直しは受け持たないので、1 包みに収まらない分は分けて送る。
+    // Ethernet の 1500 から IP と UDP の頭を引いた大きさ
+    private static let maxPacketSize = 1500 - 20 - 8
+    private static let rtpHeaderSize = 12 + 7
+
+    let keys = CastStreamingKeys.random()
+    // 受け手が鳴らす時刻の目盛り。AAC にする時の周波数 (tap が 96k なら 48k に落とす)
+    private(set) var outputSampleRate: Double = 48_000
 
     private let queue = DispatchQueue(label: "net.live-on.inugamine.Skyscraper.cast-audio")
-
-    private var listener: NWListener?
-    private var clients: [ObjectIdentifier: NWConnection] = [:]
 
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
     private var procID: AudioDeviceIOProcID?
 
-    private var heardSound = false   // 一度でも無音でない音が来たか (queue の上で触る)
-
-    // AAC への変換。以下は全て queue の上でだけ触る
+    // 以下は queue の上でだけ触る
+    private var heardSound = false   // 一度でも無音でない音が来たか
     private var converter: AVAudioConverter?
     private var pcmFormat: AVAudioFormat?
     private var aacFormat: AVAudioFormat?
     private var adtsRateIndex: UInt8 = 3
     private var pending: [Float] = []   // まだ AAC にしていない分 (左右交互)
+    private var tapSampleRate: Double = 48_000
+    private var capturedFrames: Int64 = 0   // タップから届いたフレームの総数
 
-    // AAC は 1024 フレームで一包み
-    private static let framesPerPacket = 1024
-    private static let bitRate = 192_000
+    private var connection: NWConnection?
+    private var reportTimer: DispatchSourceTimer?
+    private var frameID: UInt32 = 0
+    private var sequenceNumber = UInt16.random(in: 0...UInt16.max)
+    private let rtpStart = UInt32.random(in: 0...0x7FFF_FFFF)
+    private var packetsSent: UInt32 = 0
+    private var octetsSent: UInt32 = 0
 
     // 許可が無いと、タップは動くが中身は全部 0 になる。
     // それを見抜くために、一度でも音が来たかを外から訊けるようにしておく
@@ -132,15 +171,38 @@ nonisolated final class CastAudioPipeline: @unchecked Sendable {
         queue.sync { heardSound }
     }
 
-    // タップを張り、HTTP の口を開けて、その番号を返す
-    func start(processes: [AudioObjectID]) async throws -> UInt16 {
-        try startTap(processes: processes)
+    // 1. タップを張って AAC の変換器を用意する。
+    // 周波数が決まるのはここなので、OFFER (Cast.swift) はこの後に送る。
+    // 繋がるまでに届いた音は捨てる (Mac はもう黙っている。1 秒ほどの間)
+    func prepare(processes: [AudioObjectID]) throws {
         do {
-            return try await startListener()
+            try startTap(processes: processes)
         } catch {
             stop()
             throw error
         }
+    }
+
+    // 2. ANSWER で教わった UDP の口へ繋いで、流し始める。
+    // 受け手は Sender Report を一度受け取るまで一切鳴らさないので、最初に一通送っておく
+    func connect(host: String, port: UInt16) async throws {
+        guard let udpPort = NWEndpoint.Port(rawValue: port) else { throw CastError.unreachable }
+        let connection = NWConnection(host: NWEndpoint.Host(host), port: udpPort, using: .udp)
+        try await open(connection)
+
+        queue.sync {
+            // ここを RTP の時刻の起点にする。数えるのも送るのもここから
+            capturedFrames = 0
+            pending.removeAll()
+            self.connection = connection
+            sendSenderReport()
+            let timer = DispatchSource.makeTimerSource(queue: queue)
+            timer.schedule(deadline: .now() + .milliseconds(500), repeating: .milliseconds(500))
+            timer.setEventHandler { [weak self] in self?.sendSenderReport() }
+            timer.resume()
+            reportTimer = timer
+        }
+        Self.log.info("streaming to \(host, privacy: .public):\(port)")
     }
 
     func stop() {
@@ -158,11 +220,130 @@ nonisolated final class CastAudioPipeline: @unchecked Sendable {
             tapID = AudioObjectID(kAudioObjectUnknown)
         }
         queue.async { [self] in
-            listener?.cancel()
-            listener = nil
-            for connection in clients.values { connection.cancel() }
-            clients.removeAll()
+            reportTimer?.cancel()
+            reportTimer = nil
+            connection?.cancel()
+            connection = nil
         }
+    }
+
+    // MARK: UDP
+
+    private func open(_ connection: NWConnection) async throws {
+        // 状態の知らせは queue の上で一本道に届くので、一度きりの印は箱で持てば足りる
+        let once = EncoderInputFlag()
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            connection.stateUpdateHandler = { state in
+                guard !once.given else { return }
+                switch state {
+                case .ready:
+                    once.given = true
+                    continuation.resume()
+                case .failed(let error), .waiting(let error):
+                    once.given = true
+                    Self.log.error("udp: \(String(describing: error), privacy: .public)")
+                    continuation.resume(throwing: CastError.unreachable)
+                default:
+                    break
+                }
+            }
+            connection.start(queue: queue)
+        }
+    }
+
+    // RTCP の Sender Report (RFC 3550 の SR を、報告欄なしで)。
+    // 「今この瞬間の時計の時刻は、RTP の目盛りでいうとここ」を知らせる。
+    // RTP の側は、実際にタップから届いた数から割り出す。
+    // こうしておくと、音の機器の時計と Mac の時計が少しずつずれても、受け手が報告ごとに追い付く
+    private func sendSenderReport() {
+        guard let connection else { return }
+        let now = Date().timeIntervalSince1970 + 2_208_988_800   // NTP は 1900 年が起点
+        let seconds = UInt32(truncatingIfNeeded: Int64(now))
+        let fraction = UInt32(truncatingIfNeeded: Int64((now - floor(now)) * 4_294_967_296))
+        let elapsed = Double(capturedFrames) * outputSampleRate / tapSampleRate
+        let rtp = rtpStart &+ UInt32(truncatingIfNeeded: Int64(elapsed))
+
+        var packet = Data()
+        packet.append(0x80)                 // V=2, 報告欄なし
+        packet.append(200)                  // Sender Report
+        packet.appendBigEndian(UInt16(6))   // 長さ (32 bit 単位で、自分を除く)
+        packet.appendBigEndian(keys.ssrc)
+        packet.appendBigEndian(seconds)
+        packet.appendBigEndian(fraction)
+        packet.appendBigEndian(rtp)
+        packet.appendBigEndian(packetsSent)
+        packet.appendBigEndian(octetsSent)
+        connection.send(content: packet, completion: .idempotent)
+    }
+
+    // AAC の一包みを、暗号化して Cast 流の RTP に詰めて送る
+    private func sendFrame(_ frame: Data) {
+        guard let connection else { return }
+        let id = frameID
+        frameID &+= 1
+
+        guard let encrypted = encrypt(frame, frameID: id) else { return }
+        let rtpTimestamp = rtpStart &+ id &* UInt32(Self.framesPerPacket)
+
+        let chunkSize = Self.maxPacketSize - Self.rtpHeaderSize
+        let chunkCount = max(1, (encrypted.count + chunkSize - 1) / chunkSize)
+        for index in 0..<chunkCount {
+            let start = index * chunkSize
+            let end = min(start + chunkSize, encrypted.count)
+            let isLast = index == chunkCount - 1
+
+            var packet = Data()
+            // RTP の頭
+            packet.append(0x80)
+            packet.append((isLast ? 0x80 : 0) | Self.rtpPayloadType)
+            packet.appendBigEndian(sequenceNumber)
+            packet.appendBigEndian(rtpTimestamp)
+            packet.appendBigEndian(keys.ssrc)
+            // Cast の頭: キーフレーム + 参照フレームあり / フレーム番号 / 何包み目 / 最後の番号 / 参照先
+            // 音は一包みごとに独立しているので、どれもキーフレームで、参照先は自分
+            packet.append(0x80 | 0x40)
+            packet.append(UInt8(truncatingIfNeeded: id))
+            packet.appendBigEndian(UInt16(index))
+            packet.appendBigEndian(UInt16(chunkCount - 1))
+            packet.append(UInt8(truncatingIfNeeded: id))
+            packet.append(encrypted[start..<end])
+
+            connection.send(content: packet, completion: .idempotent)
+            sequenceNumber &+= 1
+            packetsSent &+= 1
+        }
+        octetsSent &+= UInt32(truncatingIfNeeded: encrypted.count)
+    }
+
+    // AES-128-CTR (CommonCrypto の CTR は常に big endian で数える)。初期値は 16 バイトの 0 の 8〜11 バイト目にフレーム番号を書き、
+    // OFFER で渡したマスクと混ぜたもの (openscreen の frame_crypto.cc と同じ)
+    private func encrypt(_ data: Data, frameID: UInt32) -> Data? {
+        var nonce = [UInt8](repeating: 0, count: 16)
+        nonce[8] = UInt8(truncatingIfNeeded: frameID >> 24)
+        nonce[9] = UInt8(truncatingIfNeeded: frameID >> 16)
+        nonce[10] = UInt8(truncatingIfNeeded: frameID >> 8)
+        nonce[11] = UInt8(truncatingIfNeeded: frameID)
+        for (i, mask) in keys.aesIVMask.enumerated() { nonce[i] ^= mask }
+
+        var cryptor: CCCryptorRef?
+        let created = keys.aesKey.withUnsafeBytes { key in
+            CCCryptorCreateWithMode(CCOperation(kCCEncrypt), CCMode(kCCModeCTR),
+                                    CCAlgorithm(kCCAlgorithmAES), CCPadding(ccNoPadding),
+                                    nonce, key.baseAddress, key.count,
+                                    nil, 0, 0, 0, &cryptor)
+        }
+        guard created == kCCSuccess, let cryptor else { return nil }
+        defer { CCCryptorRelease(cryptor) }
+
+        var output = Data(count: data.count)
+        var moved = 0
+        let status = output.withUnsafeMutableBytes { out in
+            data.withUnsafeBytes { input in
+                CCCryptorUpdate(cryptor, input.baseAddress, input.count,
+                                out.baseAddress, out.count, &moved)
+            }
+        }
+        return status == kCCSuccess ? output : nil
     }
 
     // MARK: タップ
@@ -256,6 +437,9 @@ nonisolated final class CastAudioPipeline: @unchecked Sendable {
         let loud = collected.contains { $0 != 0 }
         queue.async { [self] in
             if loud { heardSound = true }
+            // 繋がる前の音は数えずに捨てる (RTP の時刻を繋がった瞬間から始めるため)
+            guard connection != nil else { return }
+            capturedFrames += Int64(collected.count / 2)
             pending.append(contentsOf: collected)
             encodePending()
         }
@@ -268,7 +452,6 @@ nonisolated final class CastAudioPipeline: @unchecked Sendable {
         // 44.1k と 48k 以外 (外付けの DAC で 96k など) は、変換器に 48k へ落とさせる
         let indices: [Double: UInt8] = [48_000: 3, 44_100: 4]
         let outputRate = indices[sampleRate] != nil ? sampleRate : 48_000
-        adtsRateIndex = indices[outputRate] ?? 3
 
         guard let pcm = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2) else {
             throw CastError.noAudio
@@ -295,11 +478,14 @@ nonisolated final class CastAudioPipeline: @unchecked Sendable {
             self.pcmFormat = pcm
             self.aacFormat = aac
             self.converter = converter
+            self.adtsRateIndex = indices[outputRate] ?? 3
+            self.tapSampleRate = sampleRate
+            self.outputSampleRate = outputRate
         }
         Self.log.info("encoding AAC \(outputRate) Hz at \(Self.bitRate) bps")
     }
 
-    // 溜まった分から 1024 フレームずつ AAC にして、ADTS の頭を付けて配る
+    // 溜まった分から 1024 フレームずつ AAC にして、ADTS の頭を付けて送る
     private func encodePending() {
         guard let converter, let pcmFormat, let aacFormat else { return }
         let samplesPerPacket = Self.framesPerPacket * 2
@@ -343,13 +529,13 @@ nonisolated final class CastAudioPipeline: @unchecked Sendable {
                                    count: Int(packet.mDataByteSize))
                 var frame = adtsHeader(payloadLength: payload.count)
                 frame.append(payload)
-                broadcast(frame)
+                sendFrame(frame)
             }
         }
     }
 
     // ADTS の頭 (7 バイト、CRC 無し)。
-    // 包みごとに頭が付くので、受け手は途中から聴き始めても拍子を拾える
+    // 受け手は頭を外した生の AAC でも鳴ったが、形式を自分で名乗る分こちらが確か
     private func adtsHeader(payloadLength: Int) -> Data {
         let length = payloadLength + 7
         let profile: UInt8 = 1          // AAC LC (object type 2) - 1
@@ -365,15 +551,6 @@ nonisolated final class CastAudioPipeline: @unchecked Sendable {
         ])
     }
 
-    private func broadcast(_ frame: Data) {
-        for (id, connection) in clients {
-            connection.send(content: frame, completion: .contentProcessed { [weak self] error in
-                guard error != nil, let self else { return }
-                self.queue.async { self.clients[id] = nil }
-            })
-        }
-    }
-
     private static func defaultOutputUID() -> String? {
         let system = AudioObjectID(kAudioObjectSystemObject)
         var device = AudioObjectID(0)
@@ -387,73 +564,19 @@ nonisolated final class CastAudioPipeline: @unchecked Sendable {
         guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, &uid) == noErr else { return nil }
         return uid?.takeRetainedValue() as String?
     }
-
-    // MARK: HTTP の口
-
-    // 番号は OS に任せる。開いたら番号を返す
-    private func startListener() async throws -> UInt16 {
-        let listener = try NWListener(using: .tcp, on: .any)
-        self.listener = listener
-
-        listener.newConnectionHandler = { [weak self] connection in
-            self?.accept(connection)
-        }
-
-        // 状態の知らせは queue の上で一本道に届くので、一度きりの印は箱で持てば足りる
-        final class Once: @unchecked Sendable { var done = false }
-        let once = Once()
-
-        return try await withCheckedThrowingContinuation { continuation in
-            listener.stateUpdateHandler = { state in
-                guard !once.done else { return }
-                switch state {
-                case .ready:
-                    once.done = true
-                    continuation.resume(returning: listener.port?.rawValue ?? 0)
-                case .failed(let error), .waiting(let error):
-                    once.done = true
-                    Self.log.error("listener: \(String(describing: error), privacy: .public)")
-                    continuation.resume(throwing: CastError.noAudio)
-                default:
-                    break
-                }
-            }
-            listener.start(queue: queue)
-        }
-    }
-
-    // 頼みの一行目だけ読んで、合言葉が合えば AAC を流し始める
-    private func accept(_ connection: NWConnection) {
-        connection.start(queue: queue)
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 8192) { [weak self] data, _, _, _ in
-            guard let self else { connection.cancel(); return }
-            let request = data.map { String(decoding: $0, as: UTF8.self) } ?? ""
-            let firstLine = request.split(separator: "\r\n", maxSplits: 1).first ?? ""
-            let parts = firstLine.split(separator: " ")
-            guard parts.count >= 2, String(parts[1]) == self.path else {
-                connection.send(content: Data("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n".utf8),
-                                completion: .contentProcessed { _ in connection.cancel() })
-                return
-            }
-
-            Self.log.info("receiver connected: \(String(describing: connection.endpoint), privacy: .public)")
-
-            // 長さの分からない生配信なので、Content-Length は付けずに閉じるまで流す
-            let head = Data("HTTP/1.1 200 OK\r\nContent-Type: audio/aac\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n".utf8)
-            if parts[0] == "HEAD" {
-                connection.send(content: head, completion: .contentProcessed { _ in connection.cancel() })
-                return
-            }
-            // ADTS は包みごとに頭があるので、ファイルの頭のようなものは要らない。
-            // 次に出来た包みから、そのまま流し始める
-            connection.send(content: head, completion: .contentProcessed { _ in })
-            self.clients[ObjectIdentifier(connection)] = connection
-        }
-    }
 }
 
-// 変換器へ入力を一度だけ渡したかの印。
-// 入力を引く閉包は呼ばれる度に同じ箱を見るので、var を閉包に抱えさせずに箱で持つ
+// 一度きりの印。
+// 変換器が入力を引く閉包や、状態の知らせの閉包は呼ばれる度に同じ箱を見るので、
+// var を閉包に抱えさせずに箱で持つ
 nonisolated private final class EncoderInputFlag: @unchecked Sendable {
     var given = false
+}
+
+nonisolated private extension Data {
+    mutating func appendBigEndian<T: FixedWidthInteger>(_ value: T) {
+        // Data の中では withUnsafeBytes が Data 自身のメソッドを指してしまうので、
+        // Swift の大域関数の方だと名指しする
+        Swift.withUnsafeBytes(of: value.bigEndian) { append(contentsOf: $0) }
+    }
 }
