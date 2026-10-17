@@ -14,10 +14,13 @@
 //
 //  1. Core Audio のプロセスタップで、WebKit の裏方 (「Skyscraper Graphics and Media」)
 //     の音だけを横取りする。タップしている間は Mac のスピーカーは黙る
-//  2. 16 bit の WAV にして、Mac の中に立てた小さな HTTP の口から生配信する
+//  2. AAC (ADTS) に圧縮して、Mac の中に立てた小さな HTTP の口から生配信する
 //  3. 端末では Cast 標準の受け手 (Default Media Receiver) にその URL を渡す
 //
-//  ・遅れは単体で 6 秒前後、グループで 3 秒前後 (2026-10 に測った)。
+//  ・初めは圧縮しない WAV で配っていたが、2026-10-17 にグループの配り直しで
+//    WAV だけ通らなくなった (Nest Hub は鳴るのに Home Mini が黙る)。
+//    mp3 と AAC は通ったので AAC にした。macOS には mp3 を作る仕組みが無い
+//  ・遅れは単体で 6 秒前後、グループで 3 秒前後 (2026-10 に WAV で測った)。
 //    音楽を流す用で、Mac で動画を観ながら音だけ飛ばすのには向かない
 //  ・拾えるのは Skyscraper 全体の音で、タブ一枚ぶんだけを抜き出す手は無い。
 //    だから流している間は他のタブを黙らせる (CastController の役目)
@@ -27,6 +30,7 @@
 
 import AppKit
 import AudioToolbox
+import AVFoundation
 import CoreAudio
 import Foundation
 import Network
@@ -98,7 +102,7 @@ nonisolated final class CastAudioPipeline: @unchecked Sendable {
                                     category: "CastAudio")
 
     // URL の道に混ぜる合言葉。LAN の他の誰かが勝手に聴けないように
-    let path = "/" + UUID().uuidString.lowercased() + ".wav"
+    let path = "/" + UUID().uuidString.lowercased() + ".aac"
 
     private let queue = DispatchQueue(label: "net.live-on.inugamine.Skyscraper.cast-audio")
 
@@ -109,8 +113,18 @@ nonisolated final class CastAudioPipeline: @unchecked Sendable {
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
     private var procID: AudioDeviceIOProcID?
 
-    private var sampleRate: UInt32 = 48_000
     private var heardSound = false   // 一度でも無音でない音が来たか (queue の上で触る)
+
+    // AAC への変換。以下は全て queue の上でだけ触る
+    private var converter: AVAudioConverter?
+    private var pcmFormat: AVAudioFormat?
+    private var aacFormat: AVAudioFormat?
+    private var adtsRateIndex: UInt8 = 3
+    private var pending: [Float] = []   // まだ AAC にしていない分 (左右交互)
+
+    // AAC は 1024 フレームで一包み
+    private static let framesPerPacket = 1024
+    private static let bitRate = 192_000
 
     // 許可が無いと、タップは動くが中身は全部 0 になる。
     // それを見抜くために、一度でも音が来たかを外から訊けるようにしておく
@@ -172,8 +186,8 @@ nonisolated final class CastAudioPipeline: @unchecked Sendable {
         var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
         var address = CoreAudioProperty.address(kAudioTapPropertyFormat)
         AudioObjectGetPropertyData(tap, &address, 0, nil, &size, &format)
-        sampleRate = UInt32(format.mSampleRate)
         Self.log.info("tap format: \(format.mSampleRate) Hz, \(format.mChannelsPerFrame) ch, flags \(format.mFormatFlags)")
+        try makeEncoder(sampleRate: format.mSampleRate)
 
         // タップは単独では読めないので、今の出力先を親にした仮の機器に組み込む
         guard let outputUID = Self.defaultOutputUID() else { throw CastError.noAudio }
@@ -213,49 +227,150 @@ nonisolated final class CastAudioPipeline: @unchecked Sendable {
         }
     }
 
-    // 実時間スレッドで呼ばれる。float を 16 bit の左右交互に詰め替えて配る
+    // 実時間スレッドで呼ばれる。ここでは float を左右交互に写すだけにして、
+    // 重い AAC への変換は queue に回す
     private func receive(_ input: UnsafePointer<AudioBufferList>) {
         let list = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
-        var pcm = Data()
-        var loud = false
-
-        func sample(_ value: Float) -> Int16 {
-            if value != 0 { loud = true }
-            return Int16(max(-1, min(1, value)) * Float(Int16.max))
-        }
+        var samples: [Float] = []
 
         if list.count >= 2, let left = list[0].mData, let right = list[1].mData {
             // 左右が別々の帯で来る形
             let frames = Int(list[0].mDataByteSize) / MemoryLayout<Float>.size
             let l = left.assumingMemoryBound(to: Float.self)
             let r = right.assumingMemoryBound(to: Float.self)
-            pcm.reserveCapacity(frames * 4)
+            samples.reserveCapacity(frames * 2)
             for i in 0..<frames {
-                withUnsafeBytes(of: sample(l[i]).littleEndian) { pcm.append(contentsOf: $0) }
-                withUnsafeBytes(of: sample(r[i]).littleEndian) { pcm.append(contentsOf: $0) }
+                samples.append(l[i])
+                samples.append(r[i])
             }
         } else if list.count == 1, let data = list[0].mData {
             // 左右が交互に詰まった形 (ステレオに混ぜてあるので 2 ch)
             let count = Int(list[0].mDataByteSize) / MemoryLayout<Float>.size
-            let f = data.assumingMemoryBound(to: Float.self)
-            pcm.reserveCapacity(count * 2)
-            for i in 0..<count {
-                withUnsafeBytes(of: sample(f[i]).littleEndian) { pcm.append(contentsOf: $0) }
-            }
+            samples = Array(UnsafeBufferPointer(start: data.assumingMemoryBound(to: Float.self),
+                                                count: count))
         } else {
             return
         }
 
-        let payload = pcm
-        let wasLoud = loud
+        let collected = samples
+        let loud = collected.contains { $0 != 0 }
         queue.async { [self] in
-            if wasLoud { heardSound = true }
-            for (id, connection) in clients {
-                connection.send(content: payload, completion: .contentProcessed { [weak self] error in
-                    guard error != nil, let self else { return }
-                    self.queue.async { self.clients[id] = nil }
-                })
+            if loud { heardSound = true }
+            pending.append(contentsOf: collected)
+            encodePending()
+        }
+    }
+
+    // MARK: AAC
+
+    private func makeEncoder(sampleRate: Double) throws {
+        // ADTS の頭に書く、サンプリング周波数の番号。
+        // 44.1k と 48k 以外 (外付けの DAC で 96k など) は、変換器に 48k へ落とさせる
+        let indices: [Double: UInt8] = [48_000: 3, 44_100: 4]
+        let outputRate = indices[sampleRate] != nil ? sampleRate : 48_000
+        adtsRateIndex = indices[outputRate] ?? 3
+
+        guard let pcm = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2) else {
+            throw CastError.noAudio
+        }
+        var description = AudioStreamBasicDescription(
+            mSampleRate: outputRate,
+            mFormatID: kAudioFormatMPEG4AAC,
+            mFormatFlags: 0,
+            mBytesPerPacket: 0,
+            mFramesPerPacket: UInt32(Self.framesPerPacket),
+            mBytesPerFrame: 0,
+            mChannelsPerFrame: 2,
+            mBitsPerChannel: 0,
+            mReserved: 0
+        )
+        guard let aac = AVAudioFormat(streamDescription: &description),
+              let converter = AVAudioConverter(from: pcm, to: aac) else {
+            Self.log.error("AAC encoder unavailable for \(sampleRate) Hz")
+            throw CastError.noAudio
+        }
+        converter.bitRate = Self.bitRate
+
+        queue.sync {
+            self.pcmFormat = pcm
+            self.aacFormat = aac
+            self.converter = converter
+        }
+        Self.log.info("encoding AAC \(outputRate) Hz at \(Self.bitRate) bps")
+    }
+
+    // 溜まった分から 1024 フレームずつ AAC にして、ADTS の頭を付けて配る
+    private func encodePending() {
+        guard let converter, let pcmFormat, let aacFormat else { return }
+        let samplesPerPacket = Self.framesPerPacket * 2
+
+        while pending.count >= samplesPerPacket {
+            guard let input = AVAudioPCMBuffer(pcmFormat: pcmFormat,
+                                               frameCapacity: AVAudioFrameCount(Self.framesPerPacket)),
+                  let channels = input.floatChannelData else { return }
+            input.frameLength = AVAudioFrameCount(Self.framesPerPacket)
+            for i in 0..<Self.framesPerPacket {
+                channels[0][i] = pending[2 * i]
+                channels[1][i] = pending[2 * i + 1]
             }
+            pending.removeFirst(samplesPerPacket)
+
+            let output = AVAudioCompressedBuffer(format: aacFormat, packetCapacity: 8,
+                                                 maximumPacketSize: converter.maximumOutputPacketSize)
+
+            // 変換器はこの中で入力を引きに来る。一包みだけ渡して、あとは「今は無い」と返す。
+            // 変換器は足りない分を覚えておき、次に渡した時に続きから作る
+            let once = EncoderInputFlag()
+            var error: NSError?
+            let status = converter.convert(to: output, error: &error) { _, inputStatus in
+                if once.given {
+                    inputStatus.pointee = .noDataNow
+                    return nil
+                }
+                once.given = true
+                inputStatus.pointee = .haveData
+                return input
+            }
+            if status == .error {
+                Self.log.error("AAC encode: \(String(describing: error), privacy: .public)")
+                continue
+            }
+
+            guard let descriptions = output.packetDescriptions else { continue }
+            for index in 0..<Int(output.packetCount) {
+                let packet = descriptions[index]
+                let payload = Data(bytes: output.data.advanced(by: Int(packet.mStartOffset)),
+                                   count: Int(packet.mDataByteSize))
+                var frame = adtsHeader(payloadLength: payload.count)
+                frame.append(payload)
+                broadcast(frame)
+            }
+        }
+    }
+
+    // ADTS の頭 (7 バイト、CRC 無し)。
+    // 包みごとに頭が付くので、受け手は途中から聴き始めても拍子を拾える
+    private func adtsHeader(payloadLength: Int) -> Data {
+        let length = payloadLength + 7
+        let profile: UInt8 = 1          // AAC LC (object type 2) - 1
+        let channels: UInt8 = 2
+        return Data([
+            0xFF,
+            0xF1,                       // MPEG-4, layer 0, CRC 無し
+            (profile << 6) | (adtsRateIndex << 2) | (channels >> 2),
+            ((channels & 3) << 6) | UInt8((length >> 11) & 0x03),
+            UInt8((length >> 3) & 0xFF),
+            UInt8((length & 0x07) << 5) | 0x1F,
+            0xFC,
+        ])
+    }
+
+    private func broadcast(_ frame: Data) {
+        for (id, connection) in clients {
+            connection.send(content: frame, completion: .contentProcessed { [weak self] error in
+                guard error != nil, let self else { return }
+                self.queue.async { self.clients[id] = nil }
+            })
         }
     }
 
@@ -307,7 +422,7 @@ nonisolated final class CastAudioPipeline: @unchecked Sendable {
         }
     }
 
-    // 頼みの一行目だけ読んで、合言葉が合えば WAV を流し始める
+    // 頼みの一行目だけ読んで、合言葉が合えば AAC を流し始める
     private func accept(_ connection: NWConnection) {
         connection.start(queue: queue)
         connection.receive(minimumIncompleteLength: 1, maximumLength: 8192) { [weak self] data, _, _, _ in
@@ -324,27 +439,21 @@ nonisolated final class CastAudioPipeline: @unchecked Sendable {
             Self.log.info("receiver connected: \(String(describing: connection.endpoint), privacy: .public)")
 
             // 長さの分からない生配信なので、Content-Length は付けずに閉じるまで流す
-            var head = Data("HTTP/1.1 200 OK\r\nContent-Type: audio/wav\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n".utf8)
+            let head = Data("HTTP/1.1 200 OK\r\nContent-Type: audio/aac\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n".utf8)
             if parts[0] == "HEAD" {
                 connection.send(content: head, completion: .contentProcessed { _ in connection.cancel() })
                 return
             }
-            head.append(self.wavHeader())
+            // ADTS は包みごとに頭があるので、ファイルの頭のようなものは要らない。
+            // 次に出来た包みから、そのまま流し始める
             connection.send(content: head, completion: .contentProcessed { _ in })
             self.clients[ObjectIdentifier(connection)] = connection
         }
     }
+}
 
-    // 大きさを目一杯にした WAV の頭。受け手は終わりを気にせず読み続ける
-    private func wavHeader() -> Data {
-        var data = Data()
-        func u32(_ v: UInt32) { withUnsafeBytes(of: v.littleEndian) { data.append(contentsOf: $0) } }
-        func u16(_ v: UInt16) { withUnsafeBytes(of: v.littleEndian) { data.append(contentsOf: $0) } }
-        let channels: UInt16 = 2, bits: UInt16 = 16
-        data.append(contentsOf: "RIFF".utf8); u32(0xFFFF_FFFF - 8); data.append(contentsOf: "WAVE".utf8)
-        data.append(contentsOf: "fmt ".utf8); u32(16); u16(1); u16(channels); u32(sampleRate)
-        u32(sampleRate * UInt32(channels) * UInt32(bits / 8)); u16(channels * bits / 8); u16(bits)
-        data.append(contentsOf: "data".utf8); u32(0xFFFF_FFFF - 44)
-        return data
-    }
+// 変換器へ入力を一度だけ渡したかの印。
+// 入力を引く閉包は呼ばれる度に同じ箱を見るので、var を閉包に抱えさせずに箱で持つ
+nonisolated private final class EncoderInputFlag: @unchecked Sendable {
+    var given = false
 }

@@ -741,7 +741,7 @@ private enum CastSession {
                     "contentId": url,
                     "contentUrl": url,
                     "streamType": "LIVE",
-                    "contentType": "audio/wav",
+                    "contentType": "audio/aac",
                     "metadata": [
                         "metadataType": 0,
                         "title": title,
