@@ -7,6 +7,23 @@
     <language>en</language>
 
     <item>
+      <title>Version 1.32</title>
+      <pubDate>Mon, 19 Oct 2026 16:18:09 +0900</pubDate>
+      <sparkle:version>32</sparkle:version>
+      <sparkle:shortVersionString>1.32</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>Skyscraper 1.32</h2>
+        <ul>
+          <li>グループ間キャストの場合に、何かの拍子で音が止まってしまう問題があったため、キャストの音声で、受け手の NACK に応えて送り直すようにしました。</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://github.com/inugamine/Skyscraper/releases/download/v1.32/Skyscraper-1.32.zip"
+        sparkle:edSignature="eHaAyyXtkBFRD0jlkDzZe0L0nNwFkpJNjQ6vwEyruxIfCmdi10RtX3eVrPmyx3R+63Cup44NkcKsMj2kgk2uAA=="
+        length="13465904"
+        type="application/octet-stream" />
+    </item>    <item>
       <title>Version 1.31</title>
       <pubDate>Sat, 17 Oct 2026 18:30:21 +0900</pubDate>
       <sparkle:version>31</sparkle:version>
