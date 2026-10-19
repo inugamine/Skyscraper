@@ -27,6 +27,10 @@
 //    AAC (192 kbps) にすると 26 秒も遅れた。しかも 2026-10-17 にグループの配り直しで
 //    WAV だけ通らなくなった (Home Mini が黙る)。時刻で鳴らす Cast Streaming に載せ替えて解決
 //  ・RTP の形・暗号・RTCP は Chromium の openscreen (cast/streaming) に合わせてある
+//  ・受け手が「この包みが来てない」(Cast の RTCP フィードバックの NACK) と言ってきたら送り直す。
+//    受け手は抜けた包みを待って固まり、その先 120 フレーム (約 2.5 秒) を超えた包みは捨てる。
+//    送り直さないと、Wi-Fi が何かのタイミングで一瞬取りこぼし(?)ただけで音が二度と戻らない
+//    (2026-10-19、Nest Hub がグループのまとめ役の時に 25 秒ほどで止まった)
 //  ・拾えるのは Skyscraper 全体の音で、タブ一枚ぶんだけを抜き出す手は無い。
 //    だから流している間は他のタブを黙らせる (CastController の役目)
 //  ・WKWebView の音は Skyscraper 本体ではなく WebKit の裏方プロセスから鳴っている。
@@ -165,6 +169,14 @@ nonisolated final class CastAudioPipeline: @unchecked Sendable {
     private var packetsSent: UInt32 = 0
     private var octetsSent: UInt32 = 0
 
+    // 送り直し用に取っておく、最近のフレームの包み (queue の上でだけ触る)
+    private var history: [UInt32: [Data]] = [:]
+    private static let historyLimit: UInt32 = 500   // 約 10 秒ぶん
+    private var nackCount = 0
+    private var resentCount = 0
+    private var loggedNackCount = 0
+    private var reportTicks = 0
+
     // 許可が無いと、タップは動くが中身は全部 0 になる。
     // それを見抜くために、一度でも音が来たかを外から訊けるようにしておく
     var hasCapturedSound: Bool {
@@ -195,10 +207,14 @@ nonisolated final class CastAudioPipeline: @unchecked Sendable {
             capturedFrames = 0
             pending.removeAll()
             self.connection = connection
+            receiveFeedback(on: connection)
             sendSenderReport()
             let timer = DispatchSource.makeTimerSource(queue: queue)
             timer.schedule(deadline: .now() + .milliseconds(500), repeating: .milliseconds(500))
-            timer.setEventHandler { [weak self] in self?.sendSenderReport() }
+            timer.setEventHandler { [weak self] in
+                self?.sendSenderReport()
+                self?.logFeedbackIfChanged()
+            }
             timer.resume()
             reportTimer = timer
         }
@@ -224,6 +240,7 @@ nonisolated final class CastAudioPipeline: @unchecked Sendable {
             reportTimer = nil
             connection?.cancel()
             connection = nil
+            history.removeAll()
         }
     }
 
@@ -287,6 +304,7 @@ nonisolated final class CastAudioPipeline: @unchecked Sendable {
 
         let chunkSize = Self.maxPacketSize - Self.rtpHeaderSize
         let chunkCount = max(1, (encrypted.count + chunkSize - 1) / chunkSize)
+        var packets: [Data] = []
         for index in 0..<chunkCount {
             let start = index * chunkSize
             let end = min(start + chunkSize, encrypted.count)
@@ -309,10 +327,91 @@ nonisolated final class CastAudioPipeline: @unchecked Sendable {
             packet.append(encrypted[start..<end])
 
             connection.send(content: packet, completion: .idempotent)
+            packets.append(packet)
             sequenceNumber &+= 1
             packetsSent &+= 1
         }
         octetsSent &+= UInt32(truncatingIfNeeded: encrypted.count)
+
+        history[id] = packets
+        history[id &- Self.historyLimit] = nil
+    }
+
+    // MARK: 受け手からの RTCP
+
+    // 受け手は届いたフレームごとに RTCP を返してくる。読み続けて、NACK に応える
+    private func receiveFeedback(on connection: NWConnection) {
+        connection.receiveMessage { [weak self] data, _, _, error in
+            guard let self, error == nil else { return }
+            // 受け取りの知らせは queue の上で届く (connection を queue で動かしているため)
+            if let data { self.handleRTCP(data) }
+            if self.connection === connection {
+                self.receiveFeedback(on: connection)
+            }
+        }
+    }
+
+    // 複数の RTCP が連なった束を一つずつ読み、Cast のフィードバックだけ拾う
+    private func handleRTCP(_ data: Data) {
+        let bytes = [UInt8](data)
+        var offset = 0
+        while offset + 4 <= bytes.count {
+            let format = bytes[offset] & 0x1F
+            let type = bytes[offset + 1]
+            let length = ((Int(bytes[offset + 2]) << 8 | Int(bytes[offset + 3])) + 1) * 4
+            guard length > 4, offset + length <= bytes.count else { return }
+            let body = Array(bytes[(offset + 4)..<(offset + length)])
+            // 206 = Payload-specific feedback / 15 = Cast のフィードバック
+            if type == 206, format == 15, body.count >= 16, body[8...11].elementsEqual("CAST".utf8) {
+                handleCastFeedback(body)
+            }
+            offset += length
+        }
+    }
+
+    // [受け手 SSRC 4][送り手 SSRC 4]["CAST" 4][checkpoint 1][件数 1][遅延 2][抜け 4 × 件数]
+    // 抜け一件は [フレーム番号の下 8 bit 1][包みの番号 2][続く 8 包みの印 1]。
+    // 包みの番号が 0xFFFF なら、そのフレームの包みが全部来ていない
+    private func handleCastFeedback(_ body: [UInt8]) {
+        let count = Int(body[13])
+        for n in 0..<count {
+            let base = 16 + 4 * n
+            guard base + 4 <= body.count else { return }
+            let id = expandFrameID(body[base])
+            guard let packets = history[id] else { continue }
+            nackCount += 1
+
+            let packetID = Int(body[base + 1]) << 8 | Int(body[base + 2])
+            let bitmask = body[base + 3]
+            var wanted: [Int]
+            if packetID == 0xFFFF {
+                wanted = Array(packets.indices)
+            } else {
+                wanted = [packetID]
+                for bit in 0..<8 where bitmask & (1 << bit) != 0 {
+                    wanted.append(packetID + bit + 1)
+                }
+            }
+            for index in wanted where packets.indices.contains(index) {
+                connection?.send(content: packets[index], completion: .idempotent)
+                resentCount += 1
+            }
+        }
+    }
+
+    // 受け手はフレーム番号の下 8 bit しか言わないので、最近送った番号から元の番号を割り出す
+    private func expandFrameID(_ lower: UInt8) -> UInt32 {
+        let newest = frameID &- 1
+        let distance = UInt8(truncatingIfNeeded: newest) &- lower
+        return newest &- UInt32(distance)
+    }
+
+    // 送り直しが起きていたら、10 秒に一度の割合で記録に残す (タイマーは 0.5 秒おき)
+    private func logFeedbackIfChanged() {
+        reportTicks += 1
+        guard reportTicks % 20 == 0, nackCount != loggedNackCount else { return }
+        loggedNackCount = nackCount
+        Self.log.info("receiver asked for \(self.nackCount) missing frames, resent \(self.resentCount) packets")
     }
 
     // AES-128-CTR (CommonCrypto の CTR は常に big endian で数える)。初期値は 16 バイトの 0 の 8〜11 バイト目にフレーム番号を書き、
