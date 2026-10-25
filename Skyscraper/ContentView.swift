@@ -4437,6 +4437,9 @@ struct VerticalTabStrip: View {
     // タブの挿入位置を示す金の横バー (ブックマークと同じ人感センサー方式)
     @StateObject private var dropModel = DropIndicatorModel()
 
+    // タブの並びの中身の高さ (ScrollView の頭打ちに使う)
+    @State private var listHeight: CGFloat = 0
+
     // 並び順の組み立ては TabManager に集約した。
     // 表示 (ここ) と送り (⌃Tab) が同じ配列を見るので、構造的にずれない
     private var sections: [TabSection] { manager.sections }
@@ -4496,67 +4499,11 @@ struct VerticalTabStrip: View {
         }
     }
 
-    var body: some View {
+    // タブの並びの下に付く段：ジグザグの仕切り + New Tab + 再グループ。
+    // body から切り出してあるのは型検査を軽くするため
+    private var newTabFooter: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                // プライベートウィンドウでは菱形を塗り潰して区別する
-                Image(systemName: manager.isPrivate ? "diamond.inset.filled" : "diamond")
-                    .font(.system(size: 13))
-                    .foregroundColor(Deco.gold)
-                Text("SKYSCRAPER")
-                    .font(.system(size: 14, design: .serif))
-                    .tracking(3)
-                    .foregroundColor(Deco.cream)
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 16)
-            .padding(.bottom, 10)
-
-            // ロゴ下の扇の飾り罫（二段の鱗紋。下に向かって闇に沈む）
-            // 横の重なりは浅く（肩が触れる程度）、絞った腿が隠れないようにする
-            FanFrieze(fans: 5, rays: 6, overlap: 0.5, tiers: 2)
-                .stroke(
-                    LinearGradient(
-                        colors: [Deco.gold, Deco.gold.opacity(0.35)],
-                        startPoint: .top, endPoint: .bottom
-                    ),
-                    lineWidth: 0.8
-                )
-                .frame(height: 34)
-                .padding(.horizontal, 14)
-                .padding(.bottom, manager.isPrivate ? 8 : 12)
-
-            // プライベートウィンドウの札。
-            // 普通の窓と見間違えたまま使われるのが一番まずいので、帯の一番目に入る場所に置く
-            if manager.isPrivate {
-                Text("PRIVATE")
-                    .font(.system(size: 9, design: .serif))
-                    .tracking(4)
-                    .foregroundColor(Deco.cream)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 4)
-                    .overlay(Hexagon(inset: 6).stroke(Deco.gold, lineWidth: 1))
-                    .frame(maxWidth: .infinity)
-                    .padding(.bottom, 12)
-            }
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 7) {
-                    ForEach(sections) { section in
-                        sectionView(section)
-                    }
-                }
-                .padding(.horizontal, 10)
-            }
-            // 余白へのドロップをここで受ける。
-            // 行の上なら行側が先に取るので、二重にはならない
-            .onDrop(of: [.text], delegate: TabStripDropDelegate(
-                manager: manager, indicatorModel: dropModel
-            ))
-
-            Spacer(minLength: 0)
-
-            // サイドバー下端のジグザグ罫 (New Tab ボタンの仕切り)
+            // タブの並びと New Tab の段を分けるジグザグ罫
             Zigzag(teeth: 14)
                 .stroke(Deco.faintGold, lineWidth: 1)
                 .frame(height: 5)
@@ -4604,6 +4551,87 @@ struct VerticalTabStrip: View {
                     .padding(.trailing, 12)
                 }
             }
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                // プライベートウィンドウでは菱形を塗り潰して区別する
+                Image(systemName: manager.isPrivate ? "diamond.inset.filled" : "diamond")
+                    .font(.system(size: 13))
+                    .foregroundColor(Deco.gold)
+                Text("SKYSCRAPER")
+                    .font(.system(size: 14, design: .serif))
+                    .tracking(3)
+                    .foregroundColor(Deco.cream)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 10)
+
+            // ロゴ下の扇の飾り罫（二段の鱗紋。下に向かって闇に沈む）
+            // 横の重なりは浅く（肩が触れる程度）、絞った腿が隠れないようにする
+            FanFrieze(fans: 5, rays: 6, overlap: 0.5, tiers: 2)
+                .stroke(
+                    LinearGradient(
+                        colors: [Deco.gold, Deco.gold.opacity(0.35)],
+                        startPoint: .top, endPoint: .bottom
+                    ),
+                    lineWidth: 0.8
+                )
+                .frame(height: 34)
+                .padding(.horizontal, 14)
+                .padding(.bottom, manager.isPrivate ? 8 : 12)
+
+            // プライベートウィンドウの札。
+            // 普通の窓と見間違えたまま使われるのが一番まずいので、帯の一番目に入る場所に置く
+            if manager.isPrivate {
+                Text("PRIVATE")
+                    .font(.system(size: 9, design: .serif))
+                    .tracking(4)
+                    .foregroundColor(Deco.cream)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 4)
+                    .overlay(Hexagon(inset: 6).stroke(Deco.gold, lineWidth: 1))
+                    .frame(maxWidth: .infinity)
+                    .padding(.bottom, 12)
+            }
+
+            // タブの並びと New Tab の段をひとまとめにして上へ寄せる。
+            // 段はタブの末尾にくっ付いて下り、帯が溢れたら底で止まる。
+            // (ScrollView の高さを中身の高さで頭打ちにしているので、
+            //  溢れるまでは中身ぶんだけ、溢れたら段の残りを全部取る)
+            VStack(alignment: .leading, spacing: 0) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 7) {
+                        ForEach(sections) { section in
+                            sectionView(section)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    // 中身の高さを測る。
+                    // ScrollView は放っておくと空いた所を全部取ってしまうので、
+                    // この値で頭打ちにして段をタブの真下に付ける
+                    .onGeometryChange(for: CGFloat.self) { proxy in
+                        proxy.size.height
+                    } action: { height in
+                        listHeight = height
+                    }
+                }
+                .frame(maxHeight: listHeight)
+                // 溢れていない時は弾ませない
+                .scrollBounceBehavior(.basedOnSize)
+
+                newTabFooter
+            }
+            .frame(maxHeight: .infinity, alignment: .top)
+            // 余白へのドロップをここで受ける (段の下の空きも含めて末尾行き)。
+            // 行の上なら行側が先に取るので、二重にはならない
+            .contentShape(Rectangle())
+            .onDrop(of: [.text], delegate: TabStripDropDelegate(
+                manager: manager, indicatorModel: dropModel
+            ))
         }
         .frame(width: 200)
         .background(Deco.panel)
