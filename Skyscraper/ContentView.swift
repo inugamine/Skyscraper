@@ -4592,20 +4592,34 @@ struct SkyscraperMark: View {
     var color: Color = Deco.gold
     // 胴を背景色で塗り潰し、背後の飾り (サンバースト等) が透けないようにする
     var fill: Color = Deco.ink
+    // 窓の灯る割合 (0〜1)。0 なら窓を描かない——昼のロビーの姿 (LobbyTime.swift)
+    var litWindows: Double = 0
+    // 尖塔の先の灯り。夜だけ点ける
+    var beacon: Bool = false
     var body: some View {
         VStack(spacing: 0) {
             Triangle().fill(fill)
                 .overlay(Triangle().stroke(color, lineWidth: 1))
                 .frame(width: 3, height: 16)
-            tier(18, 18)
+                .overlay(alignment: .top) {
+                    if beacon { BeaconLight().offset(y: -3) }
+                }
+            tier(18, 18, cols: 2, rows: 2, seed: 0)
             // 胴は縦長の一本柱。高さは以前の二段 (24 + 28) の合計にして、
             // ビル全体の背丈とサンバーストとの位置関係を変えない
-            tier(34, 52)
-            tier(74, 22)
+            tier(34, 52, cols: 4, rows: 8, seed: 10)
+            tier(74, 22, cols: 9, rows: 2, seed: 50)
         }
     }
-    private func tier(_ w: CGFloat, _ h: CGFloat) -> some View {
+    private func tier(_ w: CGFloat, _ h: CGFloat,
+                      cols: Int, rows: Int, seed: Int) -> some View {
         Rectangle().fill(fill)
+            .overlay {
+                if litWindows > 0 {
+                    WindowGrid(cols: cols, rows: rows, seed: seed, lit: litWindows)
+                        .padding(3)
+                }
+            }
             .overlay(Rectangle().stroke(color, lineWidth: 1))
             .frame(width: w, height: h)
     }
@@ -4622,17 +4636,29 @@ struct NewTabPage: View {
             Spacer()
 
             // ロゴ背後のサンバースト。ビルの足元から放射する淡い光。
-            // 円弧は置かず線だけにして、密度を上げすぎない
-            ZStack(alignment: .bottom) {
-                Sunburst(rays: 9, arcRatios: [])
-                    .stroke(
-                        // 要（下）から先端（上）に向かって闇に溶ける
-                        LinearGradient(colors: [Deco.faintGold, Deco.faintGold.opacity(0.10)],
-                                       startPoint: .bottom, endPoint: .top),
-                        lineWidth: 0.8
-                    )
-                    .frame(width: 330, height: 150)
-                SkyscraperMark()
+            // 円弧は置かず線だけにして、密度を上げすぎない。
+            //
+            // 光の色・窓の灯り・夜空は時間帯で変わる (LobbyTime.swift)。
+            // 時間帯の切り替わりを拾うため、一分ごとに描き直す
+            TimelineView(.everyMinute) { timeline in
+                let phase = LobbyPhase.at(timeline.date)
+                ZStack(alignment: .bottom) {
+                    if phase == .night {
+                        NightSky()
+                            .frame(width: 330, height: 150)
+                            .transition(.opacity)
+                    }
+                    Sunburst(rays: 9, arcRatios: [])
+                        .stroke(
+                            // 要（下）から先端（上）に向かって闇に溶ける
+                            LinearGradient(colors: phase.rayColors,
+                                           startPoint: .bottom, endPoint: .top),
+                            lineWidth: 0.8
+                        )
+                        .frame(width: 330, height: 150)
+                    SkyscraperMark(litWindows: phase.litWindows, beacon: phase == .night)
+                }
+                .animation(.easeInOut(duration: 1.2), value: phase)
             }
 
             VStack(spacing: 6) {
