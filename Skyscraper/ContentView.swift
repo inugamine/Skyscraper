@@ -472,6 +472,11 @@ final class SkyscraperWebView: WKWebView {
     // 直近の右クリック位置 (CSS ピクセル・左上原点)。elementFromPoint に渡す
     private var lastRightClick: CGPoint = .zero
 
+    // 右クリックの「リンクをプライベートウインドウで開く」の行き先 (Tab が入れる)。
+    // プライベートウィンドウのタブでは nil のままにして、項目そのものを出さない——
+    // そこで「新しいタブで開く」を選べば、もうプライベートだ
+    var openLinkInPrivate: ((URL) -> Void)?
+
     override func rightMouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
         // ビューの上下向きと拡大率を JS 座標系に合わせる。
@@ -496,6 +501,18 @@ final class SkyscraperWebView: WKWebView {
                 break
             }
         }
+        // WebKit はリンクの上で右クリックした時だけ「新しいウインドウで開く」を出す。
+        // それを目印にすれば、リンクかどうかを自前で調べずに済む
+        if openLinkInPrivate != nil,
+           let index = menu.items.firstIndex(where: {
+               $0.identifier?.rawValue == "WKMenuItemIdentifierOpenLinkInNewWindow"
+           }) {
+            let item = NSMenuItem(title: String(localized: "Open Link in Private Window"),
+                                  action: #selector(openLinkInPrivateAtLastClick(_:)),
+                                  keyEquivalent: "")
+            item.target = self
+            menu.insertItem(item, at: index + 1)
+        }
     }
 
     @objc private func downloadImageAtLastClick(_ sender: Any?) {
@@ -516,15 +533,32 @@ final class SkyscraperWebView: WKWebView {
         startDownload(fromJS: js)
     }
 
-    @objc private func downloadLinkAtLastClick(_ sender: Any?) {
-        let js = """
+    // 右クリック位置のリンク先を返す JS。ダウンロードとプライベートで開くの両方が使う
+    private var linkAtLastClickJS: String {
+        """
         (() => {
             const el = document.elementFromPoint(\(lastRightClick.x), \(lastRightClick.y));
             const a = el ? el.closest('a[href]') : null;
             return a ? a.href : null;
         })();
         """
-        startDownload(fromJS: js)
+    }
+
+    @objc private func downloadLinkAtLastClick(_ sender: Any?) {
+        startDownload(fromJS: linkAtLastClickJS)
+    }
+
+    @objc private func openLinkInPrivateAtLastClick(_ sender: Any?) {
+        evaluateJavaScript(linkAtLastClickJS) { [weak self] result, _ in
+            // http(s) だけを通す。javascript: を別の窓で開いても、
+            // 元のページの文脈が無いので何も起きない
+            guard let self,
+                  let urlString = result as? String,
+                  let url = URL(string: urlString),
+                  let scheme = url.scheme?.lowercased(),
+                  scheme == "http" || scheme == "https" else { return }
+            self.openLinkInPrivate?(url)
+        }
     }
 
     private func startDownload(fromJS js: String) {
@@ -785,6 +819,9 @@ final class Tab: NSObject, ObservableObject, Identifiable {
 
     // ⌘クリックされたリンクを新規タブで開くための連絡先 (TabManager が入れる)
     var openInNewTab: ((String) -> Void)?
+
+    // 右クリックの「リンクをプライベートウインドウで開く」の連絡先 (TabManager が入れる)
+    var openInPrivateWindow: ((URL) -> Void)?
 
     // window.open() で新しい器を求められた時の連絡先 (TabManager が入れる)
     // 返された WKWebView をそのまま WebKit に渡す
@@ -1434,6 +1471,12 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         // 初回は空なので素通りする（作り直しの時にだけ効く）
         observers.forEach { $0.invalidate() }
         observers.removeAll()
+
+        // 右クリックの「リンクをプライベートウインドウで開く」。
+        // プライベートのタブでは繋がない (項目ごと出さない)
+        (webView as? SkyscraperWebView)?.openLinkInPrivate = isPrivate ? nil : { [weak self] url in
+            self?.openInPrivateWindow?(url)
+        }
 
         // トラックパッドの2本指スワイプで戻る／進む
         webView.allowsBackForwardNavigationGestures = true
@@ -3236,6 +3279,9 @@ final class TabManager: NSObject, ObservableObject {
     // 引数では渡せない。次に生まれる管理人への預かり所を静的に置く——
     // タブを新しい窓へ渡す pendingAdoption と同じ手だ
     private static var pendingPrivate = false
+    // 新しいプライベートウィンドウに最初に開かせる URL。
+    // 右クリックの「リンクをプライベートウインドウで開く」が置いていく
+    private static var pendingPrivateURL: String?
 
     let isPrivate: Bool
 
@@ -3561,7 +3607,9 @@ final class TabManager: NSObject, ObservableObject {
         // 保存もしないので、復元の待ち行列にも手を付けない——
         // ここで一つ取ってしまうと、本来開くはずの普通の窓の分が消える
         guard !isPrivate else {
-            addTab()
+            let url = Self.pendingPrivateURL
+            Self.pendingPrivateURL = nil
+            addTab(url: url)
             return
         }
         // 設定で切られていれば、保存済みのものも読まずに捨てる
@@ -3758,6 +3806,10 @@ final class TabManager: NSObject, ObservableObject {
         let profile = tab.profileID
         tab.openInNewTab = { [weak self] link in
             self?.addTabInBackground(url: link, profile: profile)
+        }
+        // 右クリックの「リンクをプライベートウインドウで開く」
+        tab.openInPrivateWindow = { [weak self] url in
+            self?.openInPrivateWindow(url)
         }
         // window.open() で器を求められたら、ここで起こして返す
         tab.openPopup = { [weak self] configuration in
@@ -3971,6 +4023,20 @@ final class TabManager: NSObject, ObservableObject {
     func openPrivateWindow() {
         Self.pendingPrivate = true
         newWindowRequests += 1
+    }
+
+    // 右クリックの「リンクをプライベートウインドウで開く」。
+    // プライベートウィンドウが既にあればそこへ一枚足して前に出し、
+    // 無ければ新しく開く (Chrome と同じ)。
+    // 名簿の後ろから探すのは externalURLTarget と同じ理屈だ
+    func openInPrivateWindow(_ url: URL) {
+        if let target = Self.openWindows.last(where: { $0.isPrivate }) {
+            target.addTab(url: url.absoluteString)
+            target.focusHostWindow()
+            return
+        }
+        Self.pendingPrivateURL = url.absoluteString
+        openPrivateWindow()
     }
 
     func closeTab(_ tab: Tab) {
@@ -6821,6 +6887,13 @@ struct ContentView: View {
         .animation(.easeOut(duration: 0.18), value: translator.isPresented)
         .frame(minWidth: 900, minHeight: 600)
         .background(Deco.ink)
+        // 題名の帯 (タイトルバー) を透かして、地の色に溶け込ませる。
+        // 既定のままだと帯だけ系統色の灰色で塗られ、窓の上に一本線が走る。
+        // (タブを新しい窓へ移した時だけ溶けていたのは偶然で、それを正式な姿にした)
+        // 窓そのものの地も同じ色にしておくと、伸縮の一瞬に灰色が覗かない。
+        // Deco.ink は @Observable の配色を読むので、配色を替えれば帯も追って変わる
+        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        .containerBackground(Deco.ink, for: .window)
         // タブ検索の盤。(⇧⌘A)
         // 盤は全ての窓のタブを並べるが、出すのは押された窓だけだ
         .overlay {
