@@ -90,9 +90,6 @@ Safari や Chrome と同じ Web Extensions に対応しています（WebKit の
 - 全画面動画、Twitter (自称: X) 向けのシアターモード
 - Sparkle による自動更新
 - 日本語／英語
-
-### これから
-
 - パスキー(WebAuthn) — Apple のエンタイトルメント審査が通りました
 
 ## 動作環境
