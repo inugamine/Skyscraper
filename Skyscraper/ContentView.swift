@@ -857,6 +857,10 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // ⌘クリックされたリンクを新規タブで開くための連絡先 (TabManager が入れる)
     var openInNewTab: ((String) -> Void)?
 
+    // ⌥クリックされたリンクを覗き窓で開くための連絡先 (TabManager が入れる)。
+    // 覗き窓の中で⌥クリックした時は、覗き窓の中で開き直す (Peek.swift)
+    var openPeek: ((String) -> Void)?
+
     // 右クリックの「リンクをプライベートウインドウで開く」の連絡先 (TabManager が入れる)
     var openInPrivateWindow: ((URL) -> Void)?
 
@@ -2645,6 +2649,18 @@ extension Tab: WKNavigationDelegate {
             return
         }
 
+        // ⌥クリックは覗き窓へ (Peek.swift)。
+        // http(s) に限る——それ以外は上の振り分けで外のアプリへ渡っている
+        if isLinkClick,
+           action.modifierFlags.contains(.option),
+           let url,
+           let scheme = action.request.url?.scheme?.lowercased(),
+           scheme == "http" || scheme == "https" {
+            decisionHandler(.cancel)
+            Task { @MainActor in self.openPeek?(url) }
+            return
+        }
+
         // ── きれいなリンク ──
         //
         // 主フレームの GET だけ。https 優先と同じ理由で、POST を
@@ -3517,6 +3533,7 @@ final class TabManager: NSObject, ObservableObject {
         // プライベートウィンドウは控えない——下で閉じたタブの控えを消すのと同じ理屈だ
         if !isPrivate { recordClosedWindow() }
         isClosed = true
+        closePeek()
         // プライベートウィンドウの後始末。
         // 最後の一枚なら、置き場の中身ごと捨てられる。
         // 閉じたタブの控え (⇧⌘T) もここで消す——
@@ -3896,6 +3913,16 @@ final class TabManager: NSObject, ObservableObject {
         tab.openInNewTab = { [weak self] link in
             self?.addTabInBackground(url: link, profile: profile)
         }
+        // ⌥クリックは覗き窓へ。覗き窓の中で押されたら、その中で開き直す
+        tab.openPeek = { [weak self, weak tab] link in
+            guard let self, let tab else { return }
+            if tab === self.peek {
+                tab.urlText = link
+                tab.load()
+            } else {
+                self.openPeek(url: link, profile: profile)
+            }
+        }
         // 右クリックの「リンクをプライベートウインドウで開く」
         tab.openInPrivateWindow = { [weak self] url in
             self?.openInPrivateWindow(url)
@@ -4146,6 +4173,11 @@ final class TabManager: NSObject, ObservableObject {
     }
 
     func closeTab(_ tab: Tab) {
+        // 覗き窓の中のページが window.close() を呼んだ
+        if tab === peek {
+            closePeek()
+            return
+        }
         guard let idx = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
         // 復元用に、閉じるタブを控える。(ロビーなら URL は空文字)控えは最大20件。
         //
@@ -4153,6 +4185,23 @@ final class TabManager: NSObject, ObservableObject {
         // ならない。後だと白紙ページまで含んだ履歴を掴むことになる
         recentlyClosed.append(closedRecord(of: tab))
         if recentlyClosed.count > 20 { recentlyClosed.removeFirst() }
+        dismantle(tab)
+        tabs.remove(at: idx)
+        // 監視とグループ割り当てを片付け、残りのタブで組み直す
+        titleWatchers[tab.id] = nil
+        urlWatchers[tab.id] = nil
+        fullscreenWatchers[tab.id] = nil
+        grouper.forget(tab.id)
+        grouper.scheduleRegroup(for: tabs)
+        if selectedID == tab.id {
+            selectedID = tabs[safe: idx]?.id ?? tabs.last?.id
+        }
+        if tabs.isEmpty { addTab() }
+    }
+
+    // タブの中身を止めて退去させる。名簿からは外さない (呼び元の仕事)。
+    // 閉じるタブと、閉じる覗き窓の両方がここを通る
+    private func dismantle(_ tab: Tab) {
         // 動画・音声の再生を確実に止めてから退去させる。
         // about:blank の読み込みだけでは非同期で、WebView がどこかに
         // 保持されて生き残った場合に音が鳴り続ける。(長時間再生したYouTube で顕著)
@@ -4168,20 +4217,44 @@ final class TabManager: NSObject, ObservableObject {
         tab.geolocation.teardown()
         tab.webView.configuration.userContentController.removeAllScriptMessageHandlers()
         tab.webView.configuration.userContentController.removeAllUserScripts()
-        tabs.remove(at: idx)
-        // 監視とグループ割り当てを片付け、残りのタブで組み直す
+    }
+
+    // ── 覗き窓 ── (Peek.swift)
+    //
+    // 中身は makeTab で作った本物のタブで、名簿に載せていないだけ
+    @Published private(set) var peek: Tab?
+
+    func openPeek(url: String, profile: UUID?) {
+        closePeek()
+        peek = makeTab(url: url, profile: profile)
+    }
+
+    // 閉じる。⇧⌘T の控えには積まない
+    func closePeek() {
+        guard let tab = peek else { return }
+        peek = nil
+        dismantle(tab)
         titleWatchers[tab.id] = nil
         urlWatchers[tab.id] = nil
         fullscreenWatchers[tab.id] = nil
-        grouper.forget(tab.id)
-        grouper.scheduleRegroup(for: tabs)
-        if selectedID == tab.id {
-            selectedID = tabs[safe: idx]?.id ?? tabs.last?.id
-        }
-        if tabs.isEmpty { addTab() }
     }
 
-    func select(_ tab: Tab) { selectedID = tab.id }
+    // タブにする。読み込み直さず、今のタブの直後へ差し込む
+    func promotePeek() {
+        guard let tab = peek else { return }
+        peek = nil
+        let index = tabs.firstIndex { $0.id == selectedID }.map { $0 + 1 } ?? tabs.count
+        tabs.insert(tab, at: index)
+        selectedID = tab.id
+        grouper.scheduleRegroup(for: tabs)
+    }
+
+    // 名簿に居ないタブ (覗き窓) を選ぶと selectedTab が空になるので、
+    // 名簿に居るものだけを受け付ける
+    func select(_ tab: Tab) {
+        guard tabs.contains(where: { $0.id == tab.id }) else { return }
+        selectedID = tab.id
+    }
 
     // ── ピン留め ──
     //
@@ -4303,6 +4376,11 @@ final class TabManager: NSObject, ObservableObject {
     }
 
     func closeSelected() {
+        // 覗き窓が開いていれば、⌘W はそちらを閉じる
+        if peek != nil {
+            closePeek()
+            return
+        }
         guard let tab = selectedTab else { return }
         // ピン留めしたタブは ⌘W では閉じない。(Safari と同じ)
         // 「うっかり閉じない」がピン留めの目的だから。
@@ -6494,6 +6572,14 @@ struct BrowserPane: View {
             // 帯は選ばれている一枚ぶんだけだ。裏タブごとに持たせると、
             // 見えない帯が焦点の移動で更新され続けるだけで何の役にも立たない
             .linkHoverBar(tab.hoveredLink, flipped: tab.hoverFlipped)
+            // ── 覗き窓 ── (Peek.swift)
+            .overlay {
+                if let peek = manager.peek {
+                    PeekOverlay(tab: peek,
+                                onClose: { manager.closePeek() },
+                                onPromote: { manager.promotePeek() })
+                }
+            }
         }
         .navigationTitle(windowTitle)
         .onAppear {
@@ -6502,6 +6588,7 @@ struct BrowserPane: View {
         .onChange(of: tab.id) { _, _ in
             addressText = tab.urlText
             clearSuggestions()
+            manager.closePeek()
         }
         .onChange(of: tab.urlText) { _, newValue in
             if !addressEditing {
