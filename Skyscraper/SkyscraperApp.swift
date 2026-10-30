@@ -280,6 +280,11 @@ struct BrowserCommands: Commands {
             Button("Search Tabs…") { manager?.showTabSearch() }
                 .keyboardShortcut("a", modifiers: [.command, .shift])
                 .disabled(manager == nil)
+            // 館内案内板。タブ・ブックマーク・操作・閉じたタブを一枚から引く
+            // (Directory.swift)。⌘K は Arc や Raycast と同じ位置
+            Button("Directory…") { manager?.showDirectory() }
+                .keyboardShortcut("k", modifiers: .command)
+                .disabled(manager == nil)
             Divider()
             // ピン留め。札の文言が今の状態で変わるので、
             // 管理人を見張る View (PinTabCommand) に包んである。
