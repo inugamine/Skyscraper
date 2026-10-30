@@ -770,6 +770,8 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     @Published var canGoBack: Bool = false
     @Published var canGoForward: Bool = false
     @Published var isLoading: Bool = false
+    // 読み込みの進み具合 (0〜1)。エレベーターの針が指す (ElevatorDial.swift)
+    @Published var loadProgress: Double = 0
     @Published var pageTitle: String = ""
     @Published var isHome: Bool = true
     @Published var addressBarFocusTrigger: Int = 0
@@ -1679,6 +1681,10 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         observers.append(webView.observe(\.title, options: [.new]) { [weak self] wv, _ in
             guard let self else { return }
             Task { @MainActor in self.pageTitle = wv.title ?? "" }
+        })
+        observers.append(webView.observe(\.estimatedProgress, options: [.new]) { [weak self] wv, _ in
+            guard let self else { return }
+            Task { @MainActor in self.loadProgress = wv.estimatedProgress }
         })
     }
 
@@ -6432,6 +6438,9 @@ struct BrowserPane: View {
     @State private var addressEndEditingTrigger = 0
     // アドレスバー行の高さ。候補一覧をその真下へ落とすのに使う
     @State private var addressBarHeight: CGFloat = 0
+    // エレベーターの針を出しているか。読み終わってもしばらく残す (updateDial)
+    @State private var showsDial = false
+    @State private var dialHideTask: Task<Void, Never>?
     // ブックマークバーを出すか（⌘B）。
     // 窓ごとの @State ではなく UserDefaults に置くのは、
     // 帯そのものが窓をまたいで同じ中身だから——片方の窓だけ
@@ -6584,11 +6593,19 @@ struct BrowserPane: View {
         .navigationTitle(windowTitle)
         .onAppear {
             addressText = tab.urlText
+            showsDial = tab.isLoading
         }
         .onChange(of: tab.id) { _, _ in
             addressText = tab.urlText
             clearSuggestions()
             manager.closePeek()
+            // 別のタブへ移った。前のタブの振り切りを待たず、今のタブに揃える
+            dialHideTask?.cancel()
+            dialHideTask = nil
+            showsDial = tab.isLoading
+        }
+        .onChange(of: tab.isLoading) { _, loading in
+            updateDial(loading: loading)
         }
         .onChange(of: tab.urlText) { _, newValue in
             if !addressEditing {
@@ -6745,10 +6762,27 @@ struct BrowserPane: View {
             .help("Downloads")
         }
 
-        if tab.isLoading {
-            ProgressView()
-                .controlSize(.small)
-                .tint(Deco.gold)
+        // エレベーターの針 (ElevatorDial.swift)。
+        // 出し入れは tab.isLoading を直に見ず showsDial で持つ——
+        // 読み終わった後、針が最上階へ振り切るのを見せてから引っ込めたいから
+        if showsDial {
+            ElevatorDial(isLoading: tab.isLoading, progress: tab.loadProgress)
+                .transition(.opacity)
+        }
+    }
+
+    // 読み込みの始まり・終わりに合わせて針を出し入れする
+    private func updateDial(loading: Bool) {
+        dialHideTask?.cancel()
+        dialHideTask = nil
+        if loading {
+            showsDial = true
+            return
+        }
+        dialHideTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(450))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeIn(duration: 0.25)) { showsDial = false }
         }
     }
 
