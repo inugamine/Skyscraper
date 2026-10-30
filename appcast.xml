@@ -7,6 +7,25 @@
     <language>en</language>
 
     <item>
+      <title>Version 1.33</title>
+      <pubDate>Fri, 30 Oct 2026 19:26:27 +0900</pubDate>
+      <sparkle:version>33</sparkle:version>
+      <sparkle:shortVersionString>1.33</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>Skyscraper 1.33</h2>
+        <ul>
+          <li>新規タブを作成するボタンの位置を修正しました。</li>
+          <li>タイトルバーの色をカラーテーマに合わせました。</li>
+          <li>「リンクを新規ウインドウで開く」を選択した際にポップアップがブロックされ、その後に「開く」を選択すると新規ウインドウではなくてタブで開いてしまう問題を修正しました。</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://github.com/inugamine/Skyscraper/releases/download/v1.33/Skyscraper-1.33.zip"
+        sparkle:edSignature="Yl0viOIzkCycXnZkvtJ/46Z2WtABUonaJqCInn0LX7mrYnm8FvhTPsiJvSBRS8oTpY6aUfG0/0zCH463yE3YAA=="
+        length="13475422"
+        type="application/octet-stream" />
+    </item>    <item>
       <title>Version 1.32</title>
       <pubDate>Mon, 19 Oct 2026 16:18:09 +0900</pubDate>
       <sparkle:version>32</sparkle:version>
