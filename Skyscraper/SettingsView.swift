@@ -23,6 +23,7 @@ struct SettingsView: View {
     @AppStorage(BookmarkSync.enabledKey) private var syncsBookmarks = true
     @AppStorage(TabManager.autoUnloadKey) private var autoUnloadMinutes = 30
     @AppStorage(HTTPSFirstStore.enabledKey) private var prefersHTTPS = true
+    @AppStorage(CleanLink.enabledKey) private var cleansLinks = true
     @AppStorage(GeolocationStore.enabledKey) private var allowsLocation = true
     @AppStorage(CloseWindowConfirmation.enabledKey) private var confirmsWindowClose = true
     @State private var showingPasswords = false
@@ -510,6 +511,28 @@ struct SettingsView: View {
                     .font(.system(size: 12, design: .serif))
                     .foregroundColor(Deco.cream)
                 Text("Addresses written as http are tried over https first. If the server does not answer securely, Skyscraper asks before falling back. Servers on your own machine and local network are left alone.")
+                    .font(.system(size: 10, design: .serif))
+                    .foregroundColor(Deco.dimGold)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .toggleStyle(.switch)
+        .tint(Deco.gold)
+        .padding(.bottom, 22)
+
+        // ══ リンク ══
+        sectionHeader("Links")
+
+        // ── 追跡用の札を剥がす ── (CleanLink.swift)
+        //
+        // 切った時に止まるのは「開く時」だけ。
+        // 右クリックと ⇧⌘C のコピーは、頼まれた時しか動かないので残す
+        Toggle(isOn: $cleansLinks) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Remove tracking from links")
+                    .font(.system(size: 12, design: .serif))
+                    .foregroundColor(Deco.cream)
+                Text("Tags such as utm_ and fbclid, which only report where you came from, are removed when a page is opened. The page itself is not changed. Copy Clean Link works either way.")
                     .font(.system(size: 10, design: .serif))
                     .foregroundColor(Deco.dimGold)
                     .fixedSize(horizontal: false, vertical: true)

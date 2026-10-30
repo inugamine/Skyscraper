@@ -200,6 +200,15 @@ struct BrowserCommands: Commands {
             .keyboardShortcut("p", modifiers: .command)
             .disabled(manager == nil)
         }
+        // Edit メニュー：コピーの並びに、今のページのきれいなリンク。
+        // ⇧⌘C は Arc と同じ位置 (CleanLink.swift)
+        CommandGroup(after: .pasteboard) {
+            Button("Copy Clean Link") {
+                CleanLink.copyPage(of: manager?.selectedTab)
+            }
+            .keyboardShortcut("c", modifiers: [.command, .shift])
+            .disabled(manager == nil)
+        }
         // Edit メニュー：ページ内検索
         CommandGroup(after: .textEditing) {
             Button("Find…") { manager?.selectedTab?.showFindBar() }

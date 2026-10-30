@@ -526,6 +526,17 @@ final class SkyscraperWebView: WKWebView {
             item.target = self
             menu.insertItem(item, at: index + 1)
         }
+        // WebKit の「リンクをコピー」の直下に、札を剥がしてコピーする項目を足す。
+        // 元の項目は残す——札ごと欲しい場面 (配信元に聞かれた時など) もある
+        if let index = menu.items.firstIndex(where: {
+            $0.identifier?.rawValue == "WKMenuItemIdentifierCopyLink"
+        }) {
+            let item = NSMenuItem(title: String(localized: "Copy Clean Link"),
+                                  action: #selector(copyCleanLinkAtLastClick(_:)),
+                                  keyEquivalent: "")
+            item.target = self
+            menu.insertItem(item, at: index + 1)
+        }
     }
 
     @objc private func downloadImageAtLastClick(_ sender: Any?) {
@@ -567,6 +578,11 @@ final class SkyscraperWebView: WKWebView {
 
     @objc private func openLinkInNewWindowAtLastClick(_ sender: Any?) {
         resolveLinkAtLastClick { [weak self] url in self?.openLinkInNewWindow?(url) }
+    }
+
+    // 札を剥がしてコピー。実体は CleanLink.swift
+    @objc private func copyCleanLinkAtLastClick(_ sender: Any?) {
+        resolveLinkAtLastClick { url in CleanLink.copy(url) }
     }
 
     // 右クリック位置のリンク先を、別の窓で開ける形で返す。
@@ -1050,6 +1066,13 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // 応答の中身が抜けて届いた時、どこを読み直すかはこれで知る
     // (その時点の webView.url は前のページを指していることがある)
     private var lastMainFrameRequest: URL?
+
+    // 開く時に札を剥がした元の宛先と、その時刻。(CleanLink.swift)
+    //
+    // 剥がした先のサーバが札を付け直して跳ね返してくる作りだと、
+    // 剥がす→跳ね返る→剥がす…と延々往復する。同じ宛先が
+    // 少し前に剥がしたばかりなら、二度目は黙って通す
+    private var lastCleaned: (from: URL, at: Date)?
 
     // Service Worker を剥がして読み直した宛先。
     // 同じ宛先でもう一度抜け殻が来たら諦める (読み直しを繰り返さないため)
@@ -2615,9 +2638,30 @@ extension Tab: WKNavigationDelegate {
         }
 
         if isLinkClick, commandHeld, let url {
-            // このタブでは開かず、新規タブへ回す
+            // このタブでは開かず、新規タブへ回す。
+            // 札はここでは剥がさない——開いた先のタブの判断役が剥がす
             decisionHandler(.cancel)
             Task { @MainActor in self.openInNewTab?(url) }
+            return
+        }
+
+        // ── きれいなリンク ──
+        //
+        // 主フレームの GET だけ。https 優先と同じ理由で、POST を
+        // 差し替えると本文が落ちる。戻る・進む・再読み込みも見送る——
+        // ここで読み込み直すと、履歴の位置がずれる。
+        // https 優先より前に置くので、持ち上げは剥がした後の宛先に効く
+        if CleanLink.stripsOnOpen,
+           let target = action.request.url,
+           action.targetFrame?.isMainFrame == true,
+           (action.request.httpMethod ?? "GET").uppercased() == "GET",
+           action.navigationType != .backForward,
+           action.navigationType != .reload,
+           !recentlyCleaned(target),
+           let clean = CleanLink.cleaned(target) {
+            decisionHandler(.cancel)
+            lastCleaned = (target, Date())
+            webView.load(URLRequest(url: clean))
             return
         }
 
@@ -2657,6 +2701,12 @@ extension Tab: WKNavigationDelegate {
             lastMainFrameRequest = action.request.url
         }
         decisionHandler(.allow)
+    }
+
+    // 同じ宛先を十秒以内に剥がしたばかりか。跳ね返りの往復止め
+    private func recentlyCleaned(_ url: URL) -> Bool {
+        guard let lastCleaned, lastCleaned.from == url else { return false }
+        return Date().timeIntervalSince(lastCleaned.at) < 10
     }
 
     // MARK: https 優先の段取り
