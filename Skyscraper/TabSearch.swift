@@ -108,6 +108,10 @@ struct TabSearchField: NSViewRepresentable {
     let onSubmit: () -> Void
     let onMove: (Int) -> Bool
     let onCancel: () -> Void
+    // 案内板 (Directory.swift) が借りる時に差し替える。タブ検索は既定のまま
+    var placeholder: String = String(localized: "Search open tabs")
+    // Tab / ⇧Tab。案内板では階の移動に使う。nil なら素通し (焦点が次へ移る)
+    var onTab: ((Int) -> Bool)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -127,7 +131,7 @@ struct TabSearchField: NSViewRepresentable {
             ?? NSFont.systemFont(ofSize: size)
         field.font = font
         field.applyDecoColors(text: Deco.cream,
-                              placeholder: String(localized: "Search open tabs"),
+                              placeholder: placeholder,
                               font: font)
         return field
     }
@@ -136,7 +140,7 @@ struct TabSearchField: NSViewRepresentable {
         context.coordinator.parent = self
         // 配色を切り替えた時の塗り直し (Theme.swift)
         field.applyDecoColors(text: Deco.cream,
-                              placeholder: String(localized: "Search open tabs"),
+                              placeholder: placeholder,
                               font: field.font)
         // 編集中の打鍵を潰さないよう、編集していないときだけ外の値を反映する
         if field.currentEditor() == nil, field.stringValue != text {
@@ -177,6 +181,10 @@ struct TabSearchField: NSViewRepresentable {
             case #selector(NSResponder.cancelOperation(_:)):
                 parent.onCancel()
                 return true
+            case #selector(NSResponder.insertTab(_:)):
+                return parent.onTab?(1) ?? false
+            case #selector(NSResponder.insertBacktab(_:)):
+                return parent.onTab?(-1) ?? false
             default:
                 return false
             }
@@ -194,6 +202,10 @@ struct TabSearchPanel: View {
 
     @State private var query = ""
     @State private var selection = 0
+    // 選んだ行を追いかけてスクロールするか。↑↓ で選んだ時だけ立てる。
+    // カーソルが乗った行も選ばれるが、そちらでまで追いかけると
+    // スクロール→カーソルの下に別の行→選び直し→スクロール…と喧嘩する
+    @State private var followsSelection = false
 
     private var matches: [TabSearchMatch] {
         TabSearch.matches(query: query, from: manager)
@@ -290,10 +302,14 @@ struct TabSearchPanel: View {
                     .padding(.horizontal, 10)
                 }
                 .frame(maxHeight: 340)
-                // ↑↓ で選んだ行が幕の外へ出ないよう追いかける
+                // ↑↓ で選んだ行が幕の外へ出ないよう追いかける。
+                // 位置を指定しないのは、見えている行なら動かさず、
+                // 外へ出かけた時だけ最小限ずらしたいから
                 .onChange(of: selection) { _, index in
+                    guard followsSelection else { return }
+                    followsSelection = false
                     guard matches.indices.contains(index) else { return }
-                    proxy.scrollTo(matches[index].id, anchor: .center)
+                    proxy.scrollTo(matches[index].id)
                 }
             }
         }
@@ -367,6 +383,7 @@ struct TabSearchPanel: View {
     private func move(_ offset: Int) -> Bool {
         let count = matches.count
         guard count > 0 else { return true }
+        followsSelection = true
         selection = ((selection + offset) % count + count) % count
         return true
     }

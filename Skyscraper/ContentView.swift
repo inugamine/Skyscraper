@@ -3409,8 +3409,20 @@ final class TabManager: NSObject, ObservableObject {
     @Published private(set) var tabSearchFocusTrigger = 0
 
     func showTabSearch() {
+        isDirectoryVisible = false
         isTabSearchVisible = true
         tabSearchFocusTrigger &+= 1
+    }
+
+    // 館内案内板 (⌘K) を出しているか。盤は窓に一つ (Directory.swift)
+    @Published var isDirectoryVisible = false
+    // 打ち込み欄へ焦点を移す合図。(⌘K のたびに増える)
+    @Published private(set) var directoryFocusTrigger = 0
+
+    func showDirectory() {
+        isTabSearchVisible = false
+        isDirectoryVisible = true
+        directoryFocusTrigger &+= 1
     }
 
     // タブID だけを鍵に、そのタブを目の前に出す。
@@ -4403,6 +4415,20 @@ final class TabManager: NSObject, ObservableObject {
     // 履歴の控えがあればそれを使うので、開いた直後から戻るが使える
     func reopenClosed() {
         guard let closed = recentlyClosed.popLast() else { return }
+        restoreClosed(closed)
+    }
+
+    // 案内板の 4F 用。新しい順に並べた控え
+    var recentlyClosedTabs: [ClosedTab] { recentlyClosed.reversed() }
+
+    // 案内板の 4F から一枚選んで開き直す。newestIndex は新しい順の番号
+    func reopenClosed(newestIndex: Int) {
+        let index = recentlyClosed.count - 1 - newestIndex
+        guard recentlyClosed.indices.contains(index) else { return }
+        restoreClosed(recentlyClosed.remove(at: index))
+    }
+
+    private func restoreClosed(_ closed: ClosedTab) {
         guard !closed.url.isEmpty || closed.interactionState != nil else {
             addTab()
             return
@@ -7126,6 +7152,12 @@ struct ContentView: View {
         .overlay {
             if manager.isTabSearchVisible {
                 TabSearchPanel(manager: manager)
+            }
+        }
+        // 館内案内板。(⌘K、Directory.swift)
+        .overlay {
+            if manager.isDirectoryVisible {
+                DirectoryPanel(manager: manager, translator: translator)
             }
         }
         .environmentObject(bookmarks)
