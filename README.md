@@ -93,7 +93,7 @@ Safari や Chrome と同じ Web Extensions に対応しています（WebKit の
 
 ### これから
 
-- パスキー(WebAuthn) — Apple のエンタイトルメント審査待ちです
+- パスキー(WebAuthn) — Apple のエンタイトルメント審査が通りました
 
 ## 動作環境
 
