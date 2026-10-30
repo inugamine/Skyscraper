@@ -485,6 +485,17 @@ final class SkyscraperWebView: WKWebView {
     // 選んだ操作なので、門番を通さずこちらで引き取って窓を開く
     var openLinkInNewWindow: ((URL) -> Void)?
 
+    // 前に居ない窓での一回目のクリックも受け取るか。
+    // 浮かぶ小窓に載っている間だけ立てる (FloatingWindow.swift)——
+    // 他のアプリを触りながら小窓の動画を一回で止められるように。
+    // 普段の窓では立てない。窓を前に出すつもりのクリックが、
+    // ページのリンクやボタンを押してしまうから
+    var acceptsFirstMouseAlways = false
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        acceptsFirstMouseAlways || super.acceptsFirstMouse(for: event)
+    }
+
     override func rightMouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
         // ビューの上下向きと拡大率を JS 座標系に合わせる。
@@ -788,6 +799,9 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     @Published var isPinned: Bool = false
     // 疑似大画面 (シアター) 中か。サイドバーやバー類の隠しに使う
     @Published var isVideoFullscreen: Bool = false
+    // 浮かぶ小窓に出しているか (FloatingWindow.swift)。
+    // 立っている間、元の窓の器はこのタブの WebView を作らず札を出す
+    @Published var isFloating: Bool = false
     // リーダーモードが使えるページか (Readability の判定器による)
     @Published var isReaderAvailable: Bool = false
     // リーダーモード表示中か
@@ -1762,6 +1776,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         !isHome
             && !isPopupBorn
             && !isPlayingAudio
+            && !isFloating
             && !isUnloaded
             && pendingURL == nil
             && pendingInteractionState == nil
@@ -3445,8 +3460,12 @@ final class TabManager: NSObject, ObservableObject {
 
     // この管理人が載っている窓。focusHostWindow と ⇧⌘W が使う
     var hostWindow: NSWindow? {
-        selectedTab?.webView.window
-            ?? tabs.compactMap { $0.webView.window }.first
+        // 小窓に出ているタブの WebView は小窓に載っている。
+        // それを拾うと、⇧⌘W が小窓を閉じに行く
+        let onHost = tabs.filter { !$0.isFloating }
+        let selected = selectedTab.flatMap { $0.isFloating ? nil : $0 }
+        return selected?.webView.window
+            ?? onHost.compactMap { $0.webView.window }.first
     }
     // 各タブのタイトル確定を見張る購読 (タブIDごと)
     private var titleWatchers: [UUID: AnyCancellable] = [:]
@@ -3592,6 +3611,8 @@ final class TabManager: NSObject, ObservableObject {
     // 窓を閉じても SwiftUI は @StateObject を温存するので、
     // ここで手を下さない限り WebView は永遠に生き残る
     private func tearDownTabs() {
+        // この窓のタブが小窓に出ていたら戻しておく (下で一緒に片付く)
+        FloatingPlayer.shared.release(manager: self)
         for tab in tabs {
             tab.webView.stopLoading()
             tab.webView.pauseAllMediaPlayback(completionHandler: nil)
@@ -3994,6 +4015,8 @@ final class TabManager: NSObject, ObservableObject {
     // WKWebView はそのまま持ち回すので、移した先で読み込み直しは起きない。
     // 閉じたタブの控え (⇧⌘T) にも積まない
     private func detach(_ tab: Tab) -> Tab? {
+        // 小窓に出したまま別の窓へは運ばない。先に元へ戻す
+        FloatingPlayer.shared.release(tab)
         guard let idx = tabs.firstIndex(where: { $0.id == tab.id }) else { return nil }
         tabs.remove(at: idx)
         titleWatchers[tab.id] = nil
@@ -4220,6 +4243,8 @@ final class TabManager: NSObject, ObservableObject {
     // タブの中身を止めて退去させる。名簿からは外さない (呼び元の仕事)。
     // 閉じるタブと、閉じる覗き窓の両方がここを通る
     private func dismantle(_ tab: Tab) {
+        // 小窓に出ていたら先に戻す。窓だけが残らないように
+        FloatingPlayer.shared.release(tab)
         // 動画・音声の再生を確実に止めてから退去させる。
         // about:blank の読み込みだけでは非同期で、WebView がどこかに
         // 保持されて生き残った場合に音が鳴り続ける。(長時間再生したYouTube で顕著)
@@ -6601,19 +6626,29 @@ struct BrowserPane: View {
                     // BrowserPane が見張っているのがそれだけだから——
                     // 条件に t.id == tab.id が入っているので同じものを指す
                     let showsWeb = t.id == tab.id && !t.isHome && tab.loadError == nil
-                    WebView(webView: t.webView, isInteractive: showsWeb)
-                        .opacity(showsWeb ? 1 : 0)
-                        .allowsHitTesting(showsWeb)
-                        // 器を作り直したら、こちらの器も組み直させる。
-                        //
-                        // updateNSView は WKWebView の親子関係に一切触らない。
-                        // (全画面再生を壊さないための判断。詳しくは WebView の中)
-                        // だから中身を差し替えても、そこには何も届かない。
-                        // .id を変えて makeNSView からやり直させる——
-                        // 器ごと新しく作るので、付け替えをめぐる上の話とは土俵が違う
-                        .id(t.webViewGeneration)
+                    // 小窓に出ているタブは、ここで WebView を作らない。
+                    // 作ると mount が小窓から WebView を引き抜く (FloatingWindow.swift)
+                    if t.isFloating {
+                        Color.clear
+                    } else {
+                        WebView(webView: t.webView, isInteractive: showsWeb)
+                            .opacity(showsWeb ? 1 : 0)
+                            .allowsHitTesting(showsWeb)
+                            // 器を作り直したら、こちらの器も組み直させる。
+                            //
+                            // updateNSView は WKWebView の親子関係に一切触らない。
+                            // (全画面再生を壊さないための判断。詳しくは WebView の中)
+                            // だから中身を差し替えても、そこには何も届かない。
+                            // .id を変えて makeNSView からやり直させる——
+                            // 器ごと新しく作るので、付け替えをめぐる上の話とは土俵が違う
+                            .id(t.webViewGeneration)
+                    }
                 }
-                if let error = tab.loadError {
+                if tab.isFloating {
+                    FloatingPlaceholder {
+                        FloatingPlayer.shared.returnToTab()
+                    }
+                } else if let error = tab.loadError {
                     ErrorPage(
                         error: error,
                         onRetry: { tab.retryFailedLoad() },
@@ -6771,6 +6806,20 @@ struct BrowserPane: View {
 
         // 家の Cast 端末で再生するボタン。YouTube の動画ページでだけ現れる (Cast.swift)
         CastButton(tab: tab)
+
+        // 浮かぶ小窓 (FloatingWindow.swift)。音が鳴っているタブか、浮いている間だけ出る
+        if tab.isPlayingAudio || tab.isFloating {
+            Button {
+                FloatingPlayer.shared.toggle(tab, in: manager)
+            } label: {
+                Image(systemName: tab.isFloating ? "pip.exit" : "pip.enter")
+                    .font(.system(size: 13))
+                    .foregroundColor(tab.isFloating ? Deco.cream : Deco.gold)
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .help(tab.isFloating ? "Return Floating Tab" : "Float Tab")
+        }
 
         // リーダーモードボタン。本文のあるページでだけ現れる
         if tab.isReaderAvailable {

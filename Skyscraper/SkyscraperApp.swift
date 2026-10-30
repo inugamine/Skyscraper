@@ -296,6 +296,14 @@ struct BrowserCommands: Commands {
             } else {
                 Button("Pin Tab") {}.disabled(true)
             }
+            // 浮かぶ小窓。浮いているタブなら戻す (FloatingWindow.swift)
+            Button("Float Tab") {
+                if let manager, let tab = manager.selectedTab {
+                    FloatingPlayer.shared.toggle(tab, in: manager)
+                }
+            }
+            .keyboardShortcut("p", modifiers: [.command, .option])
+            .disabled(manager == nil)
             Divider()
             Button("Move Tab to New Window") { manager?.moveSelectedTabToNewWindow() }
                 .disabled(manager == nil)
