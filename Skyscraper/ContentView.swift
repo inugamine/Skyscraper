@@ -477,6 +477,14 @@ final class SkyscraperWebView: WKWebView {
     // そこで「新しいタブで開く」を選べば、もうプライベートだ
     var openLinkInPrivate: ((URL) -> Void)?
 
+    // 右クリックの「リンクを新規ウインドウで開く」の行き先 (Tab が入れる)。
+    // WebKit 任せにすると、この項目は window.open() と同じ道
+    // (createWebViewWith、navigationType は .other) を通ってくる。
+    // するとポップアップの門番が「クリックに便乗した窓」と区別できずに止め、
+    // 知らせバーの「開く」はタブで開いてしまう。利用者がはっきり
+    // 選んだ操作なので、門番を通さずこちらで引き取って窓を開く
+    var openLinkInNewWindow: ((URL) -> Void)?
+
     override func rightMouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
         // ビューの上下向きと拡大率を JS 座標系に合わせる。
@@ -497,6 +505,11 @@ final class SkyscraperWebView: WKWebView {
             case "WKMenuItemIdentifierDownloadLinkedFile":
                 item.target = self
                 item.action = #selector(downloadLinkAtLastClick(_:))
+            case "WKMenuItemIdentifierOpenLinkInNewWindow" where openLinkInNewWindow != nil:
+                // 識別子はそのまま残る。下のプライベートの項目は
+                // これを目印に差し込むので、付け替えても困らない
+                item.target = self
+                item.action = #selector(openLinkInNewWindowAtLastClick(_:))
             default:
                 break
             }
@@ -549,15 +562,23 @@ final class SkyscraperWebView: WKWebView {
     }
 
     @objc private func openLinkInPrivateAtLastClick(_ sender: Any?) {
-        evaluateJavaScript(linkAtLastClickJS) { [weak self] result, _ in
-            // http(s) だけを通す。javascript: を別の窓で開いても、
-            // 元のページの文脈が無いので何も起きない
-            guard let self,
-                  let urlString = result as? String,
+        resolveLinkAtLastClick { [weak self] url in self?.openLinkInPrivate?(url) }
+    }
+
+    @objc private func openLinkInNewWindowAtLastClick(_ sender: Any?) {
+        resolveLinkAtLastClick { [weak self] url in self?.openLinkInNewWindow?(url) }
+    }
+
+    // 右クリック位置のリンク先を、別の窓で開ける形で返す。
+    // http(s) だけを通す。javascript: を別の窓で開いても、
+    // 元のページの文脈が無いので何も起きない
+    private func resolveLinkAtLastClick(_ completion: @escaping (URL) -> Void) {
+        evaluateJavaScript(linkAtLastClickJS) { result, _ in
+            guard let urlString = result as? String,
                   let url = URL(string: urlString),
                   let scheme = url.scheme?.lowercased(),
                   scheme == "http" || scheme == "https" else { return }
-            self.openLinkInPrivate?(url)
+            completion(url)
         }
     }
 
@@ -822,6 +843,9 @@ final class Tab: NSObject, ObservableObject, Identifiable {
 
     // 右クリックの「リンクをプライベートウインドウで開く」の連絡先 (TabManager が入れる)
     var openInPrivateWindow: ((URL) -> Void)?
+
+    // 右クリックの「リンクを新規ウインドウで開く」の連絡先 (TabManager が入れる)
+    var openInNewWindow: ((URL) -> Void)?
 
     // window.open() で新しい器を求められた時の連絡先 (TabManager が入れる)
     // 返された WKWebView をそのまま WebKit に渡す
@@ -1476,6 +1500,11 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         // プライベートのタブでは繋がない (項目ごと出さない)
         (webView as? SkyscraperWebView)?.openLinkInPrivate = isPrivate ? nil : { [weak self] url in
             self?.openInPrivateWindow?(url)
+        }
+        // 右クリックの「リンクを新規ウインドウで開く」。
+        // プライベートのタブでも繋ぐ (行き先は新しいプライベートウィンドウ)
+        (webView as? SkyscraperWebView)?.openLinkInNewWindow = { [weak self] url in
+            self?.openInNewWindow?(url)
         }
 
         // トラックパッドの2本指スワイプで戻る／進む
@@ -3282,6 +3311,9 @@ final class TabManager: NSObject, ObservableObject {
     // 新しいプライベートウィンドウに最初に開かせる URL。
     // 右クリックの「リンクをプライベートウインドウで開く」が置いていく
     private static var pendingPrivateURL: String?
+    // 新しい普通の窓に最初に開かせる URL とプロファイル。
+    // 右クリックの「リンクを新規ウインドウで開く」が置いていく
+    private static var pendingNewWindow: (url: String, profile: UUID?)?
 
     let isPrivate: Bool
 
@@ -3603,6 +3635,13 @@ final class TabManager: NSObject, ObservableObject {
             reopen(reopened)
             return
         }
+        // 右クリックの「リンクを新規ウインドウで開く」で生まれた窓。
+        // これも復元の待ち行列には手を付けない
+        if !isPrivate, let pending = Self.pendingNewWindow {
+            Self.pendingNewWindow = nil
+            addTab(url: pending.url, profile: pending.profile)
+            return
+        }
         // プライベートウィンドウは前回の続きから始めない。
         // 保存もしないので、復元の待ち行列にも手を付けない——
         // ここで一つ取ってしまうと、本来開くはずの普通の窓の分が消える
@@ -3810,6 +3849,10 @@ final class TabManager: NSObject, ObservableObject {
         // 右クリックの「リンクをプライベートウインドウで開く」
         tab.openInPrivateWindow = { [weak self] url in
             self?.openInPrivateWindow(url)
+        }
+        // 右クリックの「リンクを新規ウインドウで開く」。プロファイルも継ぐ
+        tab.openInNewWindow = { [weak self] url in
+            self?.openInNewWindow(url, profile: profile)
         }
         // window.open() で器を求められたら、ここで起こして返す
         tab.openPopup = { [weak self] configuration in
@@ -4037,6 +4080,19 @@ final class TabManager: NSObject, ObservableObject {
         }
         Self.pendingPrivateURL = url.absoluteString
         openPrivateWindow()
+    }
+
+    // 右クリックの「リンクを新規ウインドウで開く」。
+    // こちらは既存の窓を探さず、必ず新しく開く (Safari・Chrome と同じ)。
+    // プライベートウィンドウから選ばれたら、行き先も新しいプライベートウィンドウ
+    func openInNewWindow(_ url: URL, profile: UUID?) {
+        if isPrivate {
+            Self.pendingPrivateURL = url.absoluteString
+            openPrivateWindow()
+            return
+        }
+        Self.pendingNewWindow = (url.absoluteString, profile)
+        newWindowRequests += 1
     }
 
     func closeTab(_ tab: Tab) {
