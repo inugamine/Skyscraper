@@ -255,6 +255,15 @@ enum Directory {
                     list.append(action("Show Reader", symbol: "book") { page.toggleReader() })
                 }
             }
+            if page.isFloating {
+                list.append(action("Return Floating Tab", symbol: "pip.exit", shortcut: "⌥⌘P") {
+                    FloatingPlayer.shared.returnToTab(reveal: true)
+                })
+            } else {
+                list.append(action("Float Tab", symbol: "pip.enter", shortcut: "⌥⌘P") {
+                    FloatingPlayer.shared.toggle(page, in: manager)
+                })
+            }
             list.append(action("Find…", symbol: "magnifyingglass", shortcut: "⌘F") {
                 page.showFindBar()
             })
