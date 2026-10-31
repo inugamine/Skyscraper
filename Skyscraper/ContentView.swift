@@ -7233,6 +7233,9 @@ struct ContentView: View {
         // Deco.ink は @Observable の配色を読むので、配色を替えれば帯も追って変わる
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         .containerBackground(Deco.ink, for: .window)
+        // 透かした帯は空いた所のダブルクリックを拾わなくなるので、見張りを置く。
+        // 窓を知るための目印なので、クリックは受けない (TitlebarClickArea.swift)
+        .background { TitlebarClickArea() }
         // タブ検索の盤。(⇧⌘A)
         // 盤は全ての窓のタブを並べるが、出すのは押された窓だけだ
         .overlay {
