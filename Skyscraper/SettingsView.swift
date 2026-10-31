@@ -21,6 +21,7 @@ struct SettingsView: View {
     @AppStorage(TabManager.restoreSessionKey) private var restoresSession = true
     @AppStorage(SleepBlocker.enabledKey) private var preventsSleepDuringVideo = true
     @AppStorage(BookmarkSync.enabledKey) private var syncsBookmarks = true
+    @AppStorage(TabSync.enabledKey) private var syncsTabs = true
     @AppStorage(TabManager.autoUnloadKey) private var autoUnloadMinutes = 30
     @AppStorage(HTTPSFirstStore.enabledKey) private var prefersHTTPS = true
     @AppStorage(CleanLink.enabledKey) private var cleansLinks = true
@@ -371,6 +372,26 @@ struct SettingsView: View {
             // 入れ直した直後は、手元と向こうが食い違っている見込みが高い。
             // 切られた時は待ちの列を破棄させる
             bookmarks.syncSettingChanged()
+        }
+
+        // ── 開いているタブの見せ合い ── (TabSync.swift)
+        Toggle(isOn: $syncsTabs) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Share open tabs across your Macs")
+                    .font(.system(size: 12, design: .serif))
+                    .foregroundColor(Deco.cream)
+                Text("The titles and addresses of your open tabs are saved to your iCloud account, and the tabs open on your other Macs appear in the lobby. Tabs in private windows are never shared.")
+                    .font(.system(size: 10, design: .serif))
+                    .foregroundColor(Deco.dimGold)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .toggleStyle(.switch)
+        .tint(Deco.gold)
+        .padding(.bottom, 22)
+        .onChange(of: syncsTabs) { _, _ in
+            // 切った時はこの Mac の分を iCloud から消す
+            TabSync.shared.settingChanged()
         }
 
         // ══ タブ ══

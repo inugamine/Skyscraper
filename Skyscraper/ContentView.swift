@@ -3794,6 +3794,9 @@ final class TabManager: NSObject, ObservableObject {
     // スクロールのたびに URL を書き換えるので、都度書くと無駄が多い
     private func scheduleSave() {
         guard didRestore else { return }
+        // 開いているタブが動いた。他の Mac へも知らせる (TabSync.swift)。
+        // プライベートの窓から呼ばれても、送る一覧には載らない
+        TabSync.shared.scheduleUpload()
         saveTask?.cancel()
         saveTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 400_000_000)
@@ -4715,6 +4718,11 @@ struct NewTabPage: View {
             }
             .padding(.top, 10)
 
+            // 他の Mac で開いているタブ (TabSync.swift)。
+            // 他の Mac が無ければ何も出ず、これまでのロビーと同じ姿のまま
+            RemoteTabsSection(tab: tab)
+                .padding(.top, 14)
+
             Spacer()
 
             LobbyBottomFan()
@@ -4723,6 +4731,9 @@ struct NewTabPage: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Deco.ink)
         .overlay { LobbyFrame() }
+        // ロビーを開くたびに他の Mac の様子を聞く。
+        // 三十秒以内に聞いたばかりなら手元の分で済ませる
+        .onAppear { TabSync.shared.refreshIfStale() }
     }
 }
 
