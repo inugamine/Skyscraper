@@ -35,7 +35,9 @@ struct ElevatorDial: View {
         .frame(width: 26, height: 15)
         .accessibilityElement()
         .accessibilityLabel(Text("Loading"))
-        .accessibilityValue(Text("\(Int(needle * 100))%"))
+        // 進み具合の読み上げ。% の付け方は言語で違うので、書式の道具に任せる
+        // (文字で "\(数)%" と組むと、String Catalog が訳し分けられないと警告する)
+        .accessibilityValue(Text(needle, format: .percent.precision(.fractionLength(0))))
         .onAppear {
             needle = isLoading ? max(progress, 0.04) : 1
         }
