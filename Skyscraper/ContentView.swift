@@ -477,13 +477,37 @@ final class SkyscraperWebView: WKWebView {
     // そこで「新しいタブで開く」を選べば、もうプライベートだ
     var openLinkInPrivate: ((URL) -> Void)?
 
-    // 右クリックの「リンクを新規ウインドウで開く」の行き先 (Tab が入れる)。
-    // WebKit 任せにすると、この項目は window.open() と同じ道
+    // 右クリックの「〜を新規ウインドウで開く」一式。
+    // WebKit 任せにすると、これらは window.open() と同じ道
     // (createWebViewWith、navigationType は .other) を通ってくる。
     // するとポップアップの門番が「クリックに便乗した窓」と区別できずに止め、
-    // 知らせバーの「開く」はタブで開いてしまう。利用者がはっきり
-    // 選んだ操作なので、門番を通さずこちらで引き取って窓を開く
-    var openLinkInNewWindow: ((URL) -> Void)?
+    // 知らせバーの「開く」はタブで開いてしまう。
+    //
+    // 以前はリンクの項目だけ自前の処理に差し替えていたが、
+    // 画像の上 (X の写真など) では WebKit は別の項目を出すので素通りしていた。
+    // 項目ごとに行き先を自前で探すのはやめ、選ばれたという印だけ付けて
+    // 元の処理へ回す。行き先の解決は WebKit に任せるので、枠の中のリンクや
+    // blob: の画像でも WebKit 自身と同じものが開く
+    private static let newWindowItemIDs: Set<String> = [
+        "WKMenuItemIdentifierOpenLinkInNewWindow",
+        "WKMenuItemIdentifierOpenImageInNewWindow",
+        "WKMenuItemIdentifierOpenMediaInNewWindow",
+        "WKMenuItemIdentifierOpenFrameInNewWindow",
+    ]
+    // 付け替えた項目の、元の行き先。メニューを開くたびに作り直す
+    private var forwardedNewWindowItems: [ObjectIdentifier: (target: AnyObject?, action: Selector?)] = [:]
+    // 「新規ウインドウで開く」が選ばれた時刻。createWebViewWith が一度だけ使う
+    private var newWindowRequestedAt: Date?
+
+    // 直前に「新規ウインドウで開く」が選ばれていたか。読んだら印は消える。
+    // WebKit からの呼び戻しはすぐ来るので、古い印 (2秒超) は無かったことにする——
+    // 行き先が開けず呼び戻しが来なかった場合に、後の window.open() を
+    // 素通りさせないため
+    func consumeNewWindowRequest() -> Bool {
+        guard let at = newWindowRequestedAt else { return false }
+        newWindowRequestedAt = nil
+        return Date().timeIntervalSince(at) < 2
+    }
 
     // 前に居ない窓での一回目のクリックも受け取るか。
     // 浮かぶ小窓に載っている間だけ立てる (FloatingWindow.swift)——
@@ -508,7 +532,16 @@ final class SkyscraperWebView: WKWebView {
 
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)
+        forwardedNewWindowItems.removeAll()
         for item in menu.items {
+            if let id = item.identifier?.rawValue, Self.newWindowItemIDs.contains(id) {
+                // 識別子はそのまま残る。下のプライベートの項目は
+                // これを目印に差し込むので、付け替えても困らない
+                forwardedNewWindowItems[ObjectIdentifier(item)] = (item.target, item.action)
+                item.target = self
+                item.action = #selector(forwardNewWindowItem(_:))
+                continue
+            }
             switch item.identifier?.rawValue {
             case "WKMenuItemIdentifierDownloadImage":
                 item.target = self
@@ -516,11 +549,6 @@ final class SkyscraperWebView: WKWebView {
             case "WKMenuItemIdentifierDownloadLinkedFile":
                 item.target = self
                 item.action = #selector(downloadLinkAtLastClick(_:))
-            case "WKMenuItemIdentifierOpenLinkInNewWindow" where openLinkInNewWindow != nil:
-                // 識別子はそのまま残る。下のプライベートの項目は
-                // これを目印に差し込むので、付け替えても困らない
-                item.target = self
-                item.action = #selector(openLinkInNewWindowAtLastClick(_:))
             default:
                 break
             }
@@ -587,8 +615,14 @@ final class SkyscraperWebView: WKWebView {
         resolveLinkAtLastClick { [weak self] url in self?.openLinkInPrivate?(url) }
     }
 
-    @objc private func openLinkInNewWindowAtLastClick(_ sender: Any?) {
-        resolveLinkAtLastClick { [weak self] url in self?.openLinkInNewWindow?(url) }
+    // 印を付けてから WebKit 元来の処理へ回す。
+    // WebKit は項目の representedObject で何を選ばれたか知るので、
+    // sender は受け取った項目をそのまま渡す
+    @objc private func forwardNewWindowItem(_ sender: NSMenuItem) {
+        guard let original = forwardedNewWindowItems[ObjectIdentifier(sender)],
+              let action = original.action else { return }
+        newWindowRequestedAt = Date()
+        _ = NSApp.sendAction(action, to: original.target, from: sender)
     }
 
     // 札を剥がしてコピー。実体は CleanLink.swift
@@ -880,8 +914,9 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // 右クリックの「リンクをプライベートウインドウで開く」の連絡先 (TabManager が入れる)
     var openInPrivateWindow: ((URL) -> Void)?
 
-    // 右クリックの「リンクを新規ウインドウで開く」の連絡先 (TabManager が入れる)
-    var openInNewWindow: ((URL) -> Void)?
+    // 右クリックの「〜を新規ウインドウで開く」で器を求められた時の連絡先 (TabManager が入れる)。
+    // openPopup と同じく、返された WKWebView をそのまま WebKit に渡す。違いは置く先が新しい窓なこと
+    var openPopupWindow: ((WKWebViewConfiguration) -> WKWebView?)?
 
     // window.open() で新しい器を求められた時の連絡先 (TabManager が入れる)
     // 返された WKWebView をそのまま WebKit に渡す
@@ -1543,11 +1578,6 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         // プライベートのタブでは繋がない (項目ごと出さない)
         (webView as? SkyscraperWebView)?.openLinkInPrivate = isPrivate ? nil : { [weak self] url in
             self?.openInPrivateWindow?(url)
-        }
-        // 右クリックの「リンクを新規ウインドウで開く」。
-        // プライベートのタブでも繋ぐ (行き先は新しいプライベートウィンドウ)
-        (webView as? SkyscraperWebView)?.openLinkInNewWindow = { [weak self] url in
-            self?.openInNewWindow?(url)
         }
 
         // トラックパッドの2本指スワイプで戻る／進む
@@ -3149,6 +3179,14 @@ extension Tab: WKUIDelegate {
                  windowFeatures: WKWindowFeatures) -> WKWebView? {
         let requestedURL = navigationAction.request.url?.absoluteString
 
+        // 右クリックの「〜を新規ウインドウで開く」。利用者がはっきり選んだ操作なので
+        // 門番を通さず、WebKit が用意した器を新しい窓に置いて返す。
+        // 器ごと渡すので、行き先が何であれ WebKit 自身と同じものが開く
+        if (webView as? SkyscraperWebView)?.consumeNewWindowRequest() == true,
+           let newWindowView = openPopupWindow?(configuration) {
+            return newWindowView
+        }
+
         // 利用者が「新しいタブで開け」と明示したか。
         //
         // 素直なページなら ⌘クリックは decidePolicyFor で拾えるが、
@@ -3398,9 +3436,6 @@ final class TabManager: NSObject, ObservableObject {
     // 新しいプライベートウィンドウに最初に開かせる URL。
     // 右クリックの「リンクをプライベートウインドウで開く」が置いていく
     private static var pendingPrivateURL: String?
-    // 新しい普通の窓に最初に開かせる URL とプロファイル。
-    // 右クリックの「リンクを新規ウインドウで開く」が置いていく
-    private static var pendingNewWindow: (url: String, profile: UUID?)?
 
     let isPrivate: Bool
 
@@ -3741,13 +3776,6 @@ final class TabManager: NSObject, ObservableObject {
             reopen(reopened)
             return
         }
-        // 右クリックの「リンクを新規ウインドウで開く」で生まれた窓。
-        // これも復元の待ち行列には手を付けない
-        if !isPrivate, let pending = Self.pendingNewWindow {
-            Self.pendingNewWindow = nil
-            addTab(url: pending.url, profile: pending.profile)
-            return
-        }
         // プライベートウィンドウは前回の続きから始めない。
         // 保存もしないので、復元の待ち行列にも手を付けない——
         // ここで一つ取ってしまうと、本来開くはずの普通の窓の分が消える
@@ -3969,9 +3997,9 @@ final class TabManager: NSObject, ObservableObject {
         tab.openInPrivateWindow = { [weak self] url in
             self?.openInPrivateWindow(url)
         }
-        // 右クリックの「リンクを新規ウインドウで開く」。プロファイルも継ぐ
-        tab.openInNewWindow = { [weak self] url in
-            self?.openInNewWindow(url, profile: profile)
+        // 右クリックの「〜を新規ウインドウで開く」。プロファイルも継ぐ
+        tab.openPopupWindow = { [weak self] configuration in
+            self?.addPopupWindow(configuration: configuration, profile: profile)
         }
         // window.open() で器を求められたら、ここで起こして返す
         tab.openPopup = { [weak self] configuration in
@@ -4203,17 +4231,25 @@ final class TabManager: NSObject, ObservableObject {
         openPrivateWindow()
     }
 
-    // 右クリックの「リンクを新規ウインドウで開く」。
-    // こちらは既存の窓を探さず、必ず新しく開く (Safari・Chrome と同じ)。
-    // プライベートウィンドウから選ばれたら、行き先も新しいプライベートウィンドウ
-    func openInNewWindow(_ url: URL, profile: UUID?) {
-        if isPrivate {
-            Self.pendingPrivateURL = url.absoluteString
-            openPrivateWindow()
-            return
-        }
-        Self.pendingNewWindow = (url.absoluteString, profile)
+    // 右クリックの「〜を新規ウインドウで開く」。
+    // WebKit には器をこの場で同期に返さねばならないが、窓を開くのは View の仕事で
+    // 後から来る。だからタブだけ先に作り、タブを新しい窓へ移す時と同じ
+    // 預かり所 (pendingAdoption) に置く。中身は WebKit が流し込むので、
+    // 窓が開く前から読み込みは進む。既存の窓は探さず、必ず新しく開く (Safari・Chrome と同じ)。
+    // プライベートウィンドウから選ばれたら、受け取る窓もプライベートにする——
+    // そうしないと moveTab と同じ食い違い (見た目と置き場のずれ) が起きる
+    func addPopupWindow(configuration: WKWebViewConfiguration,
+                        profile: UUID? = nil) -> WKWebView {
+        let tab = makeTab(url: nil, popupConfiguration: configuration, profile: profile)
+        // makeTab はこの管理人に繋いでしまう。このタブは並べないので、
+        // 見張りだけ外しておく (連絡先は受け取った窓の adopt が張り替える)
+        titleWatchers[tab.id] = nil
+        urlWatchers[tab.id] = nil
+        fullscreenWatchers[tab.id] = nil
+        Self.pendingAdoption = tab
+        if isPrivate { Self.pendingPrivate = true }
         newWindowRequests += 1
+        return tab.webView
     }
 
     func closeTab(_ tab: Tab) {
