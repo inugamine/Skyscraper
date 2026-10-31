@@ -11,15 +11,13 @@
 //  これにより ZStack 常時マウント・⌘1〜9 の番号選択などの既存挙動を壊さない。
 //
 //  言語まわりの注意：Foundation Models はプロンプトに非対応言語が混ざると
-//  丸ごと拒否する。@ハンドルなどのローマ字ノイズが外国語と誤判定されがちなので、
-//  「判定する文」と「モデルに送る文」を必ず同じ掃除（sanitize）を通した文にする。
-//  ここが食い違うと、こちらの判定で通した行が Apple 側で弾かれ続ける。
+//  丸ごと拒否する。掃除 (sanitize) と言語判定は ModelLanguage.swift にある
+//  (セオドアと共用)。判定する文と送る文は必ず同じ掃除を通すこと。
 //
 
 import Foundation
 import Combine
 import WebKit
-import NaturalLanguage
 import FoundationModels
 
 // モデルに出力させる構造 (guided generation)。
@@ -140,7 +138,7 @@ final class TabGrouper: ObservableObject {
         // 通常は緩い判定 (確信度が高いときだけ弾く) で除外しすぎを防ぐが、
         // 過去に Apple 側で拒否された実績があれば最初から厳しい判定を使う
         let useStrict = preferStrictFilter
-        let candidates = eligible.filter { isSupportedLanguage($0.pageTitle, strict: useStrict) }
+        let candidates = eligible.filter { ModelLanguage.isSupported($0.pageTitle, strict: useStrict) }
         let excluded = eligible.count - candidates.count
         print("TabGrouper: start (candidates: \(candidates.count), excluded by language: \(excluded), strict: \(useStrict), pinned: \(pinned.count), minimum: \(minimumTabs))")
 
@@ -171,7 +169,7 @@ final class TabGrouper: ObservableObject {
                 print("TabGrouper: failed even with strict filter: \(error)")
                 return
             }
-            let strict = eligible.filter { isSupportedLanguage($0.pageTitle, strict: true) }
+            let strict = eligible.filter { ModelLanguage.isSupported($0.pageTitle, strict: true) }
             guard strict.count >= minimumTabs, strict.count < candidates.count else {
                 print("TabGrouper: failed: \(error)")
                 return
@@ -196,7 +194,7 @@ final class TabGrouper: ObservableObject {
         // ホスト名だけの行にする
         let listing = candidates.enumerated().map { idx, tab in
             let host = tab.webView.url?.host() ?? ""
-            let title = sanitize(tab.pageTitle)
+            let title = ModelLanguage.sanitize(tab.pageTitle)
             return title.isEmpty
                 ? "\(idx): (\(host))"
                 : "\(idx): \(title) (\(host))"
@@ -237,69 +235,5 @@ final class TabGrouper: ObservableObject {
         }
         assignments = newAssignments
         print("TabGrouper: done (\(response.content.groups.count) groups)")
-    }
-
-    // @ハンドル・URLなど、言語判定を狂わせるノイズを取り除く。
-    // 言語判定 (isSupportedLanguage) とモデルへの送信文の両方で
-    // 必ずこれを通し、判定対象と実際に送る文を一致させる
-    private func sanitize(_ text: String) -> String {
-        var cleaned = text
-        cleaned = cleaned.replacingOccurrences(
-            of: "@[A-Za-z0-9_]+", with: " ", options: .regularExpression)
-        cleaned = cleaned.replacingOccurrences(
-            of: "https?://\\S+", with: " ", options: .regularExpression)
-        cleaned = cleaned.replacingOccurrences(
-            of: "\\s+", with: " ", options: .regularExpression)
-        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    // 言語判定に渡す下駄 (事前確率)。モデルの対応言語を重めにする。
-    // "Home - Instapaper" のような短い英語の題がカタルーニャ語 (ca 0.64) と
-    // 読み違えられ、毎回外されていた (2026-09 実測)。迷う程度の短い題は
-    // 対応言語側に倒し、文字種から明らかな外国語は下駄では覆らない想定。
-    // 中国語だけは NLLanguage が簡体・繁体に分かれるので両方に付ける
-    private lazy var languageHints: [NLLanguage: Double] = {
-        var hints: [NLLanguage: Double] = [:]
-        for language in SystemLanguageModel.default.supportedLanguages {
-            guard let code = language.languageCode?.identifier else { continue }
-            if code == "zh" {
-                hints[.simplifiedChinese] = 1.0
-                hints[.traditionalChinese] = 1.0
-            } else {
-                hints[NLLanguage(rawValue: code)] = 1.0
-            }
-        }
-        return hints
-    }()
-
-    // 下駄を履かせた判定器を作り、sanitize 済みの文を読ませる
-    private func makeRecognizer(for text: String) -> NLLanguageRecognizer {
-        let recognizer = NLLanguageRecognizer()
-        recognizer.languageHints = languageHints
-        recognizer.processString(sanitize(text))
-        return recognizer
-    }
-
-    // タイトルの言語がモデルの対応言語かどうか (sanitize 済みの文で判定)。
-    // strict = false：確信度が高く非対応と分かったときだけ弾く(通常運転)
-    // strict = true ：非対応が最有力なら弾く (拒否された実績があるとき)
-    private func isSupportedLanguage(_ text: String, strict: Bool) -> Bool {
-        let cleaned = sanitize(text)
-        guard !cleaned.isEmpty else { return true }
-
-        let recognizer = makeRecognizer(for: cleaned)
-        guard let (language, confidence) = recognizer.languageHypotheses(withMaximum: 1).first else {
-            return true
-        }
-        // 短いタイトルの言語判定は揺れるので、緩い判定では
-        // 確信度 0.6 超のときだけ除外の対象にする
-        if !strict && confidence <= 0.6 { return true }
-
-        let code = Locale.Language(identifier: language.rawValue).languageCode?.identifier
-            ?? language.rawValue
-        let supportedCodes = Set(
-            SystemLanguageModel.default.supportedLanguages.compactMap { $0.languageCode?.identifier }
-        )
-        return supportedCodes.contains(code)
     }
 }
