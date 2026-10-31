@@ -96,10 +96,35 @@ enum IncomingURL {
 
 // MARK: - AppKit の受け口
 
-// SwiftUI の App に差す代理人。今のところ仕事はこれ一つだ。
-// 増やす時は、ここが何でも屋にならないよう気を付けること
+// SwiftUI の App に差す代理人。
+// 仕事は外から来た URL の受け取りと、プッシュ通知の取り次ぎの二つ。
+// 増やす時は、ここが何でも屋にならないよう気を付けること——
+// 中身は必ず持ち場の型へ渡し、ここには書かない
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func application(_ application: NSApplication, open urls: [URL]) {
         IncomingURL.receive(urls)
+    }
+
+    // ── プッシュ通知 ── (TabSync.swift)
+    //
+    // 他の Mac がタブを送ったら、iCloud が知らせを寄越す。
+    // 中身の無い「起こすだけ」の知らせなので、利用者に許可を訊く盤は出ない
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.registerForRemoteNotifications()
+    }
+
+    func application(_ application: NSApplication,
+                     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        TabSync.shared.remoteNotificationsRegistered()
+    }
+
+    func application(_ application: NSApplication,
+                     didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        TabSync.shared.remoteNotificationsFailed(error)
+    }
+
+    func application(_ application: NSApplication,
+                     didReceiveRemoteNotification userInfo: [String: Any]) {
+        TabSync.shared.handleRemoteNotification(userInfo)
     }
 }

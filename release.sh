@@ -247,7 +247,8 @@ fi
 for key in \
     com.apple.developer.icloud-services \
     com.apple.developer.icloud-container-identifiers \
-    com.apple.developer.web-browser.public-key-credential
+    com.apple.developer.web-browser.public-key-credential \
+    com.apple.developer.aps-environment
 do
     if ! echo "$ECHO_ENT" | grep -q "$key"; then
         echo "エラー: 署名に $key が乗っていない"
@@ -256,7 +257,7 @@ do
         exit 1
     fi
 done
-echo "  iCloud・パスキーの権限 OK"
+echo "  iCloud・パスキー・プッシュ通知の権限 OK"
 
 # ── 資源へのアクセス権 ──
 #
