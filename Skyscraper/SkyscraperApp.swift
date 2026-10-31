@@ -102,6 +102,10 @@ struct SkyscraperApp: App {
         // 古びた分を捨て、枚数を上限に収める。
         // 中身は別スレッドへ逃げているので、起動は待たされない
         FaviconStore.shared.pruneOnLaunch()
+
+        // 他の Mac とのタブの見せ合い (TabSync.swift)。
+        // 手前に戻るたびに取りに行く見張りを立てる
+        TabSync.shared.start()
     }
 
     var body: some Scene {
