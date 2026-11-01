@@ -1147,7 +1147,48 @@ final class Tab: NSObject, ObservableObject, Identifiable {
             let lastState = null;
             let scanScheduled = false;
             let reportScheduled = false;
-            let muted = false;
+            // ミュート中のタブなら、didCommit で先に旗が立っている。
+            // この仕掛けは atDocumentEnd で入るので、旗が無いと読み込み終わり
+            // (Swift 側の貼り直し) までの間、自動再生が音を出してしまう
+            let muted = window.__skyscraperInitialMuted === true;
+
+            // ── タブのミュート中は、ページに音を開けさせない ──
+            //
+            // 開けられてから閉め直す (volumechange) やり方では、閉め直すまでの
+            // 数ミリ秒が「ぷつっ」と漏れる。YouTube の 24 時間配信のように
+            // プレーヤーが何度も自分で音を開け直す動画では、それが繰り返し聞こえた。
+            // なので muted の書き込み口そのものに門番を立て、タブのミュート中に
+            // ページが false を書いても素通しせず、「ページは音を出したがっている」とだけ覚える。
+            //
+            // 読み出しには、ページが望んだ値を返す。本物の値 (true) を返すと、
+            // プレーヤーが「まだ黙っている」と見て開け直しを延々繰り返すため。
+            // こちらの見張り自身は本物の値を見る (nativeMuted)
+            const mutedDescriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'muted');
+            const nativeMuted = element => mutedDescriptor.get.call(element);
+            // タブのミュートを掛ける時はこちらを使う (ページの望みの控えを書き換えない)
+            const hush = element => {
+                if (!nativeMuted(element)) { mutedDescriptor.set.call(element, true); }
+            };
+            Object.defineProperty(HTMLMediaElement.prototype, 'muted', {
+                configurable: true,
+                enumerable: mutedDescriptor.enumerable,
+                get() {
+                    if (muted && this.__skyscraperPageMuted !== undefined) {
+                        return this.__skyscraperPageMuted;
+                    }
+                    return mutedDescriptor.get.call(this);
+                },
+                set(value) {
+                    if (muted) {
+                        // タブのミュート中：望みだけ控え、本物は黙らせたまま
+                        this.__skyscraperPageMuted = !!value;
+                        mutedDescriptor.set.call(this, true);
+                        return;
+                    }
+                    this.__skyscraperPageMuted = undefined;
+                    mutedDescriptor.set.call(this, value);
+                }
+            });
 
             // ── 自動再生の音を黙らせる番人 ──
             // X（Twitter）は「ミュート解除」の設定を覚えていて、スクロールで
@@ -1372,20 +1413,24 @@ final class Tab: NSObject, ObservableObject, Identifiable {
                 if (!element.muted) { element.muted = true; }
             };
 
+            const muteHoldLimit = 60;
+
             const applyMuted = () => {
                 document.querySelectorAll('audio, video').forEach(element => {
+                    element.__skyscraperMuteHolds = 0;
                     if (muted) {
-                        element.muted = true;
+                        hush(element);
                     } else if (!autoplayGuard || element.__skyscraperUnmuteApproved) {
-                        // 番人が働く場では、本人が外した要素にだけ音を戻す
-                        element.muted = false;
+                        // 番人が働く場では、本人が外した要素にだけ音を戻す。
+                        // ミュート中にページ自身が「黙りたい」と書いていたなら、その望みを通す
+                        element.muted = element.__skyscraperPageMuted === true;
                     }
                 });
             };
 
             const currentState = () => {
                 return Array.from(document.querySelectorAll('audio, video')).some(element => {
-                    return !element.paused && !element.ended && !element.muted && element.volume > 0;
+                    return !element.paused && !element.ended && !nativeMuted(element) && element.volume > 0;
                 });
             };
 
@@ -1409,8 +1454,30 @@ final class Tab: NSObject, ObservableObject, Identifiable {
                 if (element.__skyscraperMediaObserverAttached) { return; }
                 element.__skyscraperMediaObserverAttached = true;
                 // ミュート中に現れた・再生を始めた要素にもミュートを適用する
-                if (muted) { element.muted = true; }
-                element.addEventListener('play', () => { if (muted) { element.muted = true; } }, true);
+                if (muted) { hush(element); }
+                element.addEventListener('play', () => { if (muted) { hush(element); } }, true);
+                element.addEventListener('playing', () => { if (muted) { hush(element); } }, true);
+
+                // 門番 (muted の書き込み口) をすり抜けて音が開いた時の、最後の砦。
+                // 普通はここまで来ない
+                //
+                // 張り合いが止まらない相手に備えて回数に上限を設ける。ただし数えるのは
+                // 短い間 (1 秒) に立て続けに来た分だけ——24 時間配信のように
+                // 何時間もかけて少しずつ溜まった回数で、見張りを降りてはいけない
+                element.addEventListener('volumechange', () => {
+                    if (!muted || nativeMuted(element)) { return; }
+                    const now = Date.now();
+                    if (now - (element.__skyscraperMuteHoldAt || 0) > 1000) {
+                        element.__skyscraperMuteHolds = 0;
+                    }
+                    element.__skyscraperMuteHoldAt = now;
+                    element.__skyscraperMuteHolds = (element.__skyscraperMuteHolds || 0) + 1;
+                    if (element.__skyscraperMuteHolds > muteHoldLimit) { return; }
+                    hush(element);
+                }, true);
+                element.addEventListener('emptied', () => {
+                    element.__skyscraperMuteHolds = 0;
+                }, true);
 
                 if (autoplayGuard) {
                     // 現れたばかりの要素は、まず黙らせる
@@ -1454,6 +1521,32 @@ final class Tab: NSObject, ObservableObject, Identifiable {
                 });
             };
 
+            // play() を呼ばれた瞬間に黙らせる。
+            // new Audio() のように DOM に入らない要素は scan では見つからないし、
+            // 生えた直後に再生を始める要素は scan (250ms 後) を待っていられない
+            const originalPlay = HTMLMediaElement.prototype.play;
+            HTMLMediaElement.prototype.play = function () {
+                if (muted) {
+                    hush(this);
+                    attach(this);
+                }
+                return originalPlay.apply(this, arguments);
+            };
+
+            // ミュート中は、生えた要素をその場で捕まえる (scan の 250ms を待たない)。
+            // 全体を探し直すと YouTube のように DOM がよく動くページで重いので、
+            // 足された所だけを見る
+            const attachAdded = records => {
+                if (!muted) { return; }
+                for (const record of records) {
+                    for (const node of record.addedNodes) {
+                        if (node.nodeType !== Node.ELEMENT_NODE) { continue; }
+                        if (node.matches('audio, video')) { attach(node); }
+                        node.querySelectorAll('audio, video').forEach(attach);
+                    }
+                }
+            };
+
             const scan = () => {
                 scanScheduled = false;
                 document.querySelectorAll('audio, video').forEach(attach);
@@ -1485,7 +1578,10 @@ final class Tab: NSObject, ObservableObject, Identifiable {
                     }, true);
                 });
             }
-            new MutationObserver(scheduleScan).observe(document.documentElement, { childList: true, subtree: true });
+            new MutationObserver(records => {
+                attachAdded(records);
+                scheduleScan();
+            }).observe(document.documentElement, { childList: true, subtree: true });
             document.addEventListener('visibilitychange', scheduleReport, true);
             scan();
         })();
@@ -3029,6 +3125,11 @@ extension Tab: WKNavigationDelegate {
         flushPasswordCandidate()
         // 認証を通して中身が届いた──打ったものは正しかった
         httpAuth.noteNavigationSucceeded()
+        // ミュート中のタブで新しいページが始まった。
+        // 音の見張り (atDocumentEnd) が入った時点で、最初から黙っていられるよう旗を立てる
+        if isMuted {
+            webView.evaluateJavaScript("window.__skyscraperInitialMuted = true;")
+        }
     }
 
     // 画像や CSS だけが認証を求める作りもある。
