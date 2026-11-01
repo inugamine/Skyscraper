@@ -218,7 +218,8 @@ enum Directory {
         }
     }
 
-    private static func actions(_ context: DirectoryContext) -> [DirectoryEntry] {
+    // セオドア (Theodore.swift) もこの一覧から選ぶ
+    static func actions(_ context: DirectoryContext) -> [DirectoryEntry] {
         let manager = context.manager
         let tab = manager.selectedTab
         // ロビー (新規タブの盤) ではページに働きかける操作を出さない
@@ -689,7 +690,7 @@ struct DirectoryPanel: View {
                 .foregroundColor(Deco.cream)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if case .proposeClose(_, let tabs, let keptPinned) = theodore.state {
+            if let tabs = theodore.proposedTabs {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(tabs) { item in
@@ -718,8 +719,8 @@ struct DirectoryPanel: View {
                 // 枚数が少なければ詰め、多ければ巻物にする
                 .frame(height: min(CGFloat(tabs.count) * 36, 240))
 
-                if keptPinned > 0 {
-                    Text(verbatim: TheodoreLines.keptPinned(keptPinned))
+                if theodore.keptPinned > 0 {
+                    Text(verbatim: TheodoreLines.keptPinned(theodore.keptPinned))
                         .font(.system(size: 11, design: .serif))
                         .foregroundColor(Deco.dimGold)
                 }
@@ -727,7 +728,7 @@ struct DirectoryPanel: View {
                 HStack(spacing: 14) {
                     Spacer()
                     keyHint("esc", String(localized: "Cancel")) { theodore.reset() }
-                    keyHint("↩", String(localized: "Close Tabs")) { theodore.confirm(done: close) }
+                    keyHint("↩", theodore.confirmLabel) { theodore.confirm(done: close) }
                 }
             } else if case .proposeSearch = theodore.state {
                 HStack(spacing: 14) {
@@ -781,10 +782,7 @@ struct DirectoryPanel: View {
 
     private func askTheodore() {
         guard Theodore.isAvailable else { return }
-        theodore.ask(query,
-                     manager: manager,
-                     bookmarks: bookmarks.bookmarks,
-                     done: close)
+        theodore.ask(query, context: context, done: close)
     }
 
     // Esc。セオドアの札が出ていれば一覧へ戻り、そうでなければ盤を畳む
