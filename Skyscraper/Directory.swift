@@ -377,6 +377,8 @@ struct DirectoryPanel: View {
     @Environment(\.openSettings) private var openSettings
 
     @State private var query = ""
+    // 打ち込み欄の案内に添える頼みごとの例。盤を開くたびに選び直す
+    @State private var example = TheodoreLines.example
     @State private var floor: DirectoryFloor = .lobby
     @State private var selection = 0
     // 選んだ行を追いかけてスクロールするか。↑↓ で選んだ時だけ立てる。
@@ -447,6 +449,8 @@ struct DirectoryPanel: View {
         }
         // 考え中に盤が畳まれたら、答えは捨てる (後から勝手に開かないように)
         .onDisappear { theodore.reset() }
+        // 開いた時にモデルを温めておく (入りの時だけ。何も喋らせない)
+        .onAppear { theodore.prewarm() }
     }
 
     // ── 見出しと押しボタン ──
@@ -499,7 +503,7 @@ struct DirectoryPanel: View {
             onMove: { move($0, count: flat.count) },
             onCancel: cancel,
             placeholder: Theodore.isAvailable
-                ? String(localized: "Search the directory, or ask Theodore")
+                ? String(localized: "Search, or ask Theodore — e.g. “\(example)”")
                 : String(localized: "Search the directory"),
             onTab: changeFloor,
             onCommandSubmit: askTheodore
@@ -658,9 +662,7 @@ struct DirectoryPanel: View {
     private var theodoreCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Image(systemName: "bell.fill")
-                    .font(.system(size: 11))
-                    .foregroundColor(Deco.gold)
+                TheodoreEmblem(isThinking: theodore.isThinking, progress: theodore.progress)
                 Text(verbatim: "THEODORE")
                     .font(.system(size: 11, design: .serif))
                     .tracking(3)
@@ -670,11 +672,6 @@ struct DirectoryPanel: View {
                     .tracking(2)
                     .foregroundColor(Deco.dimGold)
                 Spacer()
-                if theodore.isThinking {
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(Deco.gold)
-                }
             }
 
             // お願いの控え
@@ -824,5 +821,90 @@ struct DirectoryPanel: View {
 
     private func close() {
         manager.isDirectoryVisible = false
+    }
+}
+
+
+// MARK: - セオドアの紋章
+
+// 待っている間は扇、考えている間はエレベーターの文字盤。
+//
+// 針はセオドアの進み具合 (Theodore.progress) を指す。上がるだけで下がらない——
+// 行ったり来たりさせると「引き返している」ように見えた (Ken の指摘、2026-11)。
+// 答えが出たら右端まで振り切り、少し見せてから扇へ溶け替える
+// (読み込みの針 ElevatorDial と同じ段取り)
+struct TheodoreEmblem: View {
+    let isThinking: Bool
+    let progress: Double
+
+    // 文字盤を出しているか。考え終わってもすぐには畳まず、振り切った針を少し見せる
+    @State private var showsDial = false
+    // 畳む予約の番号。予約の間に次のお願いが始まったら、古い予約は捨てる
+    @State private var hideToken = 0
+
+    var body: some View {
+        ZStack {
+            if showsDial {
+                TheodoreThinkingDial(progress: isThinking ? progress : 1)
+                    .transition(.opacity)
+            } else {
+                // ロビー下端の扇と同じ Sunburst。文字盤と同じ半円の輪郭なので、
+                // 溶け替えると放射線が目盛りと針に変わったように見える
+                Sunburst(rays: 5, arcRatios: [1.0, 0.55])
+                    .stroke(Deco.gold, lineWidth: 1)
+                    .padding(.horizontal, 1.5)
+                    .padding(.bottom, 1.5)
+                    .transition(.opacity)
+            }
+        }
+        .frame(width: 26, height: 16)
+        .animation(.easeInOut(duration: 0.35), value: showsDial)
+        .accessibilityHidden(true)
+        .onAppear { showsDial = isThinking }
+        .onChange(of: isThinking) { _, thinking in
+            hideToken &+= 1
+            if thinking {
+                showsDial = true
+            } else {
+                // 針が右端へ振り切るのを見届けてから畳む
+                let token = hideToken
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                    if token == hideToken { showsDial = false }
+                }
+            }
+        }
+    }
+}
+
+// 考え中の文字盤。読み込みの針と同じ部品で描く
+private struct TheodoreThinkingDial: View {
+    let progress: Double
+
+    // 指している位置。値が飛んでもなめらかに振れるよう、ここを経由して動かす
+    @State private var needle = 0.04
+
+    var body: some View {
+        ZStack {
+            DialFace()
+                .stroke(Deco.faintGold, lineWidth: 1)
+            DialTicks()
+                .stroke(Deco.dimGold, style: StrokeStyle(lineWidth: 1, lineCap: .round))
+            DialNeedle(value: needle)
+                .stroke(Deco.gold, style: StrokeStyle(lineWidth: 1.4, lineCap: .round))
+            DialHub()
+                .fill(Deco.gold)
+        }
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.6)) { needle = max(progress, 0.04) }
+        }
+        .onChange(of: progress) { _, value in
+            // 上がるだけ。ただし振り切った直後に次のお願いが始まった時だけは
+            // (文字盤を畳む前)、一階へ戻してから上げ直す
+            if value < needle {
+                guard value < 0.3 else { return }
+                needle = 0.04
+            }
+            withAnimation(.easeOut(duration: value >= 1 ? 0.3 : 0.6)) { needle = value }
+        }
     }
 }

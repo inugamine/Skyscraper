@@ -29,6 +29,11 @@
 //  ── 台詞 ──
 //  セオドアの台詞はモデルに書かせず、こちらで用意した定型文を出す。
 //  枚数や題がモデルの作文と食い違う事故を避けるためで、訳も効く。
+//  同じ文ばかりにならないよう、いくつかの言い回しから選ぶ。
+//
+//  ── 入り切り ──
+//  既定は切 (設定 › General › Theodore)。Skyscraper は、頼まれもしないのに
+//  動く AI を載せない。入れても、セオドアが動くのは案内板で頼まれた時だけ。
 //
 
 import AppKit
@@ -54,11 +59,21 @@ struct TheodoreIntentAnswer {
     var intent: TheodoreIntent
 }
 
+// 閉じる範囲。「今のタブ」「全部」「今のタブ以外」は番号ではなく、こちらで決める——
+// 全部を番号で選ばせると取りこぼすし、手掛かりの照合 (Apple 等) にも掛からない
+@Generable
+enum TheodoreCloseScope {
+    case current
+    case all
+    case others
+    case matching
+}
+
 @Generable
 struct TheodoreTabPick {
     // 番号より先に「何を閉じたいのか」を書かせる。後の照合の手掛かりになる
-    @Guide(description: "お願いが「このタブ」「今のタブ」のように、今見ているタブを指しているなら true")
-    var meansCurrentTab: Bool
+    @Guide(description: "閉じる範囲。current: 今見ているタブ (「このタブ」「今のタブ」)。all: この窓のタブ全部 (「タブを全部閉じて」「全部閉じて」)。others: 今見ているタブ以外の全部 (「このタブ以外を閉じて」「他のタブを全部閉じて」)。matching: サイトや話題で絞ったタブ (「Apple 関連のタブを閉じて」)")
+    var scope: TheodoreCloseScope
 
     @Guide(description: "閉じたいタブの手掛かり。サイトの名前や話題を短く (例:「Apple 関連のタブ」なら「Apple」)。「タブ」「ページ」のような言葉は付けない")
     var target: String
@@ -131,8 +146,11 @@ struct TheodoreToggleAnswer {
     @Guide(description: "お願いに当たる切り替え。どれにも当たらなければ other")
     var toggle: TheodoreToggle
 
-    // 音の操作だけは今のタブ以外も相手にする。その時の手掛かり
-    @Guide(description: "お願いの中で名指しされたサイトの名前 (例:「YouTube の音戻して」なら「YouTube」)。名指しが無ければ空")
+    // 音とピン留めは今のタブ以外も相手にする。その時の手掛かり
+    @Guide(description: "お願いが「全部のタブ」「全タブ」「すべてのタブ」に対するものなら true")
+    var meansAll: Bool
+
+    @Guide(description: "お願いの中で名指しされたサイトの名前 (例:「YouTube の音戻して」なら「YouTube」)。名指しが無ければ空。「全タブ」のような言葉は名前ではない")
     var siteName: String
 }
 
@@ -157,16 +175,20 @@ struct TheodoreSameSite {
 
 enum TheodoreLines {
     static var thinking: String {
-        String(localized: "Going up. One moment, please…")
+        [String(localized: "Going up. One moment, please…"),
+         String(localized: "Right away. Just a moment, please…"),
+         String(localized: "Let me see… one moment, please.")].randomElement()!
     }
     static func proposeClose(_ count: Int) -> String {
-        String(localized: "Certainly. Shall I close these \(count) tabs?")
+        [String(localized: "Certainly. Shall I close these \(count) tabs?"),
+         String(localized: "Very well. Shall I close these \(count) tabs for you?")].randomElement()!
     }
     static func keptPinned(_ count: Int) -> String {
         String(localized: "The \(count) pinned tabs will stay as they are.")
     }
     static var noMatchingTabs: String {
-        String(localized: "I'm terribly sorry. I couldn't find any tabs like that.")
+        [String(localized: "I'm terribly sorry. I couldn't find any tabs like that."),
+         String(localized: "I've looked on every floor, but I couldn't find such a tab.")].randomElement()!
     }
     static var onlyPinned: String {
         String(localized: "I'm sorry, but those tabs are pinned. Please unpin them first.")
@@ -178,7 +200,9 @@ enum TheodoreLines {
         String(localized: "I'm terribly sorry. There's no bookmark like that on our shelves. Shall I search the web for “\(query)” instead?")
     }
     static var unsupported: String {
-        String(localized: "My apologies. That's not something I can help with yet.")
+        [String(localized: "My apologies. That's not something I can help with yet."),
+         String(localized: "I'm afraid that's beyond an elevator attendant's duties."),
+         String(localized: "My apologies. That isn't offered on any floor of this building.")].randomElement()!
     }
     static func proposeMute(_ count: Int) -> String {
         String(localized: "Certainly. Shall I mute these \(count) tabs?")
@@ -186,8 +210,24 @@ enum TheodoreLines {
     static func proposeUnmute(_ count: Int) -> String {
         String(localized: "Certainly. Shall I unmute these \(count) tabs?")
     }
+    static func proposePin(_ count: Int) -> String {
+        String(localized: "Certainly. Shall I pin these \(count) tabs?")
+    }
+    static func proposeUnpin(_ count: Int) -> String {
+        String(localized: "Certainly. Shall I unpin these \(count) tabs?")
+    }
     static var alreadyDone: String {
-        String(localized: "Very good. That's already been taken care of.")
+        [String(localized: "Very good. That's already been taken care of."),
+         String(localized: "No need to worry. It's already done.")].randomElement()!
+    }
+
+    // 打ち込み欄の案内に添える、頼みごとの例
+    static var example: String {
+        [String(localized: "Close the tabs about Apple"),
+         String(localized: "Mute the YouTube tab"),
+         String(localized: "Reopen the page I just closed"),
+         String(localized: "Pin this tab"),
+         String(localized: "Open the weather site")].randomElement()!
     }
     static var cannotDoHere: String {
         String(localized: "I'm terribly sorry. I can't do that for this page right now.")
@@ -203,6 +243,13 @@ enum TheodoreLines {
 // MARK: - 状態
 
 // 閉じる提案に並べる一枚
+// 名指しで別のタブにも掛けられる操作 (今のタブに限らない)
+enum TheodoreTabAction {
+    case mute, unmute, pin, unpin
+
+    var isAudio: Bool { self == .mute || self == .unmute }
+}
+
 struct TheodoreTabItem: Identifiable {
     let id: UUID
     let title: String
@@ -214,8 +261,8 @@ enum TheodoreState {
     case idle
     case thinking(request: String)
     case proposeClose(request: String, tabs: [TheodoreTabItem], keptPinned: Int)
-    // 音を消す (mute = true) / 戻す相手が何枚もあって、決めきれなかった
-    case proposeMute(request: String, tabs: [TheodoreTabItem], mute: Bool)
+    // 音・ピン留めの相手が何枚もあって、決めきれなかった
+    case proposeTabs(request: String, tabs: [TheodoreTabItem], action: TheodoreTabAction)
     // 棚に無かったので、代わりにウェブ検索を勧める。open は ↩ で走らせる中身
     case proposeSearch(request: String, query: String, open: @MainActor () -> Void)
     case message(request: String, text: String)
@@ -225,7 +272,22 @@ enum TheodoreState {
 
 @MainActor
 final class Theodore: ObservableObject {
-    @Published private(set) var state: TheodoreState = .idle
+    @Published private(set) var state: TheodoreState = .idle {
+        // 台詞はここで一度だけ選ぶ。描くたびに選ぶと、言い回しがちらつく
+        didSet { line = Self.line(for: state) }
+    }
+    @Published private(set) var line = ""
+
+    // 考え中の進み具合 (0〜1)。紋章の文字盤の針が指す。
+    //
+    // 何回モデルに訊くかはお願いによって二〜四回と決まっていないので、
+    // 一回訊き終わるたびに残りの半分だけ進める (0.29 → 0.65 → 0.82 → 0.91 …)。
+    // 嘘の針にはしない——針が上がるのは、本当に一段終わった時だけ。
+    // 答えが出たら右端 (1) まで振り切る
+    @Published private(set) var progress: Double = 0
+    private var steps = 0 {
+        didSet { progress = 1 - pow(0.5, Double(steps) + 0.5) }
+    }
 
     private static let log = Logger(subsystem: "net.live-on.inugamine.Skyscraper",
                                     category: "Theodore")
@@ -245,9 +307,29 @@ final class Theodore: ObservableObject {
     private static var preferStrict = false
 
     // Apple Intelligence が使えるか。使えない Mac ではセオドアは出てこない
-    static var isAvailable: Bool {
+    // 設定の入り切りの鍵。既定は切
+    nonisolated static let enabledKey = "theodore.enabled"
+
+    // この Mac で Apple Intelligence が使えるか (設定の注記にも使う)
+    static var isModelReady: Bool {
         if case .available = SystemLanguageModel.default.availability { return true }
         return false
+    }
+
+    // セオドアを出すか。設定で入れてあって、モデルも使える時だけ
+    static var isAvailable: Bool {
+        UserDefaults.standard.bool(forKey: enabledKey) && isModelReady
+    }
+
+    // 盤を開いた時に、一段目の読み解き役を温めておく。
+    // モデルを読み込んでおくだけで、何も喋らせない。入りの時しか呼ばれない
+    private var warmSession: LanguageModelSession?
+
+    func prewarm() {
+        guard Self.isAvailable, warmSession == nil else { return }
+        let session = Self.makeIntentSession()
+        session.prewarm()
+        warmSession = session
     }
 
     var isIdle: Bool {
@@ -265,19 +347,24 @@ final class Theodore: ObservableObject {
         case .idle: ""
         case .thinking(let request),
              .proposeClose(let request, _, _),
-             .proposeMute(let request, _, _),
+             .proposeTabs(let request, _, _),
              .proposeSearch(let request, _, _),
              .message(let request, _): request
         }
     }
 
-    var line: String {
+    private static func line(for state: TheodoreState) -> String {
         switch state {
         case .idle: ""
         case .thinking: TheodoreLines.thinking
         case .proposeClose(_, let tabs, _): TheodoreLines.proposeClose(tabs.count)
-        case .proposeMute(_, let tabs, let mute):
-            mute ? TheodoreLines.proposeMute(tabs.count) : TheodoreLines.proposeUnmute(tabs.count)
+        case .proposeTabs(_, let tabs, let action):
+            switch action {
+            case .mute:   TheodoreLines.proposeMute(tabs.count)
+            case .unmute: TheodoreLines.proposeUnmute(tabs.count)
+            case .pin:    TheodoreLines.proposePin(tabs.count)
+            case .unpin:  TheodoreLines.proposeUnpin(tabs.count)
+            }
         case .proposeSearch(_, let query, _): TheodoreLines.offerSearch(query)
         case .message(_, let text): text
         }
@@ -286,7 +373,7 @@ final class Theodore: ObservableObject {
     // 札に並べるタブ (閉じる・音の提案の時だけ)
     var proposedTabs: [TheodoreTabItem]? {
         switch state {
-        case .proposeClose(_, let tabs, _), .proposeMute(_, let tabs, _): tabs
+        case .proposeClose(_, let tabs, _), .proposeTabs(_, let tabs, _): tabs
         default: nil
         }
     }
@@ -299,8 +386,10 @@ final class Theodore: ObservableObject {
     // ↩ の案内に添える言葉
     var confirmLabel: String {
         switch state {
-        case .proposeMute(_, _, true):  String(localized: "Mute Tabs")
-        case .proposeMute(_, _, false): String(localized: "Unmute Tabs")
+        case .proposeTabs(_, _, .mute):   String(localized: "Mute Tabs")
+        case .proposeTabs(_, _, .unmute): String(localized: "Unmute Tabs")
+        case .proposeTabs(_, _, .pin):    String(localized: "Pin Tabs")
+        case .proposeTabs(_, _, .unpin):  String(localized: "Unpin Tabs")
         case .proposeSearch:            String(localized: "Search the Web")
         default:                        String(localized: "Close Tabs")
         }
@@ -321,10 +410,12 @@ final class Theodore: ObservableObject {
         guard !request.isEmpty, !isThinking else { return }
         ticket &+= 1
         let mine = ticket
+        steps = 0
         state = .thinking(request: request)
         Task {
             let outcome = await self.work(request, context: context)
             guard mine == self.ticket else { return }
+            self.progress = 1
             switch outcome {
             case .state(let next):
                 self.state = next
@@ -338,11 +429,11 @@ final class Theodore: ObservableObject {
 
     // 提案を呑む (↩)
     func confirm(done: @escaping @MainActor () -> Void) {
-        if case .proposeMute(_, let tabs, let mute) = state {
+        if case .proposeTabs(_, let tabs, let action) = state {
             ticket &+= 1
             state = .idle
             done()
-            DispatchQueue.main.async { Self.setMuted(mute, tabs.map(\.id)) }
+            DispatchQueue.main.async { Self.apply(action, tabs.map(\.id)) }
             return
         }
         if case .proposeSearch(_, _, let open) = state {
@@ -411,7 +502,15 @@ final class Theodore: ObservableObject {
 
     // 一段目。お願いの種類を当てる
     private func classify(_ request: String) async throws -> TheodoreIntent {
-        let session = LanguageModelSession(instructions: """
+        // 温めてあればそれを使う。使い回すと前の問答が文脈に残るので、一度きり
+        let session = warmSession ?? Self.makeIntentSession()
+        warmSession = nil
+        return try await self.respond(session, to: "お願い: \(request)",
+                                      generating: TheodoreIntentAnswer.self).intent
+    }
+
+    private static func makeIntentSession() -> LanguageModelSession {
+        LanguageModelSession(instructions: """
             あなたはブラウザの操作係です。
             利用者のお願いを読んで、次のどれに当たるかを選んでください。
             closeTabs: 開いているタブを閉じるお願い。例「Apple 関連のタブを閉じて」「このタブを閉じて」「YouTube のタブを全部閉じて」
@@ -421,10 +520,6 @@ final class Theodore: ObservableObject {
             注意: 今開いているページを読み込み直す (再読み込み・リロード・更新) は pageAction です。reopenClosed ではありません。
             unsupported: それ以外のお願い
             """)
-        let response = try await session.respond(to: "お願い: \(request)",
-                                                 generating: TheodoreIntentAnswer.self,
-                                                 options: Self.options)
-        return response.content.intent
     }
 
     // 二段目 (閉じる)。全ての窓のタブから当てはまる物を選ばせ、提案にする
@@ -455,17 +550,30 @@ final class Theodore: ObservableObject {
                 利用者のお願いに当てはまるタブを、一覧から全て選んでください。
                 当てはまるか迷うものは選ばないでください。当てはまるものが無ければ、何も選ばないでください。
                 「このタブ」「今のタブ」は「今見ているタブ」の印が付いたものを指します。
+                「全部」「このタブ以外」と頼まれた時は、範囲 (scope) をそう答えれば、番号は選ばなくて構いません。
                 """,
             request: request,
             heading: "タブ一覧",
             lines: lines,
             generating: TheodoreTabPick.self)
 
-        // 「このタブ」は番号ではなく、こちらが知っている今のタブで決める
-        if answer.meansCurrentTab {
-            let chosen = all.filter { $0.id == currentID }
+        // 「このタブ」「全部」「このタブ以外」は番号ではなく、こちらが知っている事実で決める。
+        // 「全部」はこの窓の中だけ (他の窓まで畳むのは行き過ぎ)。
+        // 空のロビーは閉じても新しいロビーが出来るだけなので、数に入れない
+        switch answer.scope {
+        case .current:
             Self.log.info("tabs: current tab")
+            return proposeClosing(all.filter { $0.id == currentID }, request: request)
+        case .all:
+            let chosen = Self.windowTabs(all, except: nil)
+            Self.log.info("tabs: all in this window, \(chosen.count, privacy: .public)")
             return proposeClosing(chosen, request: request)
+        case .others:
+            let chosen = Self.windowTabs(all, except: currentID)
+            Self.log.info("tabs: others in this window, \(chosen.count, privacy: .public)")
+            return proposeClosing(chosen, request: request)
+        case .matching:
+            break
         }
 
         // 選ばれた物を一枚ずつ確かめる。
@@ -488,6 +596,15 @@ final class Theodore: ObservableObject {
         }
         Self.log.info("tabs: picked \(picked.count, privacy: .public), kept \(chosen.count, privacy: .public), asked \(asked, privacy: .public)")
         return proposeClosing(chosen, request: request)
+    }
+
+    // この窓のタブ (空のロビーを除く)。except に渡したタブも除く
+    private static func windowTabs(_ all: [TabSearchMatch], except excluded: UUID?) -> [TabSearchMatch] {
+        all.filter { match in
+            guard match.isCurrentWindow, match.id != excluded else { return false }
+            guard let (_, tab) = TabManager.owner(of: match.id) else { return false }
+            return !tab.isHome
+        }
     }
 
     // 一度に訊き直す枚数の上限
@@ -534,9 +651,7 @@ final class Theodore: ObservableObject {
             タブ: \(ModelLanguage.sanitize(tab.title)) (\(tab.host))
             """
         do {
-            return try await session.respond(to: prompt,
-                                             generating: TheodoreTabMatch.self,
-                                             options: Self.options).content.matches
+            return try await self.respond(session, to: prompt, generating: TheodoreTabMatch.self).matches
         } catch {
             // 言語の都合でも安全装置 (guardrail) でも、断られたら「当てはまらない」
             Self.log.error("verify tab failed: \(String(describing: error), privacy: .public)")
@@ -642,17 +757,21 @@ final class Theodore: ObservableObject {
         let toggle = toggleAnswer.toggle
         Self.log.info("action: toggle \(String(describing: toggle), privacy: .public)")
         // 音だけは今のタブに限らない。鳴っているタブと見ているタブは別なことが多い
-        let mute: Bool?
+        // 音とピン留めは、名指しがあれば今のタブ以外にも掛ける
+        let tabAction: TheodoreTabAction?
         switch toggle {
-        case .mute:   mute = true
-        case .unmute: mute = false
-        default:      mute = nil
+        case .mute:   tabAction = .mute
+        case .unmute: tabAction = .unmute
+        case .pin:    tabAction = .pin
+        case .unpin:  tabAction = .unpin
+        default:      tabAction = nil
         }
-        if let mute {
-            return audio(mute: mute,
-                         siteName: toggleAnswer.siteName,
-                         request: request,
-                         manager: context.manager)
+        if let tabAction {
+            return perTab(tabAction,
+                          meansAll: toggleAnswer.meansAll,
+                          siteName: toggleAnswer.siteName,
+                          request: request,
+                          manager: context.manager)
         }
         if let (key, opposite) = Self.keys(for: toggle) {
             if let entry = all.first(where: { $0.id == "action:" + key }) {
@@ -730,9 +849,7 @@ final class Theodore: ObservableObject {
             操作: \(action)
             """
         do {
-            return try await session.respond(to: prompt,
-                                             generating: TheodoreActionMatch.self,
-                                             options: Self.options).content.matches
+            return try await self.respond(session, to: prompt, generating: TheodoreActionMatch.self).matches
         } catch {
             Self.log.error("verify action failed: \(String(describing: error), privacy: .public)")
             return false
@@ -774,53 +891,105 @@ final class Theodore: ObservableObject {
     // 名指しがあれば、その名前が題かホストに入っている物に絞る。
     // 名指しが無ければ、今のタブが当てはまればそれ、でなければ当てはまる物全部。
     // 一枚に決まればすぐ、何枚もあれば札を出して確かめる
-    private func audio(mute: Bool,
-                       siteName: String,
-                       request: String,
-                       manager: TabManager) -> Outcome {
+    // 音・ピン留めの相手を決める。
+    //   消す: 鳴っているタブ (ミュートしていない物)   戻す: ミュート中のタブ
+    //   留める: 留めていないタブ                     外す: 留めてあるタブ
+    // 「全部」なら、ピン留めはこの窓のタブ全部、音は全ての窓のタブ全部 (名指しは見ない)。
+    // 名指しがあれば、その名前が題かホストに入っている物に絞る (窓をまたいで探す)。
+    // 名指しが無ければ——
+    //   音: 今のタブが当てはまればそれ、でなければ当てはまる物全部
+    //       (鳴っているタブと見ているタブは別なことが多い)
+    //   ピン留め: 今のタブだけ
+    // 一枚に決まればすぐ、何枚もあれば札を出して確かめる
+    private func perTab(_ action: TheodoreTabAction,
+                        meansAll: Bool,
+                        siteName: String,
+                        request: String,
+                        manager: TabManager) -> Outcome {
         // 名指しは、お願いの文に本当に書いてある時だけ信じる。
         // 「音消して」だけでも、言いつけの例に引かれて "YouTube" と答えることがあった
         // (2026-11 実測：名指しの無いお願いで named true)。
         // 鵜呑みにすると、鳴っているのが Spotify の時に見当違いの答えになる
+        // 「全部」も同じく、お願いに「全」「すべて」等が本当に書いてある時だけ信じる
+        let wantsAll = meansAll && Self.allWords.contains { request.lowercased().contains($0) }
         let trimmed = siteName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let name = Self.mentions([request], trimmed) ? trimmed : ""
+        let name = (!wantsAll && Self.mentions([request], trimmed)) ? trimmed : ""
         // 並びと範囲はタブ検索と同じ (普通の窓とプライベートは互いに見えない)
-        let all: [(match: TabSearchMatch, tab: Tab)] = TabSearch.matches(query: "", from: manager)
+        var all: [(match: TabSearchMatch, tab: Tab)] = TabSearch.matches(query: "", from: manager)
             .compactMap { match in TabManager.owner(of: match.id).map { (match: match, tab: $0.tab) } }
-        let named = name.isEmpty ? all : all.filter { Self.mentions([$0.match.title, $0.match.host], name) }
-        let fits = named.filter { mute ? ($0.tab.isPlayingAudio && !$0.tab.isMuted) : $0.tab.isMuted }
+        // ピン留めの「全部」はこの窓の中だけ (閉じる時の「全部」と揃える)
+        if wantsAll && !action.isAudio {
+            all = all.filter { $0.match.isCurrentWindow }
+        }
+        let named = name.isEmpty ? all : Self.named(all, name)
+        let fits = named.filter { Self.fits(action, $0.tab) }
 
         var chosen = fits
-        if name.isEmpty, let current = manager.selectedTab,
-           let mine = fits.first(where: { $0.tab === current }) {
-            chosen = [mine]
+        if !wantsAll, name.isEmpty, let current = manager.selectedTab {
+            if action.isAudio {
+                if let mine = fits.first(where: { $0.tab === current }) { chosen = [mine] }
+            } else {
+                chosen = fits.filter { $0.tab === current }
+            }
         }
-        Self.log.info("audio: mute \(mute, privacy: .public), named \(!name.isEmpty, privacy: .public), candidates \(chosen.count, privacy: .public)")
+        Self.log.info("tabs: \(String(describing: action), privacy: .public), all \(wantsAll, privacy: .public), named \(!name.isEmpty, privacy: .public), candidates \(chosen.count, privacy: .public)")
 
         guard !chosen.isEmpty else {
             // 名指しのサイトがどこにも開いていない
             if !name.isEmpty && named.isEmpty {
                 return .state(.message(request: request, text: TheodoreLines.noMatchingTabs))
             }
-            // 消す相手が鳴っていない / 戻す相手がミュートされていない
+            // 相手は居るが、もうそうなっている
             return .state(.message(request: request, text: TheodoreLines.alreadyDone))
         }
         if chosen.count == 1 {
             let id = chosen[0].match.id
-            return .perform { Self.setMuted(mute, [id]) }
+            return .perform { Self.apply(action, [id]) }
         }
         let items = chosen.map {
             TheodoreTabItem(id: $0.match.id, title: $0.match.title,
                             host: $0.match.host, favicon: $0.match.favicon)
         }
-        return .state(.proposeMute(request: request, tabs: items, mute: mute))
+        return .state(.proposeTabs(request: request, tabs: items, action: action))
     }
 
-    // 決めた向きに揃える。toggle なので、既にそうなっている物には触らない
-    private static func setMuted(_ mute: Bool, _ ids: [UUID]) {
+    // 「全部」を表す言葉。モデルの meansAll を裏付けるのに使う
+    private static let allWords = ["全", "すべて", "みんな", "all", "every"]
+
+    // その操作を掛ける意味があるタブか (もうそうなっている物は外す)
+    private static func fits(_ action: TheodoreTabAction, _ tab: Tab) -> Bool {
+        switch action {
+        case .mute:   tab.isPlayingAudio && !tab.isMuted
+        case .unmute: tab.isMuted
+        case .pin:    !tab.isPinned
+        case .unpin:  tab.isPinned
+        }
+    }
+
+    // 名指しに当たるタブ。まず名前をそのまま探し、
+    // 見つからなければ語に分けて全部の語が入っている物を探す
+    // ("Vapor ドキュメント" と言われて、題が "Vapor のドキュメント" の時など)
+    private static func named(_ all: [(match: TabSearchMatch, tab: Tab)],
+                              _ name: String) -> [(match: TabSearchMatch, tab: Tab)] {
+        let whole = all.filter { mentions([$0.match.title, $0.match.host], name) }
+        if !whole.isEmpty { return whole }
+        let words = name.split(whereSeparator: \.isWhitespace).map(String.init).filter { $0.count >= 2 }
+        guard words.count > 1 else { return [] }
+        return all.filter { entry in
+            words.allSatisfy { mentions([entry.match.title, entry.match.host], $0) }
+        }
+    }
+
+    // 決めた向きに揃える。もうそうなっている物には触らない
+    private static func apply(_ action: TheodoreTabAction, _ ids: [UUID]) {
         for id in ids {
-            guard let (_, tab) = TabManager.owner(of: id), tab.isMuted != mute else { continue }
-            tab.toggleMute()
+            guard let (owner, tab) = TabManager.owner(of: id) else { continue }
+            switch action {
+            case .mute:   if !tab.isMuted { tab.toggleMute() }
+            case .unmute: if tab.isMuted { tab.toggleMute() }
+            case .pin:    owner.setPinned(tab, true)
+            case .unpin:  owner.setPinned(tab, false)
+            }
         }
     }
 
@@ -831,8 +1000,8 @@ final class Theodore: ObservableObject {
             利用者のお願いが、次の切り替えのどれに当たるかを選んでください。
             言い方が違っても、したいことが同じなら当てはまります。
             向き (付ける⇔外す、表示する⇔やめる) を取り違えないよう、特に「解除」「やめて」「外して」「戻して」に気を付けてください。
-            pin: タブをピン留めする。例「ピン留めして」「このタブを固定して」
-            unpin: ピン留めを外す。例「ピン留めを外して」「ピン留め解除」「固定をやめて」
+            pin: タブをピン留めする。例「ピン留めして」「このタブを固定して」「GitHub のタブをピン留めして」
+            unpin: ピン留めを外す。例「ピン留めを外して」「ピン留め解除」「固定をやめて」「GitHub のタブのピン留めを外して」「全タブのピン留めを外して」
             mute: タブの音を消す。例「音消して」「ミュートして」「静かにして」「黙らせて」「YouTube の音を消して」
             unmute: タブの音を戻す。例「音戻して」「ミュート解除」「音を出して」「YouTube の音戻して」
             showReader: リーダー表示にする。例「リーダーモードにして」「リーダー表示で読みたい」
@@ -845,10 +1014,8 @@ final class Theodore: ObservableObject {
             hideDownloads: ダウンロードの棚を隠す
             other: 上のどれでもない操作。例「再読み込みして」「拡大して」「印刷して」「新しいタブを開いて」「設定を開いて」
             """)
-        let response = try await session.respond(to: "お願い: \(request)",
-                                                 generating: TheodoreToggleAnswer.self,
-                                                 options: Self.options)
-        return response.content
+        return try await self.respond(session, to: "お願い: \(request)",
+                                      generating: TheodoreToggleAnswer.self)
     }
 
     // 二段目 (開く)。棚から一つ選ばせ、2F と同じく今のタブで開く
@@ -999,14 +1166,22 @@ final class Theodore: ObservableObject {
             候補: \(ModelLanguage.sanitize(title)) (\(host))
             """
         do {
-            return try await session.respond(to: prompt,
-                                             generating: TheodoreSameSite.self,
-                                             options: Self.options).content.isSame
+            return try await self.respond(session, to: prompt, generating: TheodoreSameSite.self).isSame
         } catch {
             // 言語の都合でも安全装置 (guardrail) でも、断られたら「違う」
             Self.log.error("verify site failed: \(String(describing: error), privacy: .public)")
             return false
         }
+    }
+
+    // モデルへの問い合わせは全てここを通す。一回終わるごとに針を一段上げる
+    private func respond<T: Generable>(_ session: LanguageModelSession,
+                                       to prompt: String,
+                                       generating type: T.Type) async throws -> T {
+        defer { steps += 1 }
+        return try await session.respond(to: prompt,
+                                         generating: type,
+                                         options: Self.options).content
     }
 
     // 番号付きの一覧を見せて選ばせる。
@@ -1028,9 +1203,7 @@ final class Theodore: ObservableObject {
         func send(strict: Bool) async throws -> T {
             let session = LanguageModelSession(instructions: instructions)
             let prompt = "お願い: \(request)\n\n\(heading):\n\(listing(strict: strict))"
-            return try await session.respond(to: prompt,
-                                             generating: type,
-                                             options: Self.options).content
+            return try await self.respond(session, to: prompt, generating: type)
         }
 
         let strict = Self.preferStrict
