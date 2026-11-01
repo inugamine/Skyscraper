@@ -1072,10 +1072,14 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     @Published private(set) var isUnloaded: Bool = false
 
     // パスキー（WebAuthn）の橋渡し役。実体は PasskeyManager.swift
-    private let passkeyBridge = PasskeyBridge()
+    //
+    // fileprivate なのは、タブを捨てる側 (TabManager) から進行中の依頼を
+    // 取り消したいからだ。OS 側の受付を放り出すと、以後のパスキーが
+    // 全部 "Request already in progress" で断られる恐れがある
+    fileprivate let passkeyBridge = PasskeyBridge()
     // 位置情報の取次ぎ。タブごとに一人。(CLLocationManager を抱える)
     //
-    // passkeyBridge と違って fileprivate なのは、タブを捨てる側 (TabManager)から
+    // passkeyBridge と同じく fileprivate なのは、タブを捨てる側 (TabManager)から
     // 待たせている依頼を畳みたいからだ。放っておいても dealloc で止まるが、
     // それまでメニューバーの位置情報の矢印が点いたままになる
     fileprivate let geolocation = GeolocationProvider()
@@ -1949,6 +1953,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         // 下で受け口を剥すが、こちらの行列はそれでは消えない。
         // この道は器を作り直す道で Tab 自体は生き残るので、
         // 放っておくと古い器へ向けて現在地を押し続ける
+        passkeyBridge.cancelPending()
         geolocation.teardown()
         old.configuration.userContentController.removeAllScriptMessageHandlers()
         old.configuration.userContentController.removeAllUserScripts()
@@ -3755,6 +3760,7 @@ final class TabManager: NSObject, ObservableObject {
             tab.webView.pauseAllMediaPlayback(completionHandler: nil)
             tab.webView.closeAllMediaPresentations {}
             tab.webView.load(URLRequest(url: URL(string: "about:blank")!))
+            tab.passkeyBridge.cancelPending()
             tab.geolocation.teardown()
             tab.webView.configuration.userContentController.removeAllScriptMessageHandlers()
             tab.webView.configuration.userContentController.removeAllUserScripts()
@@ -4398,6 +4404,7 @@ final class TabManager: NSObject, ObservableObject {
         tab.webView.load(URLRequest(url: URL(string: "about:blank")!))
         // スクリプトメッセージハンドラとユーザースクリプトを外す。
         // configuration はタブごとに独立なので、他のタブには影響しない
+        tab.passkeyBridge.cancelPending()
         tab.geolocation.teardown()
         tab.webView.configuration.userContentController.removeAllScriptMessageHandlers()
         tab.webView.configuration.userContentController.removeAllUserScripts()

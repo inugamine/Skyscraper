@@ -22,11 +22,15 @@
 //  エンタイトルメント未取得の間は、要求が AuthorizationError 1004 で落ちて
 //  ページには NotAllowedError が返る (＝黙って壊れず、綺麗に断られる)。
 //
+//  拡張は PRF だけ通す (パスキーから決まった鍵を引き出す仕組み。
+//  E2E 暗号化のサービスが金庫の鍵に使う)。それ以外の拡張は黙って捨てる。
+//
 
 import Foundation
 import AppKit
 import WebKit
 import AuthenticationServices
+import CryptoKit
 
 // MARK: - base64url
 
@@ -56,6 +60,7 @@ private enum PasskeyError {
     case notAllowed(String)
     case invalidState(String)
     case notSupported(String)
+    case aborted(String)
 
     var jsMessage: String {
         switch self {
@@ -63,6 +68,7 @@ private enum PasskeyError {
         case .notAllowed(let m):   return "NotAllowedError|" + m
         case .invalidState(let m): return "InvalidStateError|" + m
         case .notSupported(let m): return "NotSupportedError|" + m
+        case .aborted(let m):      return "AbortError|" + m
         }
     }
 }
@@ -78,12 +84,20 @@ final class PasskeyBridge: NSObject {
     // 進行中の要求。パスキーのシートは一度に一枚
     private var pendingReply: ((Any?, String?) -> Void)?
     private var controller: ASAuthorizationController?
+    // 依頼ごとの番号。取り消した後に古い依頼の続きが走らないように見張る
+    private var generation = 0
 
     // MARK: 要求の受け付け
 
     fileprivate func handle(body: [String: Any],
                             frame: WKFrameInfo,
                             reply: @escaping (Any?, String?) -> Void) {
+        // ページの AbortSignal が鳴った。OS 側の依頼ごと取り消す
+        if body["op"] as? String == "abort" {
+            cancelPending()
+            reply(nil, nil)
+            return
+        }
         guard pendingReply == nil else {
             reply(nil, PasskeyError.notAllowed("Another passkey request is already in progress.").jsMessage)
             return
@@ -123,8 +137,12 @@ final class PasskeyBridge: NSObject {
         // プラットフォームパスキーへのアクセス許可（初回はOSが確認を出す）を
         // 済ませてから本番の要求へ進む
         pendingReply = reply
+        generation += 1
+        let ticket = generation
         ensureAuthorization { [weak self] in
             guard let self else { return }
+            // 許可の確認を待つ間に取り消された (タブが閉じた・abort された)
+            guard self.generation == ticket, self.pendingReply != nil else { return }
             do {
                 let requests: [ASAuthorizationRequest]
                 switch op {
@@ -179,6 +197,7 @@ final class PasskeyBridge: NSObject {
         let selection = body["authenticatorSelection"] as? [String: Any] ?? [:]
         let attachment = selection["authenticatorAttachment"] as? String
         let uv = userVerification(selection["userVerification"] as? String)
+        let prf = try prfRegistrationInput(body["prf"])
 
         let clientData = ASPublicKeyCredentialClientData(challenge: challenge, origin: origin)
         var requests: [ASAuthorizationRequest] = []
@@ -189,6 +208,7 @@ final class PasskeyBridge: NSObject {
             let request = provider.createCredentialRegistrationRequest(
                 clientData: clientData, name: name, userID: userID)
             request.userVerificationPreference = uv
+            if let prf { request.prf = prf }
             requests.append(request)
         }
 
@@ -202,6 +222,7 @@ final class PasskeyBridge: NSObject {
             request.residentKeyPreference = residentKey(selection)
             request.attestationPreference = attestation(body["attestation"] as? String)
             request.excludedCredentials = securityKeyDescriptors(body["excludeCredentials"])
+            if let prf { request.prf = prf }
             requests.append(request)
         }
 
@@ -223,6 +244,7 @@ final class PasskeyBridge: NSObject {
         let uv = userVerification(body["userVerification"] as? String)
         let allowed = body["allowCredentials"]
         let clientData = ASPublicKeyCredentialClientData(challenge: challenge, origin: origin)
+        let prf = try prfAssertionInput(body["prf"])
 
         let platformProvider = ASAuthorizationPlatformPublicKeyCredentialProvider(relyingPartyIdentifier: rpId)
         let platformRequest = platformProvider.createCredentialAssertionRequest(clientData: clientData)
@@ -230,11 +252,13 @@ final class PasskeyBridge: NSObject {
         platformRequest.allowedCredentials = descriptorIDs(allowed).map {
             ASAuthorizationPlatformPublicKeyCredentialDescriptor(credentialID: $0)
         }
+        if let prf { platformRequest.prf = prf }
 
         let skProvider = ASAuthorizationSecurityKeyPublicKeyCredentialProvider(relyingPartyIdentifier: rpId)
         let skRequest = skProvider.createCredentialAssertionRequest(clientData: clientData)
         skRequest.userVerificationPreference = uv
         skRequest.allowedCredentials = securityKeyDescriptors(allowed)
+        if let prf { skRequest.prf = prf }
 
         return [platformRequest, skRequest]
     }
@@ -305,7 +329,80 @@ final class PasskeyBridge: NSObject {
         }
     }
 
+    // MARK: PRF 拡張
+
+    // 塩はページから来た値 (WebAuthn の AuthenticationExtensionsPRFValues) を
+    // そのまま渡す。"WebAuthn PRF" を前置して SHA-256 にかける加工は
+    // OS 側の仕事だ (Firefox の macOS 版も生の値を渡している)。
+    // ここで加工すると二重になり、他のブラウザと違う鍵が出てしまう
+    private func prfValues(_ raw: Any?) throws -> ASAuthorizationPublicKeyCredentialPRFAssertionInput.InputValues? {
+        guard let dict = raw as? [String: Any] else { return nil }
+        guard let first = (dict["first"] as? String).flatMap({ Data(base64URL: $0) }) else {
+            throw PasskeyBridgeFailure(.notAllowed("Malformed PRF input."))
+        }
+        let second = (dict["second"] as? String).flatMap { Data(base64URL: $0) }
+        return .init(saltInput1: first, saltInput2: second)
+    }
+
+    // 登録：塩が無ければ「この新しいパスキーで PRF が使えるか」だけ訊く
+    private func prfRegistrationInput(_ raw: Any?) throws -> ASAuthorizationPublicKeyCredentialPRFRegistrationInput? {
+        guard let prf = raw as? [String: Any] else { return nil }
+        if let values = try prfValues(prf["eval"]) {
+            return .inputValues(values)
+        }
+        return .checkForSupport
+    }
+
+    // 認証：全体の塩 (eval) と、パスキーごとの塩 (evalByCredential)
+    private func prfAssertionInput(_ raw: Any?) throws -> ASAuthorizationPublicKeyCredentialPRFAssertionInput? {
+        guard let prf = raw as? [String: Any] else { return nil }
+        let general = try prfValues(prf["eval"])
+        var perCredential: [Data: ASAuthorizationPublicKeyCredentialPRFAssertionInput.InputValues] = [:]
+        for (key, value) in (prf["evalByCredential"] as? [String: Any]) ?? [:] {
+            guard let id = Data(base64URL: key), let values = try prfValues(value) else {
+                throw PasskeyBridgeFailure(.notAllowed("Malformed PRF input."))
+            }
+            perCredential[id] = values
+        }
+        if let general {
+            return .inputValues(general, perCredentialInputValues: perCredential.isEmpty ? nil : perCredential)
+        }
+        if !perCredential.isEmpty {
+            return .perCredentialInputValues(perCredential)
+        }
+        return nil
+    }
+
+    // SymmetricKey の中身を base64url に。鍵はページへ渡したら手元には残さない
+    private static func b64u(_ key: SymmetricKey?) -> String? {
+        guard let key else { return nil }
+        return key.withUnsafeBytes { Data($0) }.base64URLString
+    }
+
+    private static func prfResult(enabled: Bool?, first: SymmetricKey?, second: SymmetricKey?) -> [String: Any] {
+        var out: [String: Any] = [:]
+        if let enabled { out["enabled"] = enabled }
+        if let f = b64u(first) { out["first"] = f }
+        if let s = b64u(second) { out["second"] = s }
+        return out
+    }
+
     // MARK: 後始末
+
+    // タブを片付ける時・ページが abort した時に呼ぶ。
+    // OS 側の依頼まで取り消しておく。放り出すと AuthenticationServicesAgent が
+    // 「この app の依頼は処理中」と思い込んだまま残り、以後のパスキーが全部
+    // 1004 (Request already in progress) で断られる——2026-11 に実際に起きた。
+    // 原因が放り出しだったとは確かめられていないが、塞げる穴は塞いでおく
+    func cancelPending() {
+        guard pendingReply != nil else { return }
+        let running = controller
+        generation += 1
+        finish(nil, PasskeyError.aborted("The operation was aborted.").jsMessage)
+        // finish で controller を外したので、取り消しの返事 (canceled) は
+        // 下の delegate の照合で捨てられる
+        running?.cancel()
+    }
 
     private func finish(_ payload: Any?, _ errorMessage: String?) {
         pendingReply?(payload, errorMessage)
@@ -325,6 +422,8 @@ private struct PasskeyBridgeFailure: Error {
 extension PasskeyBridge: ASAuthorizationControllerDelegate {
     func authorizationController(controller: ASAuthorizationController,
                                  didCompleteWithAuthorization authorization: ASAuthorization) {
+        // 取り消し済みの古い依頼の返事は捨てる (新しい依頼の返事と取り違えない)
+        guard controller === self.controller else { return }
         // 登録の結果
         if let reg = authorization.credential as? ASAuthorizationPublicKeyCredentialRegistration {
             guard let attestation = reg.rawAttestationObject else {
@@ -332,14 +431,22 @@ extension PasskeyBridge: ASAuthorizationControllerDelegate {
                 return
             }
             let isSecurityKey = reg is ASAuthorizationSecurityKeyPublicKeyCredentialRegistration
-            finish([
+            var payload: [String: Any] = [
                 "op": "create",
                 "credentialId": reg.credentialID.base64URLString,
                 "clientDataJSON": reg.rawClientDataJSON.base64URLString,
                 "attestationObject": attestation.base64URLString,
                 "authenticatorAttachment": isSecurityKey ? "cross-platform" : "platform",
                 "transports": isSecurityKey ? ["usb"] : ["internal", "hybrid"],
-            ] as [String: Any], nil)
+            ]
+            if let platform = reg as? ASAuthorizationPlatformPublicKeyCredentialRegistration,
+               let out = platform.prf {
+                payload["prf"] = Self.prfResult(enabled: out.isSupported, first: out.first, second: out.second)
+            } else if let sk = reg as? ASAuthorizationSecurityKeyPublicKeyCredentialRegistration,
+                      let out = sk.prf {
+                payload["prf"] = Self.prfResult(enabled: out.isSupported, first: out.first, second: out.second)
+            }
+            finish(payload, nil)
             return
         }
 
@@ -356,10 +463,16 @@ extension PasskeyBridge: ASAuthorizationControllerDelegate {
                 let userID: Data? = platform.userID
                 if let userID { payload["userHandle"] = userID.base64URLString }
                 payload["authenticatorAttachment"] = "platform"
+                if let out = platform.prf {
+                    payload["prf"] = Self.prfResult(enabled: nil, first: out.first, second: out.second)
+                }
             } else if let sk = assertion as? ASAuthorizationSecurityKeyPublicKeyCredentialAssertion {
                 let userID: Data? = sk.userID
                 if let userID { payload["userHandle"] = userID.base64URLString }
                 payload["authenticatorAttachment"] = "cross-platform"
+                if let out = sk.prf {
+                    payload["prf"] = Self.prfResult(enabled: nil, first: out.first, second: out.second)
+                }
             }
             finish(payload, nil)
             return
@@ -370,6 +483,7 @@ extension PasskeyBridge: ASAuthorizationControllerDelegate {
 
     func authorizationController(controller: ASAuthorizationController,
                                  didCompleteWithError error: Error) {
+        guard controller === self.controller else { return }
         let ns = error as NSError
         print("Passkey error: \(ns.domain) \(ns.code) \(ns.localizedDescription)")
         if ns.domain == ASAuthorizationError.errorDomain {
@@ -470,13 +584,28 @@ extension PasskeyBridge {
             const request = bridge().postMessage(payload)
                 .catch((e) => { throw toDOMException(e); });
             if (!signal) { return request; }
-            // abort されたら JS 側の約束だけ先に破る（OS のシートは残るが実害は無い）
+            // abort されたら約束を先に破り、OS のシートと受付も取り消させる。
+            // 済んだ後の abort は無視する (同じページの次の依頼を巻き込まない)
+            let settled = false;
+            request.then(() => { settled = true; }, () => { settled = true; });
             return new Promise((resolve, reject) => {
                 signal.addEventListener('abort', () => {
                     reject(new DOMException('The operation was aborted.', 'AbortError'));
+                    if (!settled) {
+                        try { bridge().postMessage({ op: 'abort' }).catch(() => {}); } catch (e) {}
+                    }
                 }, { once: true });
                 request.then(resolve, reject);
             });
+        };
+
+        // ── PRF 拡張 ──
+        // 塩は加工せず base64url にして渡す (加工は OS がやる)
+        const serializePrfValues = (v) => {
+            if (!v) { return null; }
+            const out = { first: bufToB64u(v.first) };
+            if (v.second !== undefined && v.second !== null) { out.second = bufToB64u(v.second); }
+            return out;
         };
 
         const serializeDescriptors = (list) => (Array.isArray(list) ? list : []).map((c) => ({
@@ -543,8 +672,32 @@ extension PasskeyBridge {
         };
 
         // ── 応答を PublicKeyCredential 形に組む ──
-        const finishCredential = (r) => {
+        const finishCredential = (r, wantPrf) => {
             const response = { clientDataJSON: b64uToBuf(r.clientDataJSON) };
+
+            // 拡張の結果。getClientExtensionResults() は ArrayBuffer、toJSON() は base64url
+            const extResults = {};
+            const extJSON = {};
+            if (wantPrf) {
+                const p = r.prf || null;
+                const res = {};
+                const resJSON = {};
+                if (r.op === 'create') {
+                    const enabled = !!(p && (p.enabled || p.first));
+                    res.enabled = enabled;
+                    resJSON.enabled = enabled;
+                }
+                if (p && p.first) {
+                    res.results = { first: b64uToBuf(p.first) };
+                    resJSON.results = { first: p.first };
+                    if (p.second) {
+                        res.results.second = b64uToBuf(p.second);
+                        resJSON.results.second = p.second;
+                    }
+                }
+                extResults.prf = res;
+                extJSON.prf = resJSON;
+            }
             let parsed = null;
             if (r.op === 'create') {
                 response.attestationObject = b64uToBuf(r.attestationObject);
@@ -568,14 +721,14 @@ extension PasskeyBridge {
                 type: 'public-key',
                 authenticatorAttachment: r.authenticatorAttachment || null,
                 response,
-                getClientExtensionResults: () => ({}),
+                getClientExtensionResults: () => extResults,
                 toJSON() {
                     const json = {
                         id: r.credentialId,
                         rawId: r.credentialId,
                         type: 'public-key',
                         authenticatorAttachment: r.authenticatorAttachment || null,
-                        clientExtensionResults: {},
+                        clientExtensionResults: extJSON,
                     };
                     if (r.op === 'create') {
                         json.response = {
@@ -657,10 +810,22 @@ extension PasskeyBridge {
                     },
                     attestation: pk.attestation ? String(pk.attestation) : 'none',
                 };
+                const prf = pk.extensions && pk.extensions.prf;
+                if (prf) {
+                    // 登録の時にパスキーごとの塩は渡せない (仕様)
+                    if (prf.evalByCredential && Object.keys(prf.evalByCredential).length > 0) {
+                        return Promise.reject(new DOMException(
+                            'evalByCredential is not allowed during registration.', 'NotSupportedError'));
+                    }
+                    payload.prf = {};
+                    const ev = serializePrfValues(prf.eval);
+                    if (ev) { payload.prf.eval = ev; }
+                }
             } catch (e) {
                 return Promise.reject(e instanceof TypeError ? e : new TypeError(String(e)));
             }
-            return callBridge(payload, options.signal).then(finishCredential);
+            return callBridge(payload, options.signal)
+                .then((r) => finishCredential(r, !!payload.prf));
         };
 
         container.get = function (options) {
@@ -685,10 +850,35 @@ extension PasskeyBridge {
                     allowCredentials: serializeDescriptors(pk.allowCredentials),
                     userVerification: pk.userVerification ? String(pk.userVerification) : 'preferred',
                 };
+                const prf = pk.extensions && pk.extensions.prf;
+                if (prf) {
+                    payload.prf = {};
+                    const ev = serializePrfValues(prf.eval);
+                    if (ev) { payload.prf.eval = ev; }
+                    const byCred = prf.evalByCredential || {};
+                    const keys = Object.keys(byCred);
+                    if (keys.length > 0) {
+                        // 鍵は allowCredentials の id (base64url) と一致しなければならない (仕様)
+                        const allowed = new Set(payload.allowCredentials.map((c) => c.id));
+                        if (allowed.size === 0) {
+                            return Promise.reject(new DOMException(
+                                'evalByCredential requires allowCredentials.', 'NotSupportedError'));
+                        }
+                        payload.prf.evalByCredential = {};
+                        for (const k of keys) {
+                            if (!allowed.has(k)) {
+                                return Promise.reject(new DOMException(
+                                    'evalByCredential key does not match allowCredentials.', 'SyntaxError'));
+                            }
+                            payload.prf.evalByCredential[k] = serializePrfValues(byCred[k]);
+                        }
+                    }
+                }
             } catch (e) {
                 return Promise.reject(e instanceof TypeError ? e : new TypeError(String(e)));
             }
-            return callBridge(payload, options.signal).then(finishCredential);
+            return callBridge(payload, options.signal)
+                .then((r) => finishCredential(r, !!payload.prf));
         };
 
         // ── 機能検出への回答 ──
