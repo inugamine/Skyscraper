@@ -1,0 +1,49 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PRF test</title>
+<style>
+  body { font: 15px -apple-system, sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; }
+  button { font: inherit; padding: .5rem 1rem; margin: .25rem .5rem .25rem 0; }
+  pre { background: #f3f3f3; padding: .75rem; white-space: pre-wrap; word-break: break-all; }
+</style>
+<h1>PRF test</h1>
+<p>同じパスキー・同じ塩で、ブラウザごとの <code>first</code> が一致するかを見る。塩は固定：<code>skyscraper-prf-test</code></p>
+<button id="reg">1. Register</button>
+<button id="login">2. Login (PRF)</button>
+<pre id="out">ready</pre>
+<script>
+const out = document.getElementById('out');
+const log = (s) => { out.textContent = s; };
+const hex = (buf) => Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+const salt = new TextEncoder().encode('skyscraper-prf-test');
+const rand = (n) => crypto.getRandomValues(new Uint8Array(n));
+
+document.getElementById('reg').onclick = async () => {
+  try {
+    const c = await navigator.credentials.create({ publicKey: {
+      challenge: rand(32),
+      rp: { name: 'PRF test' },
+      user: { id: rand(16), name: 'prf-test', displayName: 'PRF test' },
+      pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+      authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
+      extensions: { prf: {} },
+    }});
+    log('registered\nid: ' + c.id + '\nextensions: ' + JSON.stringify(c.toJSON().clientExtensionResults));
+  } catch (e) { log('register failed: ' + e.name + ': ' + e.message); }
+};
+
+document.getElementById('login').onclick = async () => {
+  try {
+    const c = await navigator.credentials.get({ publicKey: {
+      challenge: rand(32),
+      userVerification: 'required',
+      extensions: { prf: { eval: { first: salt } } },
+    }});
+    const r = c.getClientExtensionResults();
+    const first = r.prf && r.prf.results && r.prf.results.first;
+    log('credential: ' + c.id + '\nprf.first: ' + (first ? hex(first) : '(none)')
+        + '\nraw: ' + JSON.stringify(c.toJSON().clientExtensionResults));
+  } catch (e) { log('login failed: ' + e.name + ': ' + e.message); }
+};
+</script>
