@@ -112,6 +112,8 @@ struct TabSearchField: NSViewRepresentable {
     var placeholder: String = String(localized: "Search open tabs")
     // Tab / ⇧Tab。案内板では階の移動に使う。nil なら素通し (焦点が次へ移る)
     var onTab: ((Int) -> Bool)? = nil
+    // ⌘↩。案内板ではセオドアに頼むのに使う。nil なら ↩ と同じ扱い
+    var onCommandSubmit: (() -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -170,6 +172,17 @@ struct TabSearchField: NSViewRepresentable {
 
         func control(_ control: NSControl, textView: NSTextView,
                      doCommandBy commandSelector: Selector) -> Bool {
+            // ⌘↩ は insertNewline として来ることも、
+            // 割り当て無しの noop として来ることもある。どちらも拾う
+            if commandSelector == #selector(NSResponder.insertNewline(_:))
+                || commandSelector == Selector(("noop:")),
+               let onCommandSubmit = parent.onCommandSubmit,
+               let event = NSApp.currentEvent, event.type == .keyDown,
+               event.keyCode == 36 || event.keyCode == 76,
+               event.modifierFlags.contains(.command) {
+                onCommandSubmit()
+                return true
+            }
             switch commandSelector {
             case #selector(NSResponder.insertNewline(_:)):
                 parent.onSubmit()

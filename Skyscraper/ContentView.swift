@@ -2026,7 +2026,8 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         return after.isEmpty || after.first == "/" || after.first == "?" || after.first == "#"
     }
 
-    private static func searchURL(for text: String) -> URL? {
+    // セオドア (Theodore.swift) も、棚に無いサイトを検索する時に使う
+    static func searchURL(for text: String) -> URL? {
         var comps = URLComponents(string: "https://www.google.com/search")!
         comps.queryItems = [URLQueryItem(name: "q", value: text)]
         return comps.url

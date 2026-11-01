@@ -27,6 +27,7 @@ struct SettingsView: View {
     @AppStorage(CleanLink.enabledKey) private var cleansLinks = true
     @AppStorage(GeolocationStore.enabledKey) private var allowsLocation = true
     @AppStorage(CloseWindowConfirmation.enabledKey) private var confirmsWindowClose = true
+    @AppStorage(Theodore.enabledKey) private var theodoreEnabled = false
     @State private var showingPasswords = false
     @State private var showingExtensions = false
     @State private var pane: Pane = .general
@@ -469,6 +470,36 @@ struct SettingsView: View {
                 Spacer(minLength: 0)
             }
         }
+        .padding(.bottom, 22)
+
+        // ══ セオドア ══ (Theodore.swift)
+        sectionHeader("Theodore")
+
+        // ── 館内案内板のエレベーターボーイ ──
+        //
+        // 既定は切。Skyscraper は、頼まれもしないのに動く AI を載せない。
+        // 入れても、セオドアが動くのは案内板で頼まれた時だけだ。
+        // Apple Intelligence が使えない Mac では入れられない (注記を出す)
+        Toggle(isOn: $theodoreEnabled) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Ask Theodore in the Directory")
+                    .font(.system(size: 12, design: .serif))
+                    .foregroundColor(Deco.cream)
+                Text("Theodore, the elevator attendant, takes requests typed into the Directory (⌘K): closing tabs, opening bookmarks, reopening closed tabs and working the current tab. Requests are understood on this Mac with Apple Intelligence and are never sent anywhere.")
+                    .font(.system(size: 10, design: .serif))
+                    .foregroundColor(Deco.dimGold)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !Theodore.isModelReady {
+                    Text("Apple Intelligence is turned off or not available on this Mac.")
+                        .font(.system(size: 10, design: .serif))
+                        .foregroundColor(Deco.faintGold)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .toggleStyle(.switch)
+        .tint(Deco.gold)
+        .disabled(!Theodore.isModelReady)
         .padding(.bottom, 22)
 
         // ══ 拡張機能 ══

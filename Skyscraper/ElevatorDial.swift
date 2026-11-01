@@ -59,6 +59,7 @@ struct ElevatorDial: View {
 
 // MARK: - 文字盤の部品
 //
+// セオドアの紋章 (Directory.swift の TheodoreEmblem) も借りるので private にしない。
 // どれも同じ枠 (幅いっぱいの半円、要は下辺の中央) で描く。
 // 要の位置と半径はここで一度だけ決める
 
@@ -84,7 +85,7 @@ private struct DialGeometry {
 }
 
 // 外周の弧と、足元の水平の罫
-private struct DialFace: Shape {
+struct DialFace: Shape {
     func path(in rect: CGRect) -> Path {
         let g = DialGeometry(rect)
         var path = Path()
@@ -100,7 +101,7 @@ private struct DialFace: Shape {
 }
 
 // 階の目盛り。九本で、一つおきに長い
-private struct DialTicks: Shape {
+struct DialTicks: Shape {
     func path(in rect: CGRect) -> Path {
         let g = DialGeometry(rect)
         var path = Path()
@@ -115,7 +116,7 @@ private struct DialTicks: Shape {
 }
 
 // 針。value を animatableData にしてあるので、間の角度も描かれる
-private struct DialNeedle: Shape {
+struct DialNeedle: Shape {
     var value: Double
 
     var animatableData: Double {
@@ -133,7 +134,7 @@ private struct DialNeedle: Shape {
 }
 
 // 針の要
-private struct DialHub: Shape {
+struct DialHub: Shape {
     func path(in rect: CGRect) -> Path {
         let g = DialGeometry(rect)
         return Path(ellipseIn: CGRect(x: g.center.x - 1.8, y: g.center.y - 1.8,

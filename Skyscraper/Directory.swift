@@ -13,6 +13,13 @@
 //
 //  階はエレベーターの押しボタンで選ぶ。Tab で次の階、⇧Tab で前の階。
 //
+//  ── セオドア ──
+//  打ち込み欄は探すのとセオドア (Theodore.swift) に頼むのを兼ねる。
+//  打てば今まで通り一瞬で絞り込み、一覧の一番下に「セオドアに頼む」の行が出る。
+//  何も当たらなければその行だけが残るので、↩ でそのまま頼める。
+//  ⌘↩ なら当たりがあってもセオドアへ。
+//  セオドアが話している間は一覧の代わりに彼の札が出て、Esc で一覧へ戻る。
+//
 //  ── 盤の土台 ──
 //  暗幕・打ち込み欄・ジグザグ罫はタブ検索の盤 (TabSearch.swift) と同じ作り。
 //  打ち込み欄そのものも TabSearchField を借りている。
@@ -211,7 +218,8 @@ enum Directory {
         }
     }
 
-    private static func actions(_ context: DirectoryContext) -> [DirectoryEntry] {
+    // セオドア (Theodore.swift) もこの一覧から選ぶ
+    static func actions(_ context: DirectoryContext) -> [DirectoryEntry] {
         let manager = context.manager
         let tab = manager.selectedTab
         // ロビー (新規タブの盤) ではページに働きかける操作を出さない
@@ -369,12 +377,15 @@ struct DirectoryPanel: View {
     @Environment(\.openSettings) private var openSettings
 
     @State private var query = ""
+    // 打ち込み欄の案内に添える頼みごとの例。盤を開くたびに選び直す
+    @State private var example = TheodoreLines.example
     @State private var floor: DirectoryFloor = .lobby
     @State private var selection = 0
     // 選んだ行を追いかけてスクロールするか。↑↓ で選んだ時だけ立てる。
     // カーソルが乗った行も選ばれるが、そちらでまで追いかけると
     // スクロール→カーソルの下に別の行→選び直し→スクロール…と喧嘩する
     @State private var followsSelection = false
+    @StateObject private var theodore = Theodore()
 
     private var context: DirectoryContext {
         DirectoryContext(manager: manager,
@@ -383,9 +394,23 @@ struct DirectoryPanel: View {
                          openSettings: { openSettings() })
     }
 
+    // セオドアに頼む行。打ち込みがあって、Apple Intelligence が使える時だけ
+    private var askEntry: DirectoryEntry? {
+        let request = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !request.isEmpty, Theodore.isAvailable else { return nil }
+        return DirectoryEntry(id: Self.askID,
+                              floor: floor,
+                              title: String(localized: "Ask Theodore: “\(request)”"),
+                              symbol: "bell",
+                              perform: {})
+    }
+
+    private static let askID = "theodore:ask"
+
     var body: some View {
         let sections = Directory.sections(floor: floor, query: query, context: context)
-        let flat = sections.flatMap(\.entries)
+        let ask = askEntry
+        let flat = sections.flatMap(\.entries) + (ask.map { [$0] } ?? [])
 
         ZStack {
             // 暗幕。押せば閉じる
@@ -401,7 +426,11 @@ struct DirectoryPanel: View {
                     .frame(height: 5)
                     .padding(.horizontal, 18)
                     .padding(.bottom, 6)
-                list(sections, flat: flat)
+                if theodore.isIdle {
+                    list(sections, flat: flat, ask: ask)
+                } else {
+                    theodoreCard
+                }
             }
             .padding(.vertical, 16)
             .frame(width: 600)
@@ -410,8 +439,18 @@ struct DirectoryPanel: View {
             .overlay(Rectangle().stroke(Deco.faintGold, lineWidth: 1).padding(-5))
             .shadow(color: .black.opacity(0.6), radius: 20, y: 8)
         }
-        .onChange(of: query) { _, _ in selection = 0 }
-        .onChange(of: floor) { _, _ in selection = 0 }
+        .onChange(of: query) { _, _ in
+            selection = 0
+            theodore.reset()
+        }
+        .onChange(of: floor) { _, _ in
+            selection = 0
+            theodore.reset()
+        }
+        // 考え中に盤が畳まれたら、答えは捨てる (後から勝手に開かないように)
+        .onDisappear { theodore.reset() }
+        // 開いた時にモデルを温めておく (入りの時だけ。何も喋らせない)
+        .onAppear { theodore.prewarm() }
     }
 
     // ── 見出しと押しボタン ──
@@ -462,9 +501,12 @@ struct DirectoryPanel: View {
             focusTrigger: manager.directoryFocusTrigger,
             onSubmit: { submit(flat) },
             onMove: { move($0, count: flat.count) },
-            onCancel: close,
-            placeholder: String(localized: "Search the directory"),
-            onTab: changeFloor
+            onCancel: cancel,
+            placeholder: Theodore.isAvailable
+                ? String(localized: "Search, or ask Theodore — e.g. “\(example)”")
+                : String(localized: "Search the directory"),
+            onTab: changeFloor,
+            onCommandSubmit: askTheodore
         )
         .frame(height: 20)
         .padding(.horizontal, 14)
@@ -479,7 +521,8 @@ struct DirectoryPanel: View {
 
     @ViewBuilder
     private func list(_ sections: [DirectorySection],
-                      flat: [DirectoryEntry]) -> some View {
+                      flat: [DirectoryEntry],
+                      ask: DirectoryEntry?) -> some View {
         if flat.isEmpty {
             Group {
                 if query.isEmpty {
@@ -507,6 +550,15 @@ struct DirectoryPanel: View {
                             ForEach(Array(section.entries.enumerated()), id: \.element.id) { index, entry in
                                 row(offset + index, entry).id(entry.id)
                             }
+                        }
+                        // 一番下にセオドアへの取り次ぎ
+                        if let ask {
+                            if !sections.isEmpty {
+                                Rectangle().fill(Deco.faintGold).frame(height: 0.5)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 4)
+                            }
+                            row(flat.count - 1, ask).id(ask.id)
                         }
                     }
                     .padding(.horizontal, 10)
@@ -605,23 +657,154 @@ struct DirectoryPanel: View {
         }
     }
 
+    // ── セオドアの札 ──
+
+    private var theodoreCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                TheodoreEmblem(isThinking: theodore.isThinking, progress: theodore.progress)
+                Text(verbatim: "THEODORE")
+                    .font(.system(size: 11, design: .serif))
+                    .tracking(3)
+                    .foregroundColor(Deco.gold)
+                Text(verbatim: "·  ELEVATOR ATTENDANT")
+                    .font(.system(size: 9, design: .serif))
+                    .tracking(2)
+                    .foregroundColor(Deco.dimGold)
+                Spacer()
+            }
+
+            // お願いの控え
+            Text(verbatim: "“\(theodore.request)”")
+                .font(.system(size: 11, design: .serif))
+                .italic()
+                .foregroundColor(Deco.dimGold)
+                .lineLimit(2)
+
+            // 台詞
+            Text(verbatim: theodore.line)
+                .font(.system(size: 13, design: .serif))
+                .foregroundColor(Deco.cream)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let tabs = theodore.proposedTabs {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(tabs) { item in
+                            HStack(spacing: 10) {
+                                FaviconBadge(image: item.favicon, isPinned: false, side: 16)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(verbatim: item.title)
+                                        .font(.system(size: 12, design: .serif))
+                                        .foregroundColor(Deco.gold)
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                    if !item.host.isEmpty {
+                                        Text(verbatim: item.host)
+                                            .font(.system(size: 10, design: .serif))
+                                            .tracking(1)
+                                            .foregroundColor(Deco.dimGold)
+                                            .lineLimit(1)
+                                    }
+                                }
+                                Spacer(minLength: 0)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+                // 枚数が少なければ詰め、多ければ巻物にする
+                .frame(height: min(CGFloat(tabs.count) * 36, 240))
+
+                if theodore.keptPinned > 0 {
+                    Text(verbatim: TheodoreLines.keptPinned(theodore.keptPinned))
+                        .font(.system(size: 11, design: .serif))
+                        .foregroundColor(Deco.dimGold)
+                }
+
+                HStack(spacing: 14) {
+                    Spacer()
+                    keyHint("esc", String(localized: "Cancel")) { theodore.reset() }
+                    keyHint("↩", theodore.confirmLabel) { theodore.confirm(done: close) }
+                }
+            } else if case .proposeSearch = theodore.state {
+                HStack(spacing: 14) {
+                    Spacer()
+                    keyHint("esc", String(localized: "Cancel")) { theodore.reset() }
+                    keyHint("↩", String(localized: "Search the Web")) { theodore.confirm(done: close) }
+                }
+            } else if !theodore.isThinking {
+                HStack {
+                    Spacer()
+                    keyHint("esc", String(localized: "Back")) { theodore.reset() }
+                }
+            }
+        }
+        .padding(.horizontal, 28)
+        .padding(.vertical, 12)
+    }
+
+    // 札の足元のキーの案内。押しても効く
+    private func keyHint(_ key: String,
+                         _ label: String,
+                         action: @escaping @MainActor () -> Void) -> some View {
+        HStack(spacing: 6) {
+            Text(verbatim: key)
+                .font(.system(size: 9, design: .serif))
+                .foregroundColor(Deco.gold)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .overlay(Hexagon(inset: 3).stroke(Deco.faintGold, lineWidth: 0.5))
+            Text(verbatim: label)
+                .font(.system(size: 11, design: .serif))
+                .tracking(1)
+                .foregroundColor(Deco.gold)
+        }
+        .contentShape(Rectangle())
+        // Button にしないのは、押した拍子に打ち込み欄から焦点を奪わないため
+        .onTapGesture { action() }
+    }
+
     // ── 操作 ──
 
     private func submit(_ flat: [DirectoryEntry]) {
+        // セオドアの札が出ている間、↩ は提案を呑む時だけ働く
+        guard theodore.isIdle else {
+            theodore.confirm(done: close)
+            return
+        }
         guard flat.indices.contains(selection) else { return }
         activate(flat[selection])
+    }
+
+    private func askTheodore() {
+        guard Theodore.isAvailable else { return }
+        theodore.ask(query, context: context, done: close)
+    }
+
+    // Esc。セオドアの札が出ていれば一覧へ戻り、そうでなければ盤を畳む
+    private func cancel() {
+        if theodore.isIdle {
+            close()
+        } else {
+            theodore.reset()
+        }
     }
 
     // 盤を畳んでから実行する。
     // 盤が出たままだと、ページ内検索などが焦点を受け取れない
     private func activate(_ entry: DirectoryEntry) {
+        if entry.id == Self.askID {
+            askTheodore()
+            return
+        }
         close()
         DispatchQueue.main.async { entry.perform() }
     }
 
     // ↑↓。端まで来たら巻き戻す (タブ検索と同じ流儀)
     private func move(_ offset: Int, count: Int) -> Bool {
-        guard count > 0 else { return true }
+        guard count > 0, theodore.isIdle else { return true }
         followsSelection = true
         selection = ((selection + offset) % count + count) % count
         return true
@@ -638,5 +821,90 @@ struct DirectoryPanel: View {
 
     private func close() {
         manager.isDirectoryVisible = false
+    }
+}
+
+
+// MARK: - セオドアの紋章
+
+// 待っている間は扇、考えている間はエレベーターの文字盤。
+//
+// 針はセオドアの進み具合 (Theodore.progress) を指す。上がるだけで下がらない——
+// 行ったり来たりさせると「引き返している」ように見えた (Ken の指摘、2026-11)。
+// 答えが出たら右端まで振り切り、少し見せてから扇へ溶け替える
+// (読み込みの針 ElevatorDial と同じ段取り)
+struct TheodoreEmblem: View {
+    let isThinking: Bool
+    let progress: Double
+
+    // 文字盤を出しているか。考え終わってもすぐには畳まず、振り切った針を少し見せる
+    @State private var showsDial = false
+    // 畳む予約の番号。予約の間に次のお願いが始まったら、古い予約は捨てる
+    @State private var hideToken = 0
+
+    var body: some View {
+        ZStack {
+            if showsDial {
+                TheodoreThinkingDial(progress: isThinking ? progress : 1)
+                    .transition(.opacity)
+            } else {
+                // ロビー下端の扇と同じ Sunburst。文字盤と同じ半円の輪郭なので、
+                // 溶け替えると放射線が目盛りと針に変わったように見える
+                Sunburst(rays: 5, arcRatios: [1.0, 0.55])
+                    .stroke(Deco.gold, lineWidth: 1)
+                    .padding(.horizontal, 1.5)
+                    .padding(.bottom, 1.5)
+                    .transition(.opacity)
+            }
+        }
+        .frame(width: 26, height: 16)
+        .animation(.easeInOut(duration: 0.35), value: showsDial)
+        .accessibilityHidden(true)
+        .onAppear { showsDial = isThinking }
+        .onChange(of: isThinking) { _, thinking in
+            hideToken &+= 1
+            if thinking {
+                showsDial = true
+            } else {
+                // 針が右端へ振り切るのを見届けてから畳む
+                let token = hideToken
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                    if token == hideToken { showsDial = false }
+                }
+            }
+        }
+    }
+}
+
+// 考え中の文字盤。読み込みの針と同じ部品で描く
+private struct TheodoreThinkingDial: View {
+    let progress: Double
+
+    // 指している位置。値が飛んでもなめらかに振れるよう、ここを経由して動かす
+    @State private var needle = 0.04
+
+    var body: some View {
+        ZStack {
+            DialFace()
+                .stroke(Deco.faintGold, lineWidth: 1)
+            DialTicks()
+                .stroke(Deco.dimGold, style: StrokeStyle(lineWidth: 1, lineCap: .round))
+            DialNeedle(value: needle)
+                .stroke(Deco.gold, style: StrokeStyle(lineWidth: 1.4, lineCap: .round))
+            DialHub()
+                .fill(Deco.gold)
+        }
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.6)) { needle = max(progress, 0.04) }
+        }
+        .onChange(of: progress) { _, value in
+            // 上がるだけ。ただし振り切った直後に次のお願いが始まった時だけは
+            // (文字盤を畳む前)、一階へ戻してから上げ直す
+            if value < needle {
+                guard value < 0.3 else { return }
+                needle = 0.04
+            }
+            withAnimation(.easeOut(duration: value >= 1 ? 0.3 : 0.6)) { needle = value }
+        }
     }
 }
