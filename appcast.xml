@@ -7,6 +7,26 @@
     <language>en</language>
 
     <item>
+      <title>Version 1.37</title>
+      <pubDate>Sun, 01 Nov 2026 12:20:33 +0900</pubDate>
+      <sparkle:version>37</sparkle:version>
+      <sparkle:shortVersionString>1.37</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>Skyscraper 1.37</h2>
+        <ul>
+          <li>パスキーの PRF に対応しました。  </li>
+          <li>Apple Foundation Models 製 AI アシスタント Theodore(セオドア) を実装しました。設定でオン・オフができます。(デフォルトはオフです)</li>
+          <li>「リンクを新規ウインドウで開く」を選択した際にポップアップがブロックされ、その後に「開く」を選択すると新規ウインドウではなくタブで開いてしまう問題を今度こそ修正しました(たぶん)。</li>
+          <li>タブをミュートしている間、たまに一瞬音が漏れる問題を修正しました。</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://github.com/inugamine/Skyscraper/releases/download/v1.37/Skyscraper-1.37.zip"
+        sparkle:edSignature="r8/BZenB+qOv3I6zppXlqEDC/5SvQO8IGjvSypRzQG6HsOgHwut4tjgNarb99TXa6/bPn5aNwKU+dqu3hOUADA=="
+        length="13699759"
+        type="application/octet-stream" />
+    </item>    <item>
       <title>Version 1.36</title>
       <pubDate>Sun, 01 Nov 2026 11:13:47 +0900</pubDate>
       <sparkle:version>36</sparkle:version>
