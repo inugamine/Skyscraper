@@ -29,9 +29,14 @@
 //  - アプリが手前に戻った時 (知らせが届かなかった時の保険)
 //  - ロビーを開いた時
 //
-//  終了する時と他のアプリへ移る時は、五秒の待ちを飛ばしてその場で送る。
-//  終了は送り終わるまで (最大三秒) 待たせる (AppDelegate.applicationShouldTerminate)。
-//  それでも間に合わなかった分は、次にその Mac で起動した時に上書きされる。
+//  他のアプリへ移る時は、五秒の待ちを飛ばしてその場で送る。
+//
+//  終了する時は「このMacで開いているタブは無い」と送って空にしてから閉じる
+//  (AppDelegate.applicationShouldTerminate、最大三秒待たせる)。
+//  受け取る側は空の Mac を並べないので、他の Mac のロビーからは節ごと消える。
+//  Safari は閉じた後も前のタブを見せ続けるが、Skyscraper は「今開いている物」だけを
+//  見せる (Ken の決定)。次に起動すればセッションが戻り、数秒でまた並ぶ。
+//  間に合わなかった時 (圏外で終了した等) も、次の起動で上書きされる。
 //
 //  知らせは中身の無い「起こすだけ」のもの (content-available)。
 //  利用者に通知の許可を訊く盤は出ない。
@@ -173,27 +178,36 @@ final class TabSync: ObservableObject {
         Task { await ensureSubscription() }
     }
 
-    // ── 終了の前に送り切る (AppDelegate の applicationShouldTerminate から) ──
+    // ── 待ちを飛ばして送る・終了の前に空にする ──
     //
     // 五秒の待ちの間に終了されると、閉じたタブが向こうに伝わらないまま残る。
     // (YouTube を閉じて ⌘Q すると、他の Mac にはまだ YouTube が並んでいた)
-    // willTerminate の知らせでは、もう返事を待つ通信は間に合わない。
+    // willTerminate の知らせでは、もう返事を待つ通信は間に合わないので、
+    // その手前の applicationShouldTerminate で終了を待たせて送る。
 
-    // 送っていない変化があるか
+    // 送っていない変化があるか (他のアプリへ移る時に見る)
     var hasPendingChanges: Bool {
         guard isEnabled else { return false }
         return localTabs() != sentTabs || localName() != sentName
     }
 
-    // 待ちを飛ばして今すぐ送る。timeout を過ぎたら諦めて戻る——
-    // iCloud が黙り込んでも、終了まで固まらないように
-    func flush(timeout: TimeInterval) async {
+    // 終了の前に空にする必要があるか。
+    // 今回の起動でまだ一度も送っていなければ (sentTabs が nil)、
+    // 前回の起動の分が向こうに残っているかもしれないので空にしに行く
+    var needsClearOnQuit: Bool {
+        guard isEnabled else { return false }
+        return sentTabs?.isEmpty != true
+    }
+
+    // 待ちを飛ばして今すぐ送る。clearing なら空の一覧を送る (終了の前)。
+    // timeout を過ぎたら諦めて戻る——iCloud が黙り込んでも、終了まで固まらないように
+    func flush(timeout: TimeInterval, clearing: Bool = false) async {
         debounce?.cancel()
         debounce = nil
         pushing?.cancel()
         pushing = nil
         await withTaskGroup(of: Void.self) { group in
-            group.addTask { await self.push() }
+            group.addTask { await self.push(clearing: clearing) }
             group.addTask { try? await Task.sleep(for: .seconds(timeout)) }
             await group.next()
             group.cancelAll()
@@ -320,9 +334,9 @@ final class TabSync: ObservableObject {
 
     // MARK: - 送る
 
-    private func push() async {
+    private func push(clearing: Bool = false) async {
         guard isEnabled, await isUsable, await ensureZone() else { return }
-        let tabs = localTabs()
+        let tabs = clearing ? [] : localTabs()
         let name = localName()
         guard tabs != sentTabs || name != sentName else {
             Self.log.debug("タブが動いていないので送らない")
