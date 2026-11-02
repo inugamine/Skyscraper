@@ -29,6 +29,10 @@
 //  - アプリが手前に戻った時 (知らせが届かなかった時の保険)
 //  - ロビーを開いた時
 //
+//  終了する時と他のアプリへ移る時は、五秒の待ちを飛ばしてその場で送る。
+//  終了は送り終わるまで (最大三秒) 待たせる (AppDelegate.applicationShouldTerminate)。
+//  それでも間に合わなかった分は、次にその Mac で起動した時に上書きされる。
+//
 //  知らせは中身の無い「起こすだけ」のもの (content-available)。
 //  利用者に通知の許可を訊く盤は出ない。
 //
@@ -154,7 +158,46 @@ final class TabSync: ObservableObject {
                 self?.refresh(force: true)
             }
         }
+        // 他のアプリへ移る時は、五秒の待ちを飛ばしてその場で送る。
+        // 席を外す前に、一番新しい状態を置いていく
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didResignActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.hasPendingChanges else { return }
+                Task { await self.flush(timeout: 10) }
+            }
+        }
         Task { await ensureSubscription() }
+    }
+
+    // ── 終了の前に送り切る (AppDelegate の applicationShouldTerminate から) ──
+    //
+    // 五秒の待ちの間に終了されると、閉じたタブが向こうに伝わらないまま残る。
+    // (YouTube を閉じて ⌘Q すると、他の Mac にはまだ YouTube が並んでいた)
+    // willTerminate の知らせでは、もう返事を待つ通信は間に合わない。
+
+    // 送っていない変化があるか
+    var hasPendingChanges: Bool {
+        guard isEnabled else { return false }
+        return localTabs() != sentTabs || localName() != sentName
+    }
+
+    // 待ちを飛ばして今すぐ送る。timeout を過ぎたら諦めて戻る——
+    // iCloud が黙り込んでも、終了まで固まらないように
+    func flush(timeout: TimeInterval) async {
+        debounce?.cancel()
+        debounce = nil
+        pushing?.cancel()
+        pushing = nil
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await self.push() }
+            group.addTask { try? await Task.sleep(for: .seconds(timeout)) }
+            await group.next()
+            group.cancelAll()
+        }
     }
 
     // ── プッシュ通知の取り次ぎ (AppDelegate から) ──

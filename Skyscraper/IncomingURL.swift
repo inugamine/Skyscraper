@@ -127,4 +127,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                      didReceiveRemoteNotification userInfo: [String: Any]) {
         TabSync.shared.handleRemoteNotification(userInfo)
     }
+
+    // ── 終了の前に、閉じたタブを他の Mac へ送り切る ── (TabSync.swift)
+    //
+    // 送っていない変化がある時だけ「少し待て」と返し、送り終えて (最大三秒)
+    // から閉じる。変化が無ければ待たせない
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard TabSync.shared.hasPendingChanges else { return .terminateNow }
+        Task { @MainActor in
+            await TabSync.shared.flush(timeout: 3)
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
 }
