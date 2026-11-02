@@ -7,6 +7,23 @@
     <language>en</language>
 
     <item>
+      <title>Version 1.38</title>
+      <pubDate>Mon, 02 Nov 2026 21:46:31 +0900</pubDate>
+      <sparkle:version>38</sparkle:version>
+      <sparkle:shortVersionString>1.38</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>Skyscraper 1.38</h2>
+        <ul>
+          <li>Skyscraper を終了すると、その Mac で開いていたタブが他の Mac のロビーから下がるようになりました。タブを閉じてすぐに終了した時も、閉じたことが確実に伝わります。</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://github.com/inugamine/Skyscraper/releases/download/v1.38/Skyscraper-1.38.zip"
+        sparkle:edSignature="IsmcKZ+XT6cryRPnTqM/Dnmbr/7SVjjXzW5al2WqfnXZQonNcGvxK7lNDLjKazlHzCTrH5OQ8mQV5y6jJWW6Cg=="
+        length="13701836"
+        type="application/octet-stream" />
+    </item>    <item>
       <title>Version 1.37</title>
       <pubDate>Sun, 01 Nov 2026 12:20:33 +0900</pubDate>
       <sparkle:version>37</sparkle:version>
