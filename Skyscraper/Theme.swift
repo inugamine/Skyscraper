@@ -42,6 +42,11 @@ struct DecoPalette {
     let dimGold: UInt32
     let faintGold: UInt32
     let rust: UInt32       // 警告の錆色
+    // 明るい地の配色か。アイボリーだけが true。
+    // 釦・トグル・スクロールバーなど、システムが描く部品の明暗をこれに合わせる
+    var isLight: Bool = false
+
+    var colorScheme: ColorScheme { isLight ? .light : .dark }
 
     static func color(_ hex: UInt32) -> Color {
         Color(red:   Double((hex >> 16) & 0xff) / 255,
@@ -91,6 +96,33 @@ struct DecoPalette {
         faintGold: 0x325e56,
         rust:      0xb56a3c
     )
+
+    // ── アイボリーと金 ──
+    // 象牙色の地に、深い金と墨色の文字。
+    // 象牙と漆と金を合わせたアール・デコの調度品 (ジャン・デュナンの漆芸など) の取り合わせ。
+    // Skyscraper で唯一の明るい配色。
+    //
+    // 明るい地では役目の明暗が入れ替わる:
+    //   ink/panel/field … 象牙色 (field だけ紙のように一段白く)
+    //   cream (本文の文字) … 墨色
+    //   gold … 黒と金の金をそのまま置くと地に溶けるので、焼けた金まで沈めた
+    // 白地のページと並ぶと黄ばんで見えるので、地は白寄りの象牙にしてある。
+    // 金は茶色に転ばないよう、色相を黄に寄せて鮮やかさを上げた。
+    // 盤の地との対比は黒と金のものとおおむね揃えてある:
+    //   gold 7.9 → 4.3 (これ以上沈めると金ではなく茶色に見える)
+    //   cream 13.3 → 13.5、dimGold 4.4 → 4.8、faintGold 2.2 → 2.2、rust 4.5 → 4.9
+    static let ivoryGold = DecoPalette(
+        ink:       0xf9f6ec,
+        panel:     0xf3eee0,
+        panel2:    0xebe4d2,
+        field:     0xfdfbf5,
+        gold:      0x8f6a0e,
+        cream:     0x2a2216,
+        dimGold:   0x75674c,
+        faintGold: 0xb0a079,
+        rust:      0xa3502a,
+        isLight:   true
+    )
 }
 
 // MARK: - 配色の名簿
@@ -98,6 +130,7 @@ struct DecoPalette {
 enum DecoTheme: String, CaseIterable, Identifiable {
     case blackGold
     case verdigrisGold
+    case ivoryGold
 
     var id: String { rawValue }
 
@@ -105,6 +138,7 @@ enum DecoTheme: String, CaseIterable, Identifiable {
         switch self {
         case .blackGold:     "Black & Gold"
         case .verdigrisGold: "Verdigris & Gold"
+        case .ivoryGold:     "Ivory & Gold"
         }
     }
 
@@ -112,6 +146,7 @@ enum DecoTheme: String, CaseIterable, Identifiable {
         switch self {
         case .blackGold:     .blackGold
         case .verdigrisGold: .verdigrisGold
+        case .ivoryGold:     .ivoryGold
         }
     }
 }
@@ -155,6 +190,10 @@ enum Deco {
     static var dimGold:   Color { DecoPalette.color(palette.dimGold) }
     static var faintGold: Color { DecoPalette.color(palette.faintGold) }
     static var rust:      Color { DecoPalette.color(palette.rust) }
+
+    // 窓ごとに .preferredColorScheme(Deco.scheme) で使う。
+    // 明るい配色でシステムの部品まで暗いままだと、象牙の地に黒い釦が浮く
+    static var scheme: ColorScheme { palette.colorScheme }
 }
 
 // MARK: - AppKit の入力欄を塗る

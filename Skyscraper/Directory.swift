@@ -215,6 +215,7 @@ enum Directory {
         switch theme {
         case .blackGold:     String(localized: "Black & Gold")
         case .verdigrisGold: String(localized: "Verdigris & Gold")
+        case .ivoryGold:     String(localized: "Ivory & Gold")
         }
     }
 
