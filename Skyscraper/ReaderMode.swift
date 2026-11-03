@@ -171,7 +171,7 @@ enum Reader {
         }
         .__sr-body blockquote {
             margin: 24px 0; padding: 4px 0 4px 20px;
-            border-left: 2px solid \(gold); color: #cbbd97;
+            border-left: 2px solid \(gold); color: color-mix(in srgb, \(cream) 85%, \(ink));
         }
         .__sr-body pre, .__sr-body code {
             font-family: ui-monospace, 'SF Mono', Menlo, monospace;

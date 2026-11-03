@@ -40,7 +40,7 @@ struct WebExtensionListView: View {
         }
         .frame(minWidth: 520, minHeight: 420)
         .background(Deco.ink)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Deco.scheme)
         .animation(.easeInOut(duration: 0.2), value: needsReloadNotice)
         .sheet(item: $reviewing) { entry in
             ExtensionPermissionSheet(entry: entry)

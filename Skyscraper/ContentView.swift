@@ -7395,7 +7395,7 @@ struct ContentView: View {
             }
         }
         .environmentObject(bookmarks)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Deco.scheme)
         // この窓が手前に来たら、自分の管理人と翻訳役をメニューに差し出す
         .focusedSceneValue(\.tabManager, manager)
         .focusedSceneValue(\.translator, translator)

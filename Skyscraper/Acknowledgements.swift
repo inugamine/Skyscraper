@@ -542,5 +542,5 @@ struct AcknowledgementsList: View {
         .padding(24)
         .frame(width: 520)
         .background(Deco.ink)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Deco.scheme)
 }

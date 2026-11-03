@@ -95,7 +95,7 @@ struct ExtensionPermissionSheet: View {
         }
         .frame(width: 460, height: 520)
         .background(Deco.ink)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Deco.scheme)
         .onAppear {
             allowsPrivateData = ExtensionPermissionStore.allowsPrivateData(for: entry.id)
         }

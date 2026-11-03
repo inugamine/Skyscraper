@@ -85,7 +85,7 @@ struct SettingsView: View {
         }
         .frame(width: 520, height: 580)
         .background(Deco.ink)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Deco.scheme)
         .animation(.easeInOut(duration: 0.2), value: privacy.lastClearedMessage)
         .sheet(isPresented: $showingPasswords) {
             PasswordListView()

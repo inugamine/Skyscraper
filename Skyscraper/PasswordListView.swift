@@ -154,7 +154,7 @@ struct PasswordListView: View {
         .padding(24)
         .frame(width: 520, height: 470)
         .background(Deco.ink)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Deco.scheme)
         .onAppear(perform: reload)
         .onChange(of: store.revision) { _, _ in reload() }
         .confirmationDialog("Delete every saved password?",
