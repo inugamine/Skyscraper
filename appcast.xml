@@ -7,6 +7,23 @@
     <language>en</language>
 
     <item>
+      <title>Version 1.39</title>
+      <pubDate>Wed, 04 Nov 2026 09:01:56 +0900</pubDate>
+      <sparkle:version>39</sparkle:version>
+      <sparkle:shortVersionString>1.39</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>Skyscraper 1.39</h2>
+        <ul>
+          <li>カラーテーマに「アイボリーと金」を追加しました。</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://github.com/inugamine/Skyscraper/releases/download/v1.39/Skyscraper-1.39.zip"
+        sparkle:edSignature="iOBWV+JYr6xD49ItlXnd7N2jFFWQsWKDMLqt284M2fGSYhFFxqTdC7n52EtYnMQjqMEeuuzR+7qHlIkSvbkDCQ=="
+        length="13702162"
+        type="application/octet-stream" />
+    </item>    <item>
       <title>Version 1.38</title>
       <pubDate>Mon, 02 Nov 2026 21:46:31 +0900</pubDate>
       <sparkle:version>38</sparkle:version>
