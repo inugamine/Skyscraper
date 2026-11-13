@@ -4024,23 +4024,70 @@ final class TabManager: NSObject, ObservableObject {
         return tab
     }
 
+    // ⌘T 用：今見ているタブのすぐ下に新しいタブを開く。
+    // 帯の「New Tab」釦や他の入口は addTab のまま (末尾に付く)——
+    // 釦は帯の一番下にあるので、その真上に生えるのが自然だ
+    func addTabBelowSelected() {
+        let tab = makeTab(url: nil, profile: nil)
+        // 続けて ⌘T を押した分を順に並べる控え (lastOpened) は使わない。
+        // 開いたタブがすぐ選択中になるので、次の ⌘T は自然にその下へ入る
+        if let current = selectedTab,
+           let index = tabs.firstIndex(where: { $0.id == current.id }) {
+            // ピン留めの欄の中には入れない
+            let pinnedCount = tabs.prefix { $0.isPinned }.count
+            tabs.insert(tab, at: min(max(index + 1, pinnedCount), tabs.count))
+        } else {
+            tabs.append(tab)
+        }
+        selectedID = tab.id
+    }
+
     // ⌘クリック用：裏で開いて、今のタブに留まる
     @discardableResult
-    func addTabInBackground(url: String, profile: UUID? = nil) -> Tab {
+    func addTabInBackground(url: String, profile: UUID? = nil, opener: Tab? = nil) -> Tab {
         let tab = makeTab(url: url, profile: profile)
-        tabs.append(tab)
+        insert(tab, openedFrom: opener)
         return tab
     }
+
+    // 新しいタブを帯に挿す。
+    //
+    // ページから開かれたタブ (⌘クリック・window.open) は、開いた元のタブの
+    // すぐ下に入れる。同じタブから続けて開いた分は、前に開いた分の下へ
+    // 順に並べる (Chrome と同じ。逆順に積まない)。
+    // 元が分からない時 (ブックマークや拡張機能から) は今まで通り末尾
+    private func insert(_ tab: Tab, openedFrom opener: Tab?) {
+        guard let opener,
+              let openerIndex = tabs.firstIndex(where: { $0.id == opener.id }) else {
+            tabs.append(tab)
+            return
+        }
+        var index = openerIndex + 1
+        // 同じ元から続けて開いているなら、直前に開いた分の下へ
+        if let last = lastOpened, last.opener == opener.id,
+           let childIndex = tabs.firstIndex(where: { $0.id == last.child }),
+           childIndex > openerIndex {
+            index = childIndex + 1
+        }
+        // ピン留めの欄の中には入れない (新しいタブは留まっていない)
+        let pinnedCount = tabs.prefix { $0.isPinned }.count
+        index = min(max(index, pinnedCount), tabs.count)
+        tabs.insert(tab, at: index)
+        lastOpened = (opener.id, tab.id)
+    }
+
+    // 直前に「どのタブから、どのタブを開いたか」。続けて開いた分を順に並べるための控え
+    private var lastOpened: (opener: UUID, child: UUID)?
 
     // window.open() 用：WebKit が用意した設定で器を起こし、その WKWebView を返す。
     // 中身を入れるのは WebKit の仕事なので、ここでは load しない。
     // 本物のポップアップ窓に対応するので、開いたらそちらを見せる
     func addPopupTab(configuration: WKWebViewConfiguration,
-                     profile: UUID? = nil) -> WKWebView {
+                     profile: UUID? = nil, opener: Tab? = nil) -> WKWebView {
         // 置き場そのものは configuration が運んでくる。
         // profile を渡すのは、生まれたタブが自分の所属を名乗れるようにするためだ
         let tab = makeTab(url: nil, popupConfiguration: configuration, profile: profile)
-        tabs.append(tab)
+        insert(tab, openedFrom: opener)
         selectedID = tab.id
         return tab.webView
     }
@@ -4137,8 +4184,8 @@ final class TabManager: NSObject, ObservableObject {
         // 開いた側のプロファイルを継ぐ。値で掴む（let なので変わらない）——
         // tab 本人をクロージャに握らせると、タブが自分を掴む輪になる
         let profile = tab.profileID
-        tab.openInNewTab = { [weak self] link in
-            self?.addTabInBackground(url: link, profile: profile)
+        tab.openInNewTab = { [weak self, weak tab] link in
+            self?.addTabInBackground(url: link, profile: profile, opener: tab)
         }
         // ⌥クリックは覗き窓へ。覗き窓の中で押されたら、その中で開き直す
         tab.openPeek = { [weak self, weak tab] link in
@@ -4159,8 +4206,8 @@ final class TabManager: NSObject, ObservableObject {
             self?.addPopupWindow(configuration: configuration, profile: profile)
         }
         // window.open() で器を求められたら、ここで起こして返す
-        tab.openPopup = { [weak self] configuration in
-            self?.addPopupTab(configuration: configuration, profile: profile)
+        tab.openPopup = { [weak self, weak tab] configuration in
+            self?.addPopupTab(configuration: configuration, profile: profile, opener: tab)
         }
         // window.close() を受けたら、そのタブを畳む
         tab.requestClose = { [weak self, weak tab] in

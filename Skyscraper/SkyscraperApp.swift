@@ -161,7 +161,7 @@ struct BrowserCommands: Commands {
             Button("New Private Window") { manager?.openPrivateWindow() }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
                 .disabled(manager == nil)
-            Button("New Tab") { manager?.addTab() }
+            Button("New Tab") { manager?.addTabBelowSelected() }
                 .keyboardShortcut("t", modifiers: .command)
                 .disabled(manager == nil)
             Button("Close Tab") { manager?.closeSelected() }
