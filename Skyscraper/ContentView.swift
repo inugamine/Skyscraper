@@ -324,6 +324,15 @@ struct Bookmark: Identifiable, Codable, Hashable {
     // 既定値に落ちず keyNotFound を投げる。下の init は try? で
     // 受けているので、それをやると保存済みが丸ごと消える
     var folder: [String]? = nil
+    // ロビー (新規タブの盤) に近道として並べるか。
+    // true なら並べる、false なら並べない、nil は「まだ一度も選んでいない」。
+    //
+    // Optional なのは folder と同じ理由 (古い保存を壊さないため) に加えて、
+    // nil に意味を持たせているからだ。誰も選んでいない間は従来通り
+    // 先頭の五件を並べ、一度でも選んだら選んだ分だけを並べる
+    // (BookmarkStore.lobbyShortcuts)。
+    // iCloud へは [Bookmark] の JSON ごと運ばれるので、この印も一緒に揃う
+    var pinned: Bool? = nil
 }
 
 @MainActor
@@ -436,14 +445,59 @@ final class BookmarkStore: ObservableObject {
         bookmarks = []
     }
 
-    func moveUp(_ i: Int) {
-        guard i > 0, i < bookmarks.count else { return }
-        bookmarks.swapAt(i, i - 1)
+    // 管理の盤の掴み手での並べ替え：id の項目を、並びの index 番目へ運ぶ。
+    // index は「運び終えた後の並び」での位置。
+    //
+    // 手元で組み替えてから一度だけ差し替える (didSet が一度で済む)
+    func move(id: UUID, to index: Int) {
+        guard let from = bookmarks.firstIndex(where: { $0.id == id }) else { return }
+        let dest = max(0, min(index, bookmarks.count - 1))
+        guard from != dest else { return }
+        var arr = bookmarks
+        let moved = arr.remove(at: from)
+        arr.insert(moved, at: dest)
+        bookmarks = arr
     }
 
-    func moveDown(_ i: Int) {
-        guard i >= 0, i < bookmarks.count - 1 else { return }
-        bookmarks.swapAt(i, i + 1)
+    // MARK: ロビーの近道
+
+    // 誰も選んでいない間にロビーへ並べる件数 (以前の決め打ちと同じ)
+    private static let legacyLobbyCount = 5
+
+    // ロビーに並べる相手を、一度でも自分で選んだか
+    private var hasLobbyChoice: Bool {
+        bookmarks.contains { $0.pinned != nil }
+    }
+
+    // ロビーに並べる分。並び順はブックマークの並びのまま。
+    // 件数に上限は無い——選んだだけ並ぶ
+    var lobbyShortcuts: [Bookmark] {
+        if hasLobbyChoice {
+            return bookmarks.filter { $0.pinned == true }
+        }
+        return Array(bookmarks.prefix(Self.legacyLobbyCount))
+    }
+
+    // 管理の盤で印を点ける相手。一行ごとに数え直さずに済むよう、まとめて渡す
+    var lobbyPinnedIDs: Set<UUID> {
+        Set(lobbyShortcuts.map(\.id))
+    }
+
+    // ロビーに並べる／外すの切り替え。
+    //
+    // 初めて触った時に、全件へ true / false を書き込む。
+    // 今ロビーに見えている先頭の五件を「選んだ」ことにして、
+    // そこから一件だけ入れ替える——押した途端に他が消える、を避けるため
+    func toggleLobbyPin(_ id: UUID) {
+        var arr = bookmarks
+        guard let i = arr.firstIndex(where: { $0.id == id }) else { return }
+        if !hasLobbyChoice {
+            for j in arr.indices {
+                arr[j].pinned = j < Self.legacyLobbyCount
+            }
+        }
+        arr[i].pinned = !(arr[i].pinned ?? false)
+        bookmarks = arr
     }
 
     // ドラッグでの並べ替え：draggedID の項目を targetID の前または後ろに挿す
@@ -4953,7 +5007,33 @@ struct NewTabPage: View {
     @ObservedObject var tab: Tab
     @EnvironmentObject var store: BookmarkStore
 
+    // 額縁 (LobbyFrame) の内側の線は端から 20pt の所に居る。
+    // 転がる器をその内側へ引っ込めて、中身が線の上を横切らないようにする
+    private static let frameInset: CGFloat = 21
+
     var body: some View {
+        // 近道が増えて窓に収まらなくなったら、盤ごと縦に転がす。
+        //
+        // minHeight に窓の高さを渡してあるので、収まっている間は
+        // Spacer が今まで通りに伸びて、ビルは中央、扇は下端に居る。
+        // 溢れた時だけ Spacer が畳まれて、中身の丈で転がる
+        GeometryReader { geo in
+            ScrollView {
+                lobby
+                    .frame(maxWidth: .infinity, minHeight: geo.size.height)
+            }
+            .scrollIndicators(.never)
+        }
+        .padding(.vertical, Self.frameInset)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Deco.ink)
+        .overlay { LobbyFrame() }
+        // ロビーを開くたびに他の Mac の様子を聞く。
+        // 三十秒以内に聞いたばかりなら手元の分で済ませる
+        .onAppear { TabSync.shared.refreshIfStale() }
+    }
+
+    private var lobby: some View {
         VStack(spacing: 22) {
             Spacer()
 
@@ -4994,23 +5074,10 @@ struct NewTabPage: View {
                     .foregroundColor(Deco.faintGold)
             }
 
-            HStack(spacing: 12) {
-                ForEach(Array(store.bookmarks.prefix(5))) { bm in
-                    Button {
-                        tab.open(bookmark: bm.url)
-                    } label: {
-                        Text(bm.title)
-                            .font(.system(size: 12, design: .serif))
-                            .tracking(1)
-                            .foregroundColor(Deco.gold)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 9)
-                            .overlay(Hexagon(inset: 7).stroke(Deco.faintGold, lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.top, 10)
+            // ブックマークの近道。管理の盤でピンを点けた分だけ並ぶ
+            LobbyShortcuts(tab: tab, bookmarks: store.lobbyShortcuts)
+                .padding(.top, 10)
+                .padding(.horizontal, 48)
 
             // 他の Mac で開いているタブ (TabSync.swift)。
             // 他の Mac が無ければ何も出ず、これまでのロビーと同じ姿のまま
@@ -5019,15 +5086,77 @@ struct NewTabPage: View {
 
             Spacer()
 
+            // 器を額縁の内へ引っ込めた分だけ、下の余白を詰める
+            // (扇の位置は今までと変わらない)
             LobbyBottomFan()
-                .padding(.bottom, 32)
+                .padding(.bottom, 32 - Self.frameInset)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Deco.ink)
-        .overlay { LobbyFrame() }
-        // ロビーを開くたびに他の Mac の様子を聞く。
-        // 三十秒以内に聞いたばかりなら手元の分で済ませる
-        .onAppear { TabSync.shared.refreshIfStale() }
+    }
+}
+
+// ロビーに並べるブックマークの近道。
+// 横は六つまで。越えた分は段を足して下へ積む
+private struct LobbyShortcuts: View {
+    @ObservedObject var tab: Tab
+    let bookmarks: [Bookmark]
+
+    // 一段に並べる数
+    private static let perRow = 6
+
+    private var rows: [[Bookmark]] {
+        stride(from: 0, to: bookmarks.count, by: Self.perRow).map { start in
+            Array(bookmarks[start..<min(start + Self.perRow, bookmarks.count)])
+        }
+    }
+
+    var body: some View {
+        // 題の長い近道が六つ並ぶと、窓の幅を越える。
+        // 題の幅の頭打ちを何通りか用意して、窓に収まる一番ゆったりした物を選ばせる。
+        // (どれも収まらない狭さなら、一番詰めた物で我慢する)
+        ViewThatFits(in: .horizontal) {
+            grid(titleLimit: 170)
+            grid(titleLimit: 130)
+            grid(titleLimit: 100)
+            grid(titleLimit: 74)
+            grid(titleLimit: 52)
+        }
+    }
+
+    private func grid(titleLimit: CGFloat) -> some View {
+        VStack(spacing: 12) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                HStack(spacing: 12) {
+                    ForEach(row) { bm in
+                        shortcut(bm, titleLimit: titleLimit)
+                    }
+                }
+            }
+        }
+    }
+
+    private func shortcut(_ bm: Bookmark, titleLimit: CGFloat) -> some View {
+        Button {
+            tab.open(bookmark: bm.url)
+        } label: {
+            Text(bm.title)
+                .font(.system(size: 12, design: .serif))
+                .tracking(1)
+                .foregroundColor(Deco.gold)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                // 短い題はその幅のまま、長い題だけ頭打ちで切る。
+                // maxWidth だけだと短い題まで頭打ちの幅へ広がるので、
+                // fixedSize で「欲しい幅」を訊かせてから頭を押さえる
+                .frame(maxWidth: titleLimit)
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 9)
+                .overlay(Hexagon(inset: 7).stroke(Deco.faintGold, lineWidth: 1))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        // 切られた題も、乗せれば全部読める
+        .help(bm.title)
     }
 }
 
@@ -6046,6 +6175,40 @@ struct BookmarkManager: View {
     @Environment(\.dismiss) private var dismiss
     @State private var confirmingDeleteAll = false
 
+    // --- 掴み手 (三本線) での並べ替え ---
+    //
+    // 掴んでいる間、配列には手を触れない。掴んだ行は指に付いて動き、
+    // 間の行は一行ぶんずれて「ここへ入る」隙間を見せる。どれも見た目
+    // (offset) だけの話で、配列を組み替えるのは放した時の一度きり。
+    // 動かすたびに差し替えると、そのたびに保存と iCloud への送りが走る
+
+    // 掴んでいる行。nil なら何も掴んでいない
+    @State private var dragID: UUID? = nil
+    // 掴んだ時の位置と、今放せば入る位置
+    @State private var dragFrom = 0
+    @State private var dragTo = 0
+    // 掴んでから指が縦に動いた量
+    @State private var dragTranslation: CGFloat = 0
+    // 掴んだ時の、一覧の転がり具合
+    @State private var dragStartScroll: CGFloat = 0
+    // 指の今の高さ (盤の座標)。端に寄ったら一覧を転がすのに使う
+    @State private var pointerY: CGFloat = 0
+
+    // 一行の高さ。実物を測って入れる
+    @State private var rowHeight: CGFloat = 28
+    // 一覧の転がり具合と、その行き止まり
+    @State private var scrollY: CGFloat = 0
+    @State private var scrollMax: CGFloat = 0
+    // 一覧の窓の枠 (盤の座標)
+    @State private var listFrame: CGRect = .zero
+    @State private var scrollPosition = ScrollPosition(edge: .top)
+    // 端に寄せている間、一覧を転がし続ける係
+    @State private var autoScroll: Task<Void, Never>? = nil
+
+    private static let rowSpacing: CGFloat = 8
+    // 行から次の行までの歩幅
+    private var pitch: CGFloat { rowHeight + Self.rowSpacing }
+
     var body: some View {
         VStack(spacing: 0) {
             // ヘッダー
@@ -6076,66 +6239,36 @@ struct BookmarkManager: View {
 
             // 一覧
             ScrollView {
-                VStack(spacing: 8) {
+                // ロビーに並んでいる分。一行ごとに数え直さないよう、ここで一度だけ引く
+                let pinnedIDs = store.lobbyPinnedIDs
+                VStack(spacing: Self.rowSpacing) {
                     ForEach($store.bookmarks) { $bm in
                         let idx = store.bookmarks.firstIndex(where: { $0.id == bm.id }) ?? 0
-                        HStack(spacing: 8) {
-                            VStack(spacing: 2) {
-                                Button { store.moveUp(idx) } label: {
-                                    Image(systemName: "chevron.up").font(.system(size: 9))
-                                        .foregroundColor(idx == 0 ? Deco.faintGold : Deco.gold)
-                                }
-                                .buttonStyle(.plain).disabled(idx == 0)
-                                Button { store.moveDown(idx) } label: {
-                                    Image(systemName: "chevron.down").font(.system(size: 9))
-                                        .foregroundColor(idx == store.bookmarks.count - 1 ? Deco.faintGold : Deco.gold)
-                                }
-                                .buttonStyle(.plain).disabled(idx == store.bookmarks.count - 1)
-                            }
-
-                            TextField("Name", text: $bm.title)
-                                .textFieldStyle(.plain)
-                                .font(.system(size: 12, design: .serif))
-                                .foregroundColor(Deco.cream)
-                                .padding(.horizontal, 10).padding(.vertical, 6)
-                                .background(Deco.field)
-                                .overlay(Rectangle().stroke(Deco.faintGold, lineWidth: 0.5))
-                                .frame(width: 130)
-
-                            // フォルダの道筋。スラッシュ区切りで階層になる。
-                            // ("仕事/参考") 空にすれば帯の直下へ戻る。
-                            // 同じ名前を打てばそのフォルダに入る——
-                            // フォルダは実体を持たず、道筋の一致で束ねているから。
-                            TextField("Folder", text: Binding(
-                                get: { (bm.folder ?? []).joined(separator: "/") },
-                                set: { $bm.folder.wrappedValue = Self.folderPath(from: $0) }
-                            ))
-                                .textFieldStyle(.plain)
-                                .font(.system(size: 12, design: .serif))
-                                .foregroundColor(Deco.dimGold)
-                                .padding(.horizontal, 10).padding(.vertical, 6)
-                                .background(Deco.field)
-                                .overlay(Rectangle().stroke(Deco.faintGold, lineWidth: 0.5))
-                                .frame(width: 120)
-
-                            TextField("URL", text: $bm.url)
-                                .textFieldStyle(.plain)
-                                .font(.system(size: 12, design: .serif))
-                                .foregroundColor(Deco.gold)
-                                .padding(.horizontal, 10).padding(.vertical, 6)
-                                .background(Deco.field)
-                                .overlay(Rectangle().stroke(Deco.faintGold, lineWidth: 0.5))
-
-                            Button { store.remove(bm) } label: {
-                                Image(systemName: "trash").font(.system(size: 11))
-                                    .foregroundColor(Deco.dimGold)
-                            }
-                            .buttonStyle(.plain)
-                        }
+                        row($bm, index: idx, pinned: pinnedIDs.contains(bm.id))
                     }
                 }
                 .padding(16)
             }
+            .scrollPosition($scrollPosition)
+            // 転がり具合を控える。掴んだまま一覧が転がると、指は止まっていても
+            // 行は中身の上を進んだことになるので、入る位置も数え直す
+            .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                geometry.contentOffset.y
+            } action: { _, offset in
+                scrollY = offset
+                updateDropIndex()
+            }
+            .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                max(0, geometry.contentSize.height - geometry.containerSize.height)
+            } action: { _, limit in
+                scrollMax = limit
+            }
+            .onGeometryChange(for: CGRect.self) { proxy in
+                proxy.frame(in: .global)
+            } action: { frame in
+                listFrame = frame
+            }
+            .onDisappear { autoScroll?.cancel() }
 
             // フッター
             HStack {
@@ -6205,6 +6338,205 @@ struct BookmarkManager: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("The bookmark bar will be emptied. This cannot be undone.")
+        }
+    }
+
+    // MARK: 一覧の一行
+
+    // body から切り出してあるのは型検査を軽くするため。
+    // 掴み手・ピン・三つの欄・ゴミ箱を一つの式に積むと膨らむ
+    private func row(_ bm: Binding<Bookmark>, index: Int, pinned: Bool) -> some View {
+        let id = bm.wrappedValue.id
+        let isDragged = dragID == id
+        return HStack(spacing: 8) {
+            // 掴み手。ここを掴んで上下に運ぶと並べ替えになる
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 12))
+                .foregroundColor(isDragged ? Deco.gold : Deco.dimGold)
+                .frame(width: 18, height: 24)
+                .contentShape(Rectangle())
+                .pointerStyle(isDragged ? PointerStyle.grabActive : PointerStyle.grabIdle)
+                .gesture(reorderGesture(id: id, index: index))
+                .help("Drag to reorder")
+
+            // ロビー (新規タブの盤) に近道として並べるか
+            Button { store.toggleLobbyPin(id) } label: {
+                Image(systemName: pinned ? "pin.fill" : "pin")
+                    .font(.system(size: 11))
+                    .foregroundColor(pinned ? Deco.gold : Deco.dimGold)
+                    .frame(width: 16, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(pinned ? String(localized: "Remove from Lobby")
+                         : String(localized: "Show in Lobby"))
+
+            TextField("Name", text: bm.title)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12, design: .serif))
+                .foregroundColor(Deco.cream)
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(Deco.field)
+                .overlay(Rectangle().stroke(Deco.faintGold, lineWidth: 0.5))
+                .frame(width: 130)
+
+            // フォルダの道筋。スラッシュ区切りで階層になる。
+            // ("仕事/参考") 空にすれば帯の直下へ戻る。
+            // 同じ名前を打てばそのフォルダに入る——
+            // フォルダは実体を持たず、道筋の一致で束ねているから。
+            TextField("Folder", text: Binding(
+                get: { (bm.wrappedValue.folder ?? []).joined(separator: "/") },
+                set: { bm.wrappedValue.folder = Self.folderPath(from: $0) }
+            ))
+                .textFieldStyle(.plain)
+                .font(.system(size: 12, design: .serif))
+                .foregroundColor(Deco.dimGold)
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(Deco.field)
+                .overlay(Rectangle().stroke(Deco.faintGold, lineWidth: 0.5))
+                .frame(width: 120)
+
+            TextField("URL", text: bm.url)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12, design: .serif))
+                .foregroundColor(Deco.gold)
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(Deco.field)
+                .overlay(Rectangle().stroke(Deco.faintGold, lineWidth: 0.5))
+
+            Button { store.remove(bm.wrappedValue) } label: {
+                Image(systemName: "trash").font(.system(size: 11))
+                    .foregroundColor(Deco.dimGold)
+            }
+            .buttonStyle(.plain)
+        }
+        // 歩幅を出すために、行の実寸を測っておく (どの行も同じ高さ)
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            proxy.size.height
+        } action: { height in
+            if height > 0 { rowHeight = height }
+        }
+        // 掴んでいる行は地を塗って金の枠で囲み、下を通る行が透けないようにする
+        .background {
+            if isDragged {
+                Rectangle().fill(Deco.ink).padding(-4)
+            }
+        }
+        .overlay {
+            if isDragged {
+                Rectangle().stroke(Deco.gold, lineWidth: 0.8).padding(-4)
+                    .allowsHitTesting(false)
+            }
+        }
+        .offset(y: rowOffset(id: id, index: index))
+        .zIndex(isDragged ? 1 : 0)
+        // 掴んでいる行は指にぴったり付ける。
+        // 周りの行をずらすアニメーションに巻き込まれると、指から遅れる
+        .transaction { transaction in
+            if isDragged { transaction.animation = nil }
+        }
+    }
+
+    // MARK: 掴み手での並べ替え
+
+    // 掴んでいる行が、元の位置からどれだけずれて見えるか。
+    // 指の動きに、掴んでから一覧が転がった分を足す。並びの外へは出さない
+    private var dragOffset: CGFloat {
+        let raw = dragTranslation + (scrollY - dragStartScroll)
+        let lower = -CGFloat(dragFrom) * pitch
+        let upper = CGFloat(max(store.bookmarks.count - 1 - dragFrom, 0)) * pitch
+        return min(max(raw, lower), upper)
+    }
+
+    // 各行の見た目のずれ。
+    // 掴んだ行は指に付き、元の位置と入る位置の間に居る行は一行ぶん道を空ける
+    private func rowOffset(id: UUID, index: Int) -> CGFloat {
+        guard let dragID else { return 0 }
+        if id == dragID { return dragOffset }
+        if dragFrom < dragTo, index > dragFrom, index <= dragTo { return -pitch }
+        if dragTo < dragFrom, index >= dragTo, index < dragFrom { return pitch }
+        return 0
+    }
+
+    // 掴み手のドラッグ。
+    //
+    // 座標を盤全体 (.global) で取っているのは、行そのものが offset で
+    // 動くからだ。行の中の座標で測ると、動いた行に釣られて値が揺れる
+    private func reorderGesture(id: UUID, index: Int) -> some Gesture {
+        DragGesture(minimumDistance: 1, coordinateSpace: .global)
+            .onChanged { value in
+                if dragID != id {
+                    dragFrom = index
+                    dragTo = index
+                    dragTranslation = 0
+                    dragStartScroll = scrollY
+                    pointerY = value.location.y
+                    dragID = id
+                    startAutoScroll()
+                }
+                dragTranslation = value.translation.height
+                pointerY = value.location.y
+                updateDropIndex()
+            }
+            .onEnded { _ in
+                finishDrag()
+            }
+    }
+
+    // 今放せば何番目に入るかを数え直す。
+    // 変わった時だけ、道を空ける行を滑らせる
+    private func updateDropIndex() {
+        guard dragID != nil, pitch > 0 else { return }
+        let steps = Int((dragOffset / pitch).rounded())
+        let last = max(store.bookmarks.count - 1, 0)
+        let target = min(max(dragFrom + steps, 0), last)
+        if target != dragTo {
+            withAnimation(.easeOut(duration: 0.15)) {
+                dragTo = target
+            }
+        }
+    }
+
+    // 放した。ここで初めて配列を組み替える。
+    //
+    // アニメーションを切ってあるのは、ずらしていた見た目を戻すのと
+    // 配列の組み替えが同時に起きるからだ。両方が一瞬で入れ替われば
+    // 画面の上では何も動かないが、片方だけ滑ると行が跳ねて見える
+    private func finishDrag() {
+        autoScroll?.cancel()
+        autoScroll = nil
+        guard let id = dragID else { return }
+        let target = dragTo
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            dragID = nil
+            dragTranslation = 0
+            store.move(id: id, to: target)
+        }
+    }
+
+    // 掴んだまま一覧の上端・下端へ寄せたら、そちらへ転がす。
+    // 窓に収まらない数のブックマークでも、端から端まで運べるように。
+    // 端に深く入るほど速く転がる
+    private func startAutoScroll() {
+        autoScroll?.cancel()
+        autoScroll = Task {
+            let edge: CGFloat = 36
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(16))
+                guard !Task.isCancelled, dragID != nil else { break }
+                var delta: CGFloat = 0
+                if pointerY < listFrame.minY + edge {
+                    delta = -min(16, (listFrame.minY + edge - pointerY) / 3 + 2)
+                } else if pointerY > listFrame.maxY - edge {
+                    delta = min(16, (pointerY - (listFrame.maxY - edge)) / 3 + 2)
+                }
+                guard delta != 0 else { continue }
+                let next = min(max(scrollY + delta, 0), scrollMax)
+                guard abs(next - scrollY) > 0.5 else { continue }
+                scrollPosition.scrollTo(y: next)
+            }
         }
     }
 

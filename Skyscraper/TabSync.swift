@@ -513,6 +513,10 @@ struct RemoteTabsSection: View {
                 }
             }
             .scrollIndicators(.never)
+            // 中身が枠に収まっている間は、この器で転がりを受け止めない。
+            // ロビーそのものが縦に転がるようになったので、ここで止めると
+            // 一覧の上にカーソルが居る間だけロビーが動かなくなる
+            .scrollBounceBehavior(.basedOnSize)
             .frame(width: 520, height: min(max(contentHeight, 1), Self.maxHeight))
         }
     }
