@@ -7,6 +7,26 @@
     <language>en</language>
 
     <item>
+      <title>Version 1.40</title>
+      <pubDate>Sat, 14 Nov 2026 08:51:40 +0900</pubDate>
+      <sparkle:version>40</sparkle:version>
+      <sparkle:shortVersionString>1.40</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>Skyscraper 1.40</h2>
+        <ul>
+          <li>タブを千切って新規ウィンドウで表示できるようになりました。(これがやりたかった)</li>
+          <li>スプリットビューに対応しました。横に2つ並べられるほか、縦に並べることもできます。</li>
+          <li>ブックマーク管理画面で、今まで矢印ボタンを連打して並べ替えていたものを、ハンドルを掴んでドラッグして直感的にブックマークの入れ替えができるようになりました。</li>
+          <li>新規ウィンドウにブックマークをピン留めできるようになりました。ブックマークの管理画面からどうぞ。</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://github.com/inugamine/Skyscraper/releases/download/v1.40/Skyscraper-1.40.zip"
+        sparkle:edSignature="iThfuQZwb+DCraJMbvII/4z705ssDQSr+a1B9tgk6xxnzJeqYLMbEnqq0i42dWshdWyWGJCownKGN735If7jBA=="
+        length="13770697"
+        type="application/octet-stream" />
+    </item>    <item>
       <title>Version 1.39</title>
       <pubDate>Wed, 04 Nov 2026 09:01:56 +0900</pubDate>
       <sparkle:version>39</sparkle:version>
