@@ -6951,11 +6951,8 @@ struct BrowserPane: View {
             // スプリットビューで二枚並べる割り付けもこの中 (SplitView.swift)
             PaneArea(tab: tab, manager: manager)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // ── リンクの飛び先 ──
-            //
-            // 帯は選ばれている一枚ぶんだけだ。裏タブごとに持たせると、
-            // 見えない帯が焦点の移動で更新され続けるだけで何の役にも立たない
-            .linkHoverBar(tab.hoveredLink, flipped: tab.hoverFlipped)
+            // リンクの飛び先の帯は PaneArea の中へ移した (SplitView.swift)。
+            // スプリットビューで並ぶ二枚それぞれが、自分の枠の下端に出す
             // ── 覗き窓 ── (Peek.swift)
             .overlay {
                 if let peek = manager.peek {

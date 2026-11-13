@@ -264,6 +264,21 @@ struct PaneArea: View {
                     }
                 }
 
+                // ── リンクの飛び先 ──
+                //
+                // 帯は見えているタブの分だけ出す。裏タブごとに持たせると、
+                // 見えない帯が更新され続けるだけで何の役にも立たない。
+                // スプリットビューでは、触っていない側のページでも
+                // マウスを載せたリンクの行き先が、その枠の下端に出る
+                ForEach(manager.tabs) { t in
+                    if t.id == tab.id || split?.contains(t.id) == true {
+                        let rect = layout.content(for: t.id)
+                        PaneHoverBar(tab: t)
+                            .frame(width: rect.width, height: rect.height)
+                            .position(x: rect.midX, y: rect.midY)
+                    }
+                }
+
                 if let split, let divider = layout.divider {
                     // 枠。触っている側だけ金にする
                     ForEach([split.first, split.second], id: \.self) { id in
@@ -331,6 +346,19 @@ private struct TabWebSlot: View {
     }
 }
 
+// リンクの飛び先の帯。一枚ぶん。
+// 透明な板を枠いっぱいに敷いて、その下端に帯を出す (LinkHover.swift)。
+// 板はクリックを受けないので、下のページはそのまま触れる
+private struct PaneHoverBar: View {
+    @ObservedObject var tab: Tab
+
+    var body: some View {
+        Color.clear
+            .allowsHitTesting(false)
+            .linkHoverBar(tab.hoveredLink, flipped: tab.hoverFlipped)
+    }
+}
+
 // WebView の代わりに出すもの (ロビー・顛末書・小窓の留守番札)。
 // どれでもなければ何も出さない (下の WebView が見える)
 private struct PaneContent: View {
@@ -380,14 +408,14 @@ private struct SplitDivider: View {
     var body: some View {
         ZStack {
             Deco.panel
-            // 細い金の線と、真ん中の菱形
-            Rectangle()
-                .fill(hovering ? Deco.gold : Deco.faintGold)
-                .frame(width: axis == .sideBySide ? 1 : nil,
-                       height: axis == .stacked ? 1 : nil)
+            // 真ん中の菱形だけ。線は引かない (枠と重なって、ごちゃついて見える)。
+            // マウスが乗ったらひとまわり大きく、金にして「掴める」と知らせる。
+            // 境目の幅 (7pt) からはみ出すが、切り落とさずに枠の上へ被らせる
             Image(systemName: "diamond.fill")
                 .font(.system(size: 5))
                 .foregroundColor(hovering ? Deco.gold : Deco.dimGold)
+                .scaleEffect(hovering ? 2.2 : 1)
+                .animation(.easeOut(duration: 0.12), value: hovering)
         }
         .contentShape(Rectangle())
         .onHover { inside in
