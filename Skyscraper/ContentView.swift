@@ -520,7 +520,15 @@ final class SkyscraperWebView: WKWebView {
         acceptsFirstMouseAlways || super.acceptsFirstMouse(for: event)
     }
 
+    // スプリットビューで、触っていない側のページを押したらそちらを選ぶ
+    // (アドレスバーが付いてくる)。押下そのものは今まで通りページへ渡す
+    override func mouseDown(with event: NSEvent) {
+        TabManager.focusPane(of: self)
+        super.mouseDown(with: event)
+    }
+
     override func rightMouseDown(with event: NSEvent) {
+        TabManager.focusPane(of: self)
         let p = convert(event.locationInWindow, from: nil)
         // ビューの上下向きと拡大率を JS 座標系に合わせる。
         // 拡大率は二段重ね：⌘+ の pageZoom と、ピンチの magnification
@@ -3492,9 +3500,19 @@ private struct SessionTab: Codable {
     var profile: UUID? = nil
 }
 
+// スプリットビューの組。タブは並びの番号で指す (UUID は起動のたびに変わる)
+private struct SessionSplit: Codable {
+    var first: Int
+    var second: Int
+    var stacked: Bool
+    var ratio: Double
+}
+
 private struct SessionState: Codable {
     var tabs: [SessionTab]
     var selectedIndex: Int
+    // 組が無ければ鍵ごと書かない。Optional なのは SessionTab.pinned と同じ理由
+    var splits: [SessionSplit]? = nil
 }
 
 @MainActor
@@ -3507,6 +3525,12 @@ final class TabManager: NSObject, ObservableObject {
             scheduleSave()
         }
     }
+    // スプリットビューの組 (SplitView.swift)。
+    // 書き換えたら保存も走らせる (比率や組み合わせも復元する)
+    @Published var splits: [TabSplit] = [] {
+        didSet { scheduleSave() }
+    }
+
     @Published var selectedID: UUID? {
         didSet {
             guard selectedID != oldValue else { return }
@@ -3514,6 +3538,8 @@ final class TabManager: NSObject, ObservableObject {
             PasswordSuggestionPanel.shared.hide()
             // 復元されたまま眠っているタブなら、ここで初めて読みに行く
             selectedTab?.activateIfDeferred()
+            // スプリットビューで並ぶ相方も一緒に起こす
+            visiblePartner?.activateIfDeferred()
             // 触られた時刻を控える。去るタブも今のタブも、ここが起点になる。
             // 去る側を控えないと、選ばれた時刻のままなので
             // 一日見ていたタブが外した途端に畳まれる
@@ -3770,6 +3796,7 @@ final class TabManager: NSObject, ObservableObject {
         titleWatchers.removeAll()
         urlWatchers.removeAll()
         fullscreenWatchers.removeAll()
+        splits.removeAll()
         tabs.removeAll()
         selectedID = nil
     }
@@ -3828,6 +3855,8 @@ final class TabManager: NSObject, ObservableObject {
         startMemoryPressureWatch()
         // 選択中の一枚だけは、待たずに読み込みを始める
         selectedTab?.activateIfDeferred()
+        // スプリットビューで並ぶ相方も
+        visiblePartner?.activateIfDeferred()
 
         // 終了時の取りこぼしを防ぐ。デバウンス待ちの変更をここで確実に書く。
         // queue に .main を渡すと addOperation 経由の非同期配送になり、
@@ -3919,6 +3948,18 @@ final class TabManager: NSObject, ObservableObject {
             tab.isPinned = entry.pinned == true
             tabs.append(tab)
         }
+        // スプリットビューの組を戻す。選択より先に戻すのは、
+        // 選んだ瞬間に相方も起こすため (selectedID の didSet)
+        for pair in state.splits ?? [] {
+            guard pair.first != pair.second,
+                  let first = tabs[safe: pair.first],
+                  let second = tabs[safe: pair.second],
+                  !splits.contains(where: { $0.contains(first.id) || $0.contains(second.id) })
+            else { continue }
+            splits.append(TabSplit(first: first.id, second: second.id,
+                                   axis: pair.stacked ? .stacked : .sideBySide,
+                                   ratio: min(max(CGFloat(pair.ratio), 0.2), 0.8)))
+        }
         selectedID = tabs[safe: state.selectedIndex]?.id ?? tabs.first?.id
         // 保存時点で既にピンが先頭に寄っているはずだが、
         // 壊れた保存を読んだ場合の保険だけ掛けておく。
@@ -3959,7 +4000,15 @@ final class TabManager: NSObject, ObservableObject {
                               profile: tab.profileID)
         }
         let index = tabs.firstIndex { $0.id == selectedID } ?? 0
-        return SessionState(tabs: entries, selectedIndex: index)
+        let pairs = splits.compactMap { split -> SessionSplit? in
+            guard let first = tabs.firstIndex(where: { $0.id == split.first }),
+                  let second = tabs.firstIndex(where: { $0.id == split.second }) else { return nil }
+            return SessionSplit(first: first, second: second,
+                                stacked: split.axis == .stacked,
+                                ratio: Double(split.ratio))
+        }
+        return SessionState(tabs: entries, selectedIndex: index,
+                            splits: pairs.isEmpty ? nil : pairs)
     }
 
     var selectedTab: Tab? {
@@ -4157,6 +4206,8 @@ final class TabManager: NSObject, ObservableObject {
         // 小窓に出したまま別の窓へは運ばない。先に元へ戻す
         FloatingPlayer.shared.release(tab)
         guard let idx = tabs.firstIndex(where: { $0.id == tab.id }) else { return nil }
+        // スプリットビューの組に居たら解く (相方はこの窓に残る)
+        dissolveSplit(containing: tab.id)
         tabs.remove(at: idx)
         titleWatchers[tab.id] = nil
         urlWatchers[tab.id] = nil
@@ -4192,9 +4243,20 @@ final class TabManager: NSObject, ObservableObject {
     // 見た目はプライベートなのに中身は永続、またはその逆になる。
     // これは黙って起きてはいけない種類の食い違いである。
     func moveTab(_ tab: Tab, to other: TabManager, at index: Int? = nil) {
-        guard other !== self, other.isPrivate == isPrivate,
-              let detached = detach(tab) else { return }
+        guard other !== self, other.isPrivate == isPrivate else { return }
+        // 最後の一枚を渡すなら、この窓は用済みになる。
+        // detach がロビーを一枚補充するので、放っておくと
+        // 新規タブだけの窓が残る。渡し終えたら窓ごと閉じる。
+        // 窓は detach の前に引いておく (渡した後では WebView がもう相手の窓に居る)
+        let window = tabs.count == 1 ? hostWindow : nil
+        guard let detached = detach(tab) else { return }
         other.adopt(detached, at: index)
+        if let window {
+            // 赤い丸と同じ道を歩かせる (onDisappear → markClosed で片付く)。
+            // 残っているのはロビーだけなので、閉じた窓の控え (⇧⌘T) には積まれない。
+            // 一拍おくのは、ドロップの処理の最中に窓を畳まないため
+            DispatchQueue.main.async { window.performClose(nil) }
+        }
     }
 
     // タブID から持ち主の窓を探す。
@@ -4310,10 +4372,27 @@ final class TabManager: NSObject, ObservableObject {
         moveTabToNewWindow(tab)
     }
 
-    func moveTabToNewWindow(_ tab: Tab) {
+    // dropPoint は、引っ張って千切った時に放した場所 (画面の座標)。
+    // 渡されたら、新しい窓をそこへ出す (TabTearOff.swift)。
+    // 右クリックやメニューから来た時は nil で、置き場所は SwiftUI 任せ
+    func moveTabToNewWindow(_ tab: Tab, dropPoint: NSPoint? = nil) {
         // 最後の一枚を出しても、元の窓にロビーが一枚残るだけで意味がない
-        guard tabs.count > 1, let detached = detach(tab) else { return }
+        guard tabs.count > 1 else { return }
+        // 元の窓の大きさ。detach の前に控える (外した後では窓を引けないことがある)。
+        // 全画面の窓から千切った時は、その大きさを引き継がない
+        let sourceWindow = hostWindow
+        let isFullScreen = sourceWindow?.styleMask.contains(.fullScreen) == true
+        let size = isFullScreen ? nil : sourceWindow?.frame.size
+        guard let detached = detach(tab) else { return }
         Self.pendingAdoption = detached
+        // プライベートウィンドウのタブは、プライベートの窓で受ける。
+        // そうしないと moveTab の所に書いた食い違い (見た目と置き場のずれ) が起きる
+        if isPrivate { Self.pendingPrivate = true }
+        if let dropPoint {
+            // 全画面の窓から千切ったら、新しい窓も全画面で出す
+            TabTearOff.shared.requestPlacement(dropPoint: dropPoint, size: size,
+                                               fullScreen: isFullScreen)
+        }
         newWindowRequests += 1
     }
 
@@ -4373,6 +4452,8 @@ final class TabManager: NSObject, ObservableObject {
         // ならない。後だと白紙ページまで含んだ履歴を掴むことになる
         recentlyClosed.append(closedRecord(of: tab))
         if recentlyClosed.count > 20 { recentlyClosed.removeFirst() }
+        // スプリットビューの組に居たら解く (相方は一枚表示に戻る)
+        dissolveSplit(containing: tab.id)
         dismantle(tab)
         tabs.remove(at: idx)
         // 監視とグループ割り当てを片付け、残りのタブで組み直す
@@ -4490,7 +4571,8 @@ final class TabManager: NSObject, ObservableObject {
     //
     // 見ているタブを畳むのは筋が通らないので、ここで弾く
     func unload(_ tab: Tab) {
-        guard tab.id != selectedID, tab.canUnload else { return }
+        // スプリットビューで並んで見えている相方も畳まない
+        guard !isOnScreen(tab), tab.canUnload else { return }
         tab.unload()
         // 器を差し替えたことを BrowserPane に伝える。
         // Tab の @Published はその Tab を見ている View しか起こさないので、
@@ -4528,7 +4610,7 @@ final class TabManager: NSObject, ObservableObject {
     private func unloadIdleTabs(olderThan idle: TimeInterval) -> Int {
         let now = Date()
         var count = 0
-        for tab in tabs where tab.id != selectedID {
+        for tab in tabs where !isOnScreen(tab) {
             guard tab.canUnload,
                   now.timeIntervalSince(tab.lastActiveAt) >= idle else { continue }
             tab.unload()
@@ -4658,9 +4740,18 @@ final class TabManager: NSObject, ObservableObject {
         guard tabs.contains(where: { !$0.isHome }) else { return }
         let index = tabs.firstIndex { $0.id == selectedID } ?? 0
         let records = tabs.map { closedRecord(of: $0) }
+        // スプリットビューの組も控える (セッション保存と同じく、並びの番号で)
+        let pairs = splits.compactMap { split -> ClosedSplit? in
+            guard let first = tabs.firstIndex(where: { $0.id == split.first }),
+                  let second = tabs.firstIndex(where: { $0.id == split.second }) else { return nil }
+            return ClosedSplit(first: first, second: second,
+                               stacked: split.axis == .stacked,
+                               ratio: Double(split.ratio))
+        }
         ClosedWindowStore.shared.record(ClosedWindow(owner: windowID,
                                                      tabs: records,
-                                                     selectedIndex: index))
+                                                     selectedIndex: index,
+                                                     splits: pairs))
     }
 
     // 控えておいた窓を、この窓の中身として組み直す (restoreSession から呼ぶ)。
@@ -4681,6 +4772,17 @@ final class TabManager: NSObject, ObservableObject {
         guard !tabs.isEmpty else {
             addTab()
             return
+        }
+        // 組を戻す。選択より先なのは、選んだ瞬間に相方も起こすため (restoreSession と同じ)
+        for pair in closed.splits {
+            guard pair.first != pair.second,
+                  let first = tabs[safe: pair.first],
+                  let second = tabs[safe: pair.second],
+                  !splits.contains(where: { $0.contains(first.id) || $0.contains(second.id) })
+            else { continue }
+            splits.append(TabSplit(first: first.id, second: second.id,
+                                   axis: pair.stacked ? .stacked : .sideBySide,
+                                   ratio: min(max(CGFloat(pair.ratio), 0.2), 0.8)))
         }
         selectedID = tabs[safe: closed.selectedIndex]?.id ?? tabs.first?.id
         normalizePinnedOrder()
@@ -5143,6 +5245,8 @@ private struct DraggableTabRow: View {
     @ObservedObject private var profiles = ProfileStore.shared
 
     @State private var rowHeight: CGFloat = 1
+    // 行の幅 (引っ張っている間の札の大きさに使う)
+    @State private var rowWidth: CGFloat = 1
 
     // 自分以外の窓。名簿順（窓が生まれた順）で並ぶ。
     // 普通の窓とプライベートの間ではタブを動かせないので、
@@ -5174,7 +5278,14 @@ private struct DraggableTabRow: View {
             onTogglePin: { manager.togglePin(tab) },
             // プライベートウィンドウにプロファイルは無いので、選択肢も出さない
             profiles: manager.isPrivate ? [] : profiles.profiles,
-            onOpenInProfile: { id in manager.addTab(profile: id) }
+            onOpenInProfile: { id in manager.addTab(profile: id) },
+            inSplit: manager.split(containing: tab.id) != nil,
+            isSplitPartner: manager.visiblePartner?.id == tab.id,
+            // 今見ているタブ自身は、並べる相手が居ない
+            onSplit: tab.id == manager.selectedID
+                ? nil : { edge in manager.makeSplitWithSelected(tab, on: edge) },
+            onExitSplit: manager.split(containing: tab.id) != nil
+                ? { manager.dissolveSplit(containing: tab.id) } : nil
         )
         // 高さを測っておく（上下判定に使う）。
         //
@@ -5182,35 +5293,29 @@ private struct DraggableTabRow: View {
         // レイアウト計算の真っ最中に状態が変わり、SwiftUI の
         // 依存グラフが輪になる。 (AttributeGraph: cycle detected の山)
         // onGeometryChange は測定結果を安全な時点で渡すための口だ
-        .onGeometryChange(for: CGFloat.self) { proxy in
-            proxy.size.height
-        } action: { height in
-            rowHeight = height
+        .onGeometryChange(for: CGSize.self) { proxy in
+            proxy.size
+        } action: { size in
+            rowHeight = size.height
+            rowWidth = size.width
         }
-        // タブを引っ張り出して新しい窓にする操作は入っていない。
+        // ドラッグの開始は AppKit の側でやる (TabTearOff.swift)。
         //
         // SwiftUI の .onDrag / .draggable には「どこにも落とされなかった」を
-        // 知る手段が無い。macOS 26 SDK には DragConfiguration と
-        // onDragSessionUpdated(_:) があり、DragSession.Phase.ended(DropOperation)
-        // で終了を受け取れる形になっているが、
-        //   .onDrag → .draggable への差し替え
-        //   .dragConfiguration(DragConfiguration(allowMove: true)) の併用
-        // のどちらを試しても、クロージャが一度も呼ばれなかった。 (2026-07 実測)
-        // dragContainer など、まだ足りない土台があると思われる。
+        // 知る手段が無く、窓の外へ引っ張り出して千切る操作が作れない。
+        // macOS 26 の onDragSessionUpdated(_:) も、.draggable と
+        // .dragConfiguration(DragConfiguration(allowMove: true)) の併用まで
+        // 試したが、クロージャが一度も呼ばれなかった。 (2026-07 実測)
         //
-        // AppKit の NSDraggingSource まで降りれば
-        // draggingSession(_:endedAt:operation:) で取れるが、
-        // 行のクリック・ホバー・×ボタン・右クリックと同居させる必要があり割に合わない。
-        //
-        // 代わりに、右クリック →「ウィンドウへ移動」→「新しいウィンドウ」で同じことができる。
-        .draggable(tab.id.uuidString)
-        .dragConfiguration(DragConfiguration(allowMove: true))
-        // 終了の受け口だけは残してある。
-        // 今は一度も呼ばれないが、SDK 側が揃えばここに
-        // .ended が届くようになる——その日の足場だ
-        .onDragSessionUpdated { session in
-            if case .ended = session.phase {
-                // 窓の外へ落とした場合の処理 (未実装)
+        // ここでやるのは「今マウスがこの行のどこに乗っているか」を教えることだけ。
+        // 落とす側 (下の .onDrop) は今まで通り SwiftUI のまま
+        .onContinuousHover(coordinateSpace: .local) { phase in
+            switch phase {
+            case .active(let point):
+                TabTearOff.shared.hover(tab, in: manager, at: point,
+                                        size: CGSize(width: rowWidth, height: rowHeight))
+            case .ended:
+                TabTearOff.shared.hoverEnded(tab)
             }
         }
         .onDrop(of: [.text], delegate: TabDropDelegate(
@@ -5318,6 +5423,15 @@ struct DecoTabRow: View {
     // 空ならメニュー自体を出さない
     var profiles: [BrowserProfile] = []
     var onOpenInProfile: (UUID) -> Void = { _ in }
+    // スプリットビュー (SplitView.swift)。
+    // inSplit: どこかの組に居る (印を出す)。
+    // isSplitPartner: 選択中のタブと並んで見えている (枠を金にする)。
+    // onSplit: 今見ているタブの隣に並べる。nil なら選べない (自分が選択中など)。
+    // onExitSplit: 組を解く。組に居なければ nil
+    var inSplit = false
+    var isSplitPartner = false
+    var onSplit: ((SplitEdge) -> Void)? = nil
+    var onExitSplit: (() -> Void)? = nil
 
     @State private var hovering = false
     @State private var showingNewGroup = false
@@ -5362,6 +5476,13 @@ struct DecoTabRow: View {
 
             Spacer(minLength: 2)
 
+            // スプリットビューの組に居る印
+            if inSplit {
+                Image(systemName: "rectangle.split.2x1")
+                    .font(.system(size: 9))
+                    .foregroundColor(isSelected || isSplitPartner ? Deco.gold : Deco.dimGold)
+            }
+
             // ピン留め中は × を出さない。
             // ⌘W を封じておいて、行には一発で閉じる札が残っている
             // というのは筋が通らない。閉じたければ先に留めを外す
@@ -5382,7 +5503,7 @@ struct DecoTabRow: View {
         .padding(.vertical, 9)
         .frame(maxWidth: .infinity)
         .background(shape.fill(isSelected ? Deco.ink : (hovering ? Deco.panel2 : Color.clear)))
-        .overlay(shape.stroke(isSelected ? Deco.gold : Deco.faintGold,
+        .overlay(shape.stroke(isSelected || isSplitPartner ? Deco.gold : Deco.faintGold,
                               lineWidth: isSelected ? 1 : 0.5))
         .contentShape(shape)
         .onTapGesture { onSelect() }
@@ -5428,6 +5549,16 @@ struct DecoTabRow: View {
                         }
                     }
                 }
+            }
+            Menu("Split View") {
+                Button("Left") { onSplit?(.left) }
+                Button("Right") { onSplit?(.right) }
+                Button("Top") { onSplit?(.top) }
+                Button("Bottom") { onSplit?(.bottom) }
+            }
+            .disabled(onSplit == nil)
+            if let onExitSplit {
+                Button("Exit Split View") { onExitSplit() }
             }
             Menu("Move to Window") {
                 Button("New Window") { onMoveToNewWindow() }
@@ -6769,55 +6900,9 @@ struct BrowserPane: View {
             }
 
             // ── 中身：ロビー or Web ──
-            // 全タブの WebView を常に画面に置き、選択中の一枚だけを見せる。
-            // NSViewRepresentable は一度作った NSView を使い回すので、
-            // 単一の WebView 枚だとタブを切り替えても最初の WebView が表示され続ける。
-            // また、常時マウントにより裏タブの読み込み・タイトル更新も進む
-            ZStack {
-                ForEach(manager.tabs) { t in
-                    // 顛末書を出している間は WebView を伏せる。
-                    // 上に重ねて隠すのではなく引っ込めるのは、AppKit のビューと
-                    // SwiftUI の重なり順を当てにしないため。(ロビーと同じ手)
-                    // loadError を選択中のタブ (tab) から読むのは、
-                    // BrowserPane が見張っているのがそれだけだから——
-                    // 条件に t.id == tab.id が入っているので同じものを指す
-                    let showsWeb = t.id == tab.id && !t.isHome && tab.loadError == nil
-                    // 小窓に出ているタブは、ここで WebView を作らない。
-                    // 作ると mount が小窓から WebView を引き抜く (FloatingWindow.swift)
-                    if t.isFloating {
-                        Color.clear
-                    } else {
-                        WebView(webView: t.webView, isInteractive: showsWeb)
-                            .opacity(showsWeb ? 1 : 0)
-                            .allowsHitTesting(showsWeb)
-                            // 器を作り直したら、こちらの器も組み直させる。
-                            //
-                            // updateNSView は WKWebView の親子関係に一切触らない。
-                            // (全画面再生を壊さないための判断。詳しくは WebView の中)
-                            // だから中身を差し替えても、そこには何も届かない。
-                            // .id を変えて makeNSView からやり直させる——
-                            // 器ごと新しく作るので、付け替えをめぐる上の話とは土俵が違う
-                            .id(t.webViewGeneration)
-                    }
-                }
-                if tab.isFloating {
-                    FloatingPlaceholder {
-                        FloatingPlayer.shared.returnToTab()
-                    }
-                } else if let error = tab.loadError {
-                    ErrorPage(
-                        error: error,
-                        onRetry: { tab.retryFailedLoad() },
-                        // 証明書を控えている時だけ札が出る。
-                        // 押した先で中身を見せ、押し切られた時に限って通す
-                        onProceed: tab.canProceedPastCertificateError
-                            ? { Task { await tab.proceedPastCertificateError() } }
-                            : nil
-                    )
-                } else if tab.isHome {
-                    NewTabPage(tab: tab)
-                }
-            }
+            // 全タブの WebView を常に画面に置き、見せる分だけを表に出す。
+            // スプリットビューで二枚並べる割り付けもこの中 (SplitView.swift)
+            PaneArea(tab: tab, manager: manager)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // ── リンクの飛び先 ──
             //
@@ -7381,6 +7466,8 @@ struct ContentView: View {
         // 透かした帯は空いた所のダブルクリックを拾わなくなるので、見張りを置く。
         // 窓を知るための目印なので、クリックは受けない (TitlebarClickArea.swift)
         .background { TitlebarClickArea() }
+        // 千切って生まれた窓を、放した場所へ運ぶための目印 (TabTearOff.swift)
+        .background { TearOffWindowAnchor() }
         // タブ検索の盤。(⇧⌘A)
         // 盤は全ての窓のタブを並べるが、出すのは押された窓だけだ
         .overlay {

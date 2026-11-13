@@ -44,6 +44,15 @@ struct ClosedTab {
     var closedAt = Date()
 }
 
+// スプリットビューの組の控え。タブは tabs の中の番号で指す
+// (開き直したタブは別の UUID で生まれる)
+struct ClosedSplit {
+    var first: Int
+    var second: Int
+    var stacked: Bool
+    var ratio: Double
+}
+
 // 閉じた窓一枚ぶんの控え
 struct ClosedWindow {
     // 閉じた窓の名札 (TabManager.windowID)。
@@ -51,6 +60,8 @@ struct ClosedWindow {
     let owner: UUID
     var tabs: [ClosedTab]
     var selectedIndex: Int
+    // スプリットビューの組。開き直した時に並べ直す
+    var splits: [ClosedSplit] = []
     var closedAt = Date()
 }
 
@@ -107,6 +118,8 @@ final class ClosedWindowStore: ObservableObject {
             let selectedRemoved = window.tabs[safe: window.selectedIndex]?.profile == id
             let removedBefore = window.tabs.prefix(window.selectedIndex)
                 .filter { $0.profile == id }.count
+            // タブを抜くと番号がずれる。この窓の組は諦める
+            if window.tabs.contains(where: { $0.profile == id }) { window.splits = [] }
             window.tabs.removeAll { $0.profile == id }
             guard window.tabs.contains(where: { !$0.url.isEmpty || $0.interactionState != nil })
             else { return nil }

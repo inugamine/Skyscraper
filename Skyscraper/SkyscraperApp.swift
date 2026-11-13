@@ -103,6 +103,12 @@ struct SkyscraperApp: App {
         // 中身は別スレッドへ逃げているので、起動は待たされない
         FaviconStore.shared.pruneOnLaunch()
 
+        // macOS の「ウインドウのタブ」は使わない。
+        // 全画面の窓から新しい窓を開くと、macOS が勝手に一つの窓へまとめて
+        // 上に横並びのタブバーを生やす。タブは自前の帯があるので要らない。
+        // (表示メニューの「タブバーを表示」なども一緒に消える)
+        NSWindow.allowsAutomaticWindowTabbing = false
+
         // 他の Mac とのタブの見せ合い (TabSync.swift)。
         // 手前に戻るたびに取りに行く見張りを立てる
         TabSync.shared.start()
@@ -310,6 +316,9 @@ struct BrowserCommands: Commands {
             .disabled(manager == nil)
             Divider()
             Button("Move Tab to New Window") { manager?.moveSelectedTabToNewWindow() }
+                .disabled(manager == nil)
+            // スプリットビューを解く (SplitView.swift)。並んでいなければ何もしない
+            Button("Exit Split View") { manager?.exitActiveSplit() }
                 .disabled(manager == nil)
             Divider()
             ForEach(1...9, id: \.self) { n in
