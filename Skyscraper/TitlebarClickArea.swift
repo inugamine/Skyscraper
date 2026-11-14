@@ -67,7 +67,7 @@ final class TitlebarClickView: NSView {
         return true
     }
 
-    // システム設定の「ウインドウのタイトルバーをダブルクリックして…」に従う。
+    // システム設定の「ウィンドウのタイトルバーをダブルクリックして…」に従う。
     // 値は全体の設定 (NSGlobalDomain) にあり、standard から読める
     private func performDoubleClickAction(on window: NSWindow) {
         switch UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") {

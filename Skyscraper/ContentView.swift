@@ -526,12 +526,12 @@ final class SkyscraperWebView: WKWebView {
     // 直近の右クリック位置 (CSS ピクセル・左上原点)。elementFromPoint に渡す
     private var lastRightClick: CGPoint = .zero
 
-    // 右クリックの「リンクをプライベートウインドウで開く」の行き先 (Tab が入れる)。
+    // 右クリックの「リンクをプライベートウィンドウで開く」の行き先 (Tab が入れる)。
     // プライベートウィンドウのタブでは nil のままにして、項目そのものを出さない——
     // そこで「新しいタブで開く」を選べば、もうプライベートだ
     var openLinkInPrivate: ((URL) -> Void)?
 
-    // 右クリックの「〜を新規ウインドウで開く」一式。
+    // 右クリックの「〜を新規ウィンドウで開く」一式。
     // WebKit 任せにすると、これらは window.open() と同じ道
     // (createWebViewWith、navigationType は .other) を通ってくる。
     // するとポップアップの門番が「クリックに便乗した窓」と区別できずに止め、
@@ -550,10 +550,10 @@ final class SkyscraperWebView: WKWebView {
     ]
     // 付け替えた項目の、元の行き先。メニューを開くたびに作り直す
     private var forwardedNewWindowItems: [ObjectIdentifier: (target: AnyObject?, action: Selector?)] = [:]
-    // 「新規ウインドウで開く」が選ばれた時刻。createWebViewWith が一度だけ使う
+    // 「新規ウィンドウで開く」が選ばれた時刻。createWebViewWith が一度だけ使う
     private var newWindowRequestedAt: Date?
 
-    // 直前に「新規ウインドウで開く」が選ばれていたか。読んだら印は消える。
+    // 直前に「新規ウィンドウで開く」が選ばれていたか。読んだら印は消える。
     // WebKit からの呼び戻しはすぐ来るので、古い印 (2秒超) は無かったことにする——
     // 行き先が開けず呼び戻しが来なかった場合に、後の window.open() を
     // 素通りさせないため
@@ -615,7 +615,7 @@ final class SkyscraperWebView: WKWebView {
                 break
             }
         }
-        // WebKit はリンクの上で右クリックした時だけ「新しいウインドウで開く」を出す。
+        // WebKit はリンクの上で右クリックした時だけ「新しいウィンドウで開く」を出す。
         // それを目印にすれば、リンクかどうかを自前で調べずに済む
         if openLinkInPrivate != nil,
            let index = menu.items.firstIndex(where: {
@@ -973,10 +973,10 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // 覗き窓の中で⌥クリックした時は、覗き窓の中で開き直す (Peek.swift)
     var openPeek: ((String) -> Void)?
 
-    // 右クリックの「リンクをプライベートウインドウで開く」の連絡先 (TabManager が入れる)
+    // 右クリックの「リンクをプライベートウィンドウで開く」の連絡先 (TabManager が入れる)
     var openInPrivateWindow: ((URL) -> Void)?
 
-    // 右クリックの「〜を新規ウインドウで開く」で器を求められた時の連絡先 (TabManager が入れる)。
+    // 右クリックの「〜を新規ウィンドウで開く」で器を求められた時の連絡先 (TabManager が入れる)。
     // openPopup と同じく、返された WKWebView をそのまま WebKit に渡す。違いは置く先が新しい窓なこと
     var openPopupWindow: ((WKWebViewConfiguration) -> WKWebView?)?
 
@@ -1736,7 +1736,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         observers.forEach { $0.invalidate() }
         observers.removeAll()
 
-        // 右クリックの「リンクをプライベートウインドウで開く」。
+        // 右クリックの「リンクをプライベートウィンドウで開く」。
         // プライベートのタブでは繋がない (項目ごと出さない)
         (webView as? SkyscraperWebView)?.openLinkInPrivate = isPrivate ? nil : { [weak self] url in
             self?.openInPrivateWindow?(url)
@@ -3348,7 +3348,7 @@ extension Tab: WKUIDelegate {
                  windowFeatures: WKWindowFeatures) -> WKWebView? {
         let requestedURL = navigationAction.request.url?.absoluteString
 
-        // 右クリックの「〜を新規ウインドウで開く」。利用者がはっきり選んだ操作なので
+        // 右クリックの「〜を新規ウィンドウで開く」。利用者がはっきり選んだ操作なので
         // 門番を通さず、WebKit が用意した器を新しい窓に置いて返す。
         // 器ごと渡すので、行き先が何であれ WebKit 自身と同じものが開く
         if (webView as? SkyscraperWebView)?.consumeNewWindowRequest() == true,
@@ -3621,7 +3621,7 @@ final class TabManager: NSObject, ObservableObject {
     // タブを新しい窓へ渡す pendingAdoption と同じ手だ
     private static var pendingPrivate = false
     // 新しいプライベートウィンドウに最初に開かせる URL。
-    // 右クリックの「リンクをプライベートウインドウで開く」が置いていく
+    // 右クリックの「リンクをプライベートウィンドウで開く」が置いていく
     private static var pendingPrivateURL: String?
 
     let isPrivate: Bool
@@ -4251,11 +4251,11 @@ final class TabManager: NSObject, ObservableObject {
                 self.openPeek(url: link, profile: profile)
             }
         }
-        // 右クリックの「リンクをプライベートウインドウで開く」
+        // 右クリックの「リンクをプライベートウィンドウで開く」
         tab.openInPrivateWindow = { [weak self] url in
             self?.openInPrivateWindow(url)
         }
-        // 右クリックの「〜を新規ウインドウで開く」。プロファイルも継ぐ
+        // 右クリックの「〜を新規ウィンドウで開く」。プロファイルも継ぐ
         tab.openPopupWindow = { [weak self] configuration in
             self?.addPopupWindow(configuration: configuration, profile: profile)
         }
@@ -4505,7 +4505,7 @@ final class TabManager: NSObject, ObservableObject {
         newWindowRequests += 1
     }
 
-    // 右クリックの「リンクをプライベートウインドウで開く」。
+    // 右クリックの「リンクをプライベートウィンドウで開く」。
     // プライベートウィンドウが既にあればそこへ一枚足して前に出し、
     // 無ければ新しく開く (Chrome と同じ)。
     // 名簿の後ろから探すのは externalURLTarget と同じ理屈だ
@@ -4519,7 +4519,7 @@ final class TabManager: NSObject, ObservableObject {
         openPrivateWindow()
     }
 
-    // 右クリックの「〜を新規ウインドウで開く」。
+    // 右クリックの「〜を新規ウィンドウで開く」。
     // WebKit には器をこの場で同期に返さねばならないが、窓を開くのは View の仕事で
     // 後から来る。だからタブだけ先に作り、タブを新しい窓へ移す時と同じ
     // 預かり所 (pendingAdoption) に置く。中身は WebKit が流し込むので、
