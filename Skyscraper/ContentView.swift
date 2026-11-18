@@ -3579,6 +3579,10 @@ final class TabManager: NSObject, ObservableObject {
             scheduleSave()
         }
     }
+    // 今見ているタブを引っ張っている間、ページの領域に代わりに出すタブ (SplitView.swift)。
+    // 保存はしない。ドラッグが終われば消える
+    @Published var dragStandInID: UUID?
+
     // スプリットビューの組 (SplitView.swift)。
     // 書き換えたら保存も走らせる (比率や組み合わせも復元する)
     @Published var splits: [TabSplit] = [] {

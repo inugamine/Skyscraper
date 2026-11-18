@@ -16,6 +16,12 @@
 //  もう一つは、タブを引っ張ってページの端 (外側 1/4) へ落とす。
 //  ページの真ん中で放した時は受け取らないので、今まで通り千切れる。
 //
+//  ── 今見ているタブを掴んだ時 ──
+//  並べる相手が居ないので、引っ張っている間だけ、帯の上で次の (下の) タブを
+//  代役として見せる。一番下なら一つ上。端に落とせば、掴んだタブと代役が組になる。
+//  選択そのものは動かさない (動かすと保存や拡張機能への知らせが走る)。
+//  見せる物だけを差し替え、ドラッグが終われば元に戻す
+//
 //  ── WebView の置き方 ──
 //  全タブの WebView を常に載せておく作りは変えていない (BrowserPane の頃のまま)。
 //  見せる二枚だけ枠を半分にし、残りは今まで通り全面に敷いて伏せておく。
@@ -75,7 +81,34 @@ extension TabManager {
 
     // 画面に出ているか (選択中か、その相方)。畳む相手を選ぶ時に見る
     func isOnScreen(_ tab: Tab) -> Bool {
-        tab.id == selectedID || activeSplit?.contains(tab.id) == true
+        tab.id == selectedID || tab.id == dragStandInID
+            || activeSplit?.contains(tab.id) == true
+    }
+
+    // ── 今見ているタブを掴んだ時の代役 ──
+
+    // 引っ張っている間だけ、ページの領域に代わりに出すタブ。
+    // 帯の並びで一つ下、一番下なら一つ上。一枚きりなら代役は居ない
+    func beginDragStandIn(for dragged: Tab) {
+        guard dragged.id == selectedID else { return }
+        let order = displayOrder
+        guard let index = order.firstIndex(where: { $0.id == dragged.id }),
+              let standIn = order[safe: index + 1] ?? order[safe: index - 1] else { return }
+        // 眠っているタブなら起こしておく。放した後に組になれば、どのみち見せる
+        standIn.activateIfDeferred()
+        dragStandInID = standIn.id
+    }
+
+    func endDragStandIn() {
+        if dragStandInID != nil { dragStandInID = nil }
+    }
+
+    // 引っ張られてきたタブと組にする相手。
+    // 普段は今見ているタブ。今見ているタブ自身を掴んでいる時は代役
+    private func splitPartner(for dragged: Tab) -> Tab? {
+        guard let current = selectedTab else { return nil }
+        guard dragged.id == current.id else { return current }
+        return tabs.first { $0.id == dragStandInID }
     }
 
     // tab を other の edge 側に並べる。
@@ -141,9 +174,8 @@ extension TabManager {
         guard let id = UUID(uuidString: idString),
               let (source, tab) = Self.owner(of: id),
               source.isPrivate == isPrivate,
-              let current = selectedTab else { return false }
-        // 今見ているタブ自身は、並べる相手が居ない
-        return tab.id != current.id
+              let partner = splitPartner(for: tab) else { return false }
+        return tab.id != partner.id
     }
 
     @discardableResult
@@ -152,11 +184,11 @@ extension TabManager {
               let id = UUID(uuidString: idString),
               let (source, tab) = Self.owner(of: id),
               // 相手は先に控える。他の窓から引き取ると、選択が引き取ったタブへ移る
-              let current = selectedTab else { return false }
+              let partner = splitPartner(for: tab) else { return false }
         if source !== self {
             source.moveTab(tab, to: self)
         }
-        makeSplit(tab, with: current, on: edge)
+        makeSplit(tab, with: partner, on: edge)
         return true
     }
 
@@ -238,8 +270,11 @@ struct PaneArea: View {
 
     var body: some View {
         GeometryReader { geo in
-            // 疑似大画面の間は一枚に戻す (動画に全面を明け渡す)
-            let split = tab.isVideoFullscreen ? nil : manager.activeSplit
+            // 今見ているタブを引っ張っている間は、代役を一枚で見せる
+            let shownID = manager.dragStandInID ?? tab.id
+            // 疑似大画面の間は一枚に戻す (動画に全面を明け渡す)。代役を見せている間も一枚
+            let split = (tab.isVideoFullscreen || manager.dragStandInID != nil)
+                ? nil : manager.activeSplit
             let layout = SplitLayout(size: geo.size, split: split)
 
             ZStack(alignment: .topLeading) {
@@ -248,16 +283,16 @@ struct PaneArea: View {
                 // 単一の WebView 枠だとタブを切り替えても最初の WebView が表示され続ける。
                 // また、常時マウントにより裏タブの読み込み・タイトル更新も進む
                 ForEach(manager.tabs) { t in
-                    let onScreen = t.id == tab.id || split?.contains(t.id) == true
+                    let onScreen = t.id == shownID || split?.contains(t.id) == true
                     TabWebSlot(tab: t, onScreen: onScreen, rect: layout.content(for: t.id))
                 }
 
                 // ロビー・顛末書・小窓の留守番札。見えているタブの分だけ
                 ForEach(manager.tabs) { t in
-                    if t.id == tab.id || split?.contains(t.id) == true {
+                    if t.id == shownID || split?.contains(t.id) == true {
                         let rect = layout.content(for: t.id)
                         PaneContent(tab: t,
-                                    isActive: t.id == tab.id,
+                                    isActive: t.id == shownID,
                                     onActivate: { manager.select(t) })
                             .frame(width: rect.width, height: rect.height)
                             .position(x: rect.midX, y: rect.midY)
@@ -271,7 +306,7 @@ struct PaneArea: View {
                 // スプリットビューでは、触っていない側のページでも
                 // マウスを載せたリンクの行き先が、その枠の下端に出る
                 ForEach(manager.tabs) { t in
-                    if t.id == tab.id || split?.contains(t.id) == true {
+                    if t.id == shownID || split?.contains(t.id) == true {
                         let rect = layout.content(for: t.id)
                         PaneHoverBar(tab: t)
                             .frame(width: rect.width, height: rect.height)

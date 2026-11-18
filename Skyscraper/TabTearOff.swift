@@ -133,7 +133,10 @@ final class TabTearOff: NSObject, ObservableObject, NSDraggingSource {
             pressedTab = nil
             // 押下がこちらへ届く＝ドラッグはもう終わっている。
             // 終了の知らせを取りこぼしても、受け皿を出しっぱなしにしない
-            if isDragging { isDragging = false }
+            if isDragging {
+                isDragging = false
+                sourceManager?.endDragStandIn()
+            }
             // ⌃クリックは右クリック扱い (メニューが出る) なので手を出さない
             guard !event.modifierFlags.contains(.control),
                   let window = event.window,
@@ -206,6 +209,9 @@ final class TabTearOff: NSObject, ObservableObject, NSDraggingSource {
         draggedTab = tab
         sourceManager = manager
         isDragging = true
+        // 今見ているタブを掴んだなら、次のタブを代役に立てる (SplitView.swift)。
+        // ページの端へ落とせば、その代役と組になる
+        manager.beginDragStandIn(for: tab)
         let session = view.beginDraggingSession(with: [dragItem], event: event, source: self)
         // 受け取り手が無ければ千切るので、札を元の場所へ滑って戻らせない
         session.animatesToStartingPositionsOnCancelOrFail = false
@@ -259,6 +265,9 @@ final class TabTearOff: NSObject, ObservableObject, NSDraggingSource {
         draggedTab = nil
         sourceManager = nil
         isDragging = false
+        // 代役を下ろす。組になった時は、選択が掴んだタブへ移っているので組ごと見える。
+        // 千切った時は、元の窓の選択が次のタブへ移るので、代役と同じ物が残る
+        manager?.endDragStandIn()
 
         // どこかが受け取った (並べ替え・他の窓へ移した)。こちらの出番ではない
         guard operation == [], let tab, let manager else { return }
