@@ -3655,9 +3655,9 @@ final class TabManager: NSObject, ObservableObject {
         tabSearchFocusTrigger &+= 1
     }
 
-    // 館内案内板 (⌘K) を出しているか。盤は窓に一つ (Directory.swift)
+    // 館内案内板 (⌥⌘K) を出しているか。盤は窓に一つ (Directory.swift)
     @Published var isDirectoryVisible = false
-    // 打ち込み欄へ焦点を移す合図。(⌘K のたびに増える)
+    // 打ち込み欄へ焦点を移す合図。(⌥⌘K のたびに増える)
     @Published private(set) var directoryFocusTrigger = 0
 
     func showDirectory() {
@@ -7855,7 +7855,7 @@ struct ContentView: View {
                 TabSearchPanel(manager: manager)
             }
         }
-        // 館内案内板。(⌘K、Directory.swift)
+        // 館内案内板。(⌥⌘K、Directory.swift)
         .overlay {
             if manager.isDirectoryVisible {
                 DirectoryPanel(manager: manager, translator: translator)

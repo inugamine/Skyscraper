@@ -291,9 +291,12 @@ struct BrowserCommands: Commands {
                 .keyboardShortcut("a", modifiers: [.command, .shift])
                 .disabled(manager == nil)
             // 館内案内板。タブ・ブックマーク・操作・閉じたタブを一枚から引く
-            // (Directory.swift)。⌘K は Arc や Raycast と同じ位置
+            // (Directory.swift)。セオドアもここに居る。
+            // 元は ⌘K (Arc や Raycast と同じ位置) だったが、⌘K はページ側
+            // (Slack・GitHub・Notion 等) も使っていて、WKWebView がメニューより先に
+            // ページへ渡すため横取りされて開かないことがあった。なので ⌥⌘K
             Button("Directory…") { manager?.showDirectory() }
-                .keyboardShortcut("k", modifiers: .command)
+                .keyboardShortcut("k", modifiers: [.command, .option])
                 .disabled(manager == nil)
             Divider()
             // ピン留め。札の文言が今の状態で変わるので、

@@ -485,7 +485,7 @@ struct SettingsView: View {
                 Text("Ask Theodore in the Directory")
                     .font(.system(size: 12, design: .serif))
                     .foregroundColor(Deco.cream)
-                Text("Theodore, the elevator attendant, takes requests typed into the Directory (⌘K): closing tabs, opening bookmarks, reopening closed tabs and working the current tab. Requests are understood on this Mac with Apple Intelligence and are never sent anywhere.")
+                Text("Theodore, the elevator attendant, takes requests typed into the Directory (⌥⌘K): closing tabs, opening bookmarks, reopening closed tabs and working the current tab. Requests are understood on this Mac with Apple Intelligence and are never sent anywhere.")
                     .font(.system(size: 10, design: .serif))
                     .foregroundColor(Deco.dimGold)
                     .fixedSize(horizontal: false, vertical: true)

@@ -6531,12 +6531,12 @@
         }
       }
     },
-    "Theodore, the elevator attendant, takes requests typed into the Directory (⌘K): closing tabs, opening bookmarks, reopening closed tabs and working the current tab. Requests are understood on this Mac with Apple Intelligence and are never sent anywhere." : {
+    "Theodore, the elevator attendant, takes requests typed into the Directory (⌥⌘K): closing tabs, opening bookmarks, reopening closed tabs and working the current tab. Requests are understood on this Mac with Apple Intelligence and are never sent anywhere." : {
       "localizations" : {
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "エレベーターボーイのセオドアが、館内案内板 (⌘K) に打ち込んだお願いを承ります。タブを閉じる、ブックマークを開く、閉じたタブを開き直す、今のタブを操作する、といったことができます。お願いはこの Mac の Apple Intelligence で読み解かれ、外へ送られることはありません。"
+            "value" : "エレベーターボーイのセオドアが、館内案内板 (⌥⌘K) に打ち込んだお願いを承ります。タブを閉じる、ブックマークを開く、閉じたタブを開き直す、今のタブを操作する、といったことができます。お願いはこの Mac の Apple Intelligence で読み解かれ、外へ送られることはありません。"
           }
         }
       }
