@@ -900,14 +900,25 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     @Published var isFloating: Bool = false
     // リーダーモードが使えるページか (Readability の判定器による)
     @Published var isReaderAvailable: Bool = false
-    // リーダーモード表示中か
-    @Published var isReaderActive: Bool = false
+    // リーダーモード表示中か。畳んだら、しおりの記録も止める
+    @Published var isReaderActive: Bool = false {
+        didSet {
+            if !isReaderActive {
+                readerProgressTask?.cancel()
+                readerProgressTask = nil
+            }
+        }
+    }
     // リーダーの本文を用意している最中か (pixiv の本文や、続きのページを取りに行っている間)。ボタンを脈打たせる
     @Published var isReaderPreparing: Bool = false
     // リーダーを被せたページの鍵 (Reader.pageKey)。読み込み直さずに URL だけ変わったら畳むのに使う
     private var readerPageKey: String?
     // 読み込み直さずに URL が変わった後の、判定のやり直しの予約
     private var readerRedetect: Task<Void, Never>?
+    // リーダー表示中に、数秒おきに読んでいる位置をしおりへ記録する仕事
+    private var readerProgressTask: Task<Void, Never>?
+    // 文字の設定 (Aa) が変わったら、表示中の紙面を差し替える
+    private var readerSettingsSink: AnyCancellable?
     // ページ内検索バーを出しているか
     @Published var isFindBarVisible: Bool = false
     // 検索語
@@ -2321,6 +2332,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
                 if active, !self.isReaderActive {
                     self.isReaderActive = true
                     self.readerPageKey = Reader.pageKey(self.webView.url)
+                    self.startReaderProgress()
                 }
                 // pixiv のシリーズの移動をリーダーから辿ってきたなら、行き先もそのままリーダーで開く
                 if resume, !self.isReaderActive { self.toggleReader() }
@@ -2332,8 +2344,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // 別のページへ移ったなら紙面を畳み、少し待ってから判定をやり直す (描き替えが済むのを待つ)
     private func readerNoticeURLChange(_ url: URL?) {
         if isReaderActive, let readerPageKey, Reader.pageKey(url) != readerPageKey {
-            webView.evaluateJavaScript(Reader.exitJS, completionHandler: nil)
-            isReaderActive = false
+            closeReader()
         }
         readerRedetect?.cancel()
         // 普通の読み込みなら、読み込み完了の時に判定する
@@ -2349,25 +2360,110 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     // 本文を取りに行くことがあるので (pixiv・複数ページの記事)、入場は待てる形で呼ぶ
     func toggleReader() {
         if isReaderActive {
-            webView.evaluateJavaScript(Reader.exitJS, completionHandler: nil)
-            isReaderActive = false
+            closeReader()
             return
         }
         guard !isReaderPreparing else { return }
         isReaderPreparing = true
+        // しおりがあれば、その位置から開く (読み終わった物と、ほとんど頭の物は頭から)
+        let key = Reader.pageKey(webView.url)
+        let mark = ReadingMarks.mark(forKey: key)
+        let arguments: [String: Any] = [
+            "settings": ReaderSettingsStore.shared.settings.cssVariables,
+            "resume": ReadingMarks.resumePosition(for: mark),
+            "finished": mark?.finished ?? false,
+        ]
         Task { @MainActor [weak self] in
             guard let self else { return }
             let result = try? await self.webView.callAsyncJavaScript(
                 Reader.enterBody,
-                arguments: [:],
+                arguments: arguments,
                 in: nil,
                 contentWorld: .page
             )
             self.isReaderPreparing = false
             if (result as? Bool) == true {
                 self.isReaderActive = true
-                self.readerPageKey = Reader.pageKey(self.webView.url)
+                self.readerPageKey = key
+                self.watchReaderSettings()
+                self.startReaderProgress()
             }
+        }
+    }
+
+    // 紙面を畳む。畳む前に、読んでいた位置をしおりに残す。
+    // 位置を聞いて剥がし終えるまでは準備中にしておく (その間に本のボタンを押されて、被せ直した紙面を剥がさないため)
+    private func closeReader() {
+        let key = readerPageKey
+        isReaderActive = false
+        isReaderPreparing = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.recordReaderProgress(forKey: key, lastSaved: nil)
+            self.webView.evaluateJavaScript(Reader.exitJS, completionHandler: nil)
+            self.isReaderPreparing = false
+        }
+    }
+
+    // ── しおり ──
+    // 読んでいる間、2 秒おきに位置を記録する。プライベートウィンドウでは記録しない
+    private func startReaderProgress() {
+        readerProgressTask?.cancel()
+        guard webView.configuration.websiteDataStore.isPersistent else { return }
+        let key = readerPageKey
+        readerProgressTask = Task { @MainActor [weak self] in
+            var lastSaved: Double?
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                guard !Task.isCancelled, let self else { return }
+                if let saved = await self.recordReaderProgress(forKey: key, lastSaved: lastSaved) {
+                    lastSaved = saved
+                }
+            }
+        }
+    }
+
+    // 紙面から今の位置を聞いて、前回から動いていればしおりに書く。書いた (または変わらなかった) 位置を返す
+    @discardableResult
+    private func recordReaderProgress(forKey key: String?, lastSaved: Double?) async -> Double? {
+        guard key != nil, webView.configuration.websiteDataStore.isPersistent else { return nil }
+        let result = try? await webView.callAsyncJavaScript(
+            Reader.progressBody,
+            arguments: [:],
+            in: nil,
+            contentWorld: .page
+        )
+        guard let answer = result as? [String: Any],
+              let progress = (answer["progress"] as? NSNumber)?.doubleValue
+        else { return nil }
+        if let lastSaved, abs(lastSaved - progress) < 0.001 { return lastSaved }
+        ReadingMarks.save(progress: progress, title: answer["title"] as? String ?? pageTitle, forKey: key)
+        return progress
+    }
+
+    // ── 文字の設定 (Aa) ──
+    // 設定が変わったら、表示中の紙面の CSS 変数だけ差し替える (読み込み直さないので、読んでいる位置はそのまま)
+    private func watchReaderSettings() {
+        guard readerSettingsSink == nil else { return }
+        readerSettingsSink = ReaderSettingsStore.shared.$settings
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] settings in
+                // weak な self は Task に持ち込む前に let へ落とす (Swift 6 の並行性の決まり)
+                guard let self else { return }
+                Task { @MainActor in self.applyReaderSettings(settings) }
+            }
+    }
+
+    private func applyReaderSettings(_ settings: ReaderSettings) {
+        guard isReaderActive else { return }
+        Task { @MainActor [weak self] in
+            _ = try? await self?.webView.callAsyncJavaScript(
+                Reader.applySettingsBody,
+                arguments: ["vars": settings.cssVariables],
+                in: nil,
+                contentWorld: .page
+            )
         }
     }
 
@@ -7498,6 +7594,9 @@ struct BrowserPane: View {
             .buttonStyle(.plain)
             .help(tab.isReaderActive ? "Hide Reader" : "Show Reader")
         }
+
+        // 文字の設定 (Aa)。リーダー表示中だけ現れる (ReaderSettings.swift)
+        ReaderTypographyButton(tab: tab)
 
         // 星ボタン：現在のページを登録/解除
         Button {
