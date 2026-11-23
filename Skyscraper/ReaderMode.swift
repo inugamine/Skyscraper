@@ -79,6 +79,17 @@ enum Reader {
     // ── 入場 ──
     // callAsyncJavaScript で呼ぶ関数の本体 (pixiv の本文や続きのページを取りに行くので、待てる形にしてある)。
     // Readability を注入して本文を抽出し、オーバーレイに流し込む。成功なら true を返す。
+    // 引数 (callAsyncJavaScript の arguments で渡す):
+    //   settings … 文字の設定の CSS 変数 (ReaderSettings.cssVariables)
+    //   resume   … しおりの位置 (0〜1)。0 なら頭から
+    //   finished … 前に終わりまで読んだことがあるか。あれば扇を最初から金にしておく
+    //
+    // 紙面を被せたら、Swift から触るための窓口を window.__skyscraperReader に置く
+    // (progress = 今の位置の割合、apply = 文字の設定の差し替え、cleanup = 後始末)。
+    //
+    // 縦書きは左へ読み進める。vertical-rl の箱は右端から始まり、WebKit の版によって scrollLeft が
+    // 「0 から負へ減る」型と「最大から 0 へ減る」型がある。被せた直後の scrollLeft を起点に控え、
+    // そこからどれだけ動いたかで測れば、どちらでも同じに扱える (Mezzanine と同じ式)
     // 汎用の抜き出しは document の複製に対して走らせる (Readability が解析中に DOM を壊す造りのため。本家も同じ注意書きをしている)
     static var enterBody: String {
         guard !readabilityJS.isEmpty, !readerableJS.isEmpty, !extractJS.isEmpty else { return "return false;" }
@@ -107,6 +118,8 @@ enum Reader {
             overlay.tabIndex = -1;
             if (article.lang) { overlay.lang = article.lang; }
             if (vertical) { overlay.classList.add('__sr-vertical'); }
+            Object.entries(settings || {}).forEach(([name, value]) => overlay.style.setProperty(name, value));
+            if (finished) { overlay.dataset.finished = '1'; }
             const column = document.createElement('div');
             column.className = '__sr-column';
 
@@ -133,6 +146,14 @@ enum Reader {
             body.innerHTML = article.content;
             column.appendChild(body);
 
+            // 本文の終わりの扇。pixiv のシリーズの移動 (前の話・次の話) があれば、その手前に置く
+            const finale = document.createElement('div');
+            finale.className = '__sr-finale';
+            finale.setAttribute('aria-hidden', 'true');
+            finale.innerHTML = `\(finaleHTML)`;
+            const series = body.querySelector('.__sr-series');
+            if (series) { series.parentNode.insertBefore(finale, series); } else { column.appendChild(finale); }
+
             // シリーズの移動 (pixiv の前の話・次の話) を普通にクリックしたら、行き先でもリーダーで開く。
             // ⌘クリックなどで別のタブへ開くときは旗を立てない (このタブの次のページで勝手に開いてしまうため)
             body.querySelectorAll('.__sr-series a[href]').forEach((a) => {
@@ -147,6 +168,7 @@ enum Reader {
             // 裏のページが動いたり、サイトの操作 (pixiv のページ送りなど) が走ったりする。
             // 窓で先に受けて紙面を動かし、裏へは流さない。
             // 縦書きは左へ読み進めるので、下へ進むキーは左へ動かす
+            let touched = false; // 自分で動かし始めたか (しおりの位置へ進めるのを邪魔しないため)
             const onKey = (e) => {
                 if (e.metaKey || e.ctrlKey || e.altKey) { return; }
                 const t = e.target;
@@ -168,6 +190,7 @@ enum Reader {
                 if (d === null) { return; }
                 e.preventDefault();
                 e.stopImmediatePropagation();
+                touched = true;
                 if (d === 0) { return; }
                 const far = vertical ? overlay.scrollWidth : overlay.scrollHeight;
                 if (!isFinite(d)) { d = Math.sign(d) * far; }
@@ -191,24 +214,130 @@ enum Reader {
                 }, { passive: false });
             }
 
-            window.__skyscraperReaderCleanup = () => {
-                window.removeEventListener('keydown', onKey, true);
-            };
-
             overlay.appendChild(column);
             (document.head || document.documentElement).appendChild(style);
             document.documentElement.appendChild(overlay);
             overlay.focus({ preventScroll: true });
+
+            // ── 位置の測り方 ──
+            const originX = overlay.scrollLeft;
+            const maxScroll = () => vertical
+                ? overlay.scrollWidth - overlay.clientWidth
+                : overlay.scrollHeight - overlay.clientHeight;
+            const position = () => vertical ? Math.abs(originX - overlay.scrollLeft) : overlay.scrollTop;
+            const progress = () => {
+                const max = maxScroll();
+                return max > 0 ? Math.min(1, Math.max(0, position() / max)) : 1;
+            };
+            const seek = (p) => {
+                const value = maxScroll() * p;
+                if (vertical) { overlay.scrollLeft = originX - value; } else { overlay.scrollTop = value; }
+            };
+
+            // ── 読み終わり ──
+            // 終わりまで読んだら data-finished を立てる (扇が金に灯り、FIN が浮かぶ)。
+            // 一画面に収まる短い記事は、開いた時点で読み終わり
+            let ready = false;
+            const checkFinished = () => {
+                if (!ready || overlay.dataset.finished) { return; }
+                const max = maxScroll();
+                if (max <= 0 || position() / max >= \(ReadingMarks.finishedThreshold)) {
+                    overlay.dataset.finished = '1';
+                }
+            };
+            overlay.addEventListener('scroll', checkFinished, { passive: true });
+            overlay.addEventListener('wheel', () => { touched = true; }, { passive: true });
+
+            // ── しおりの位置まで進める ──
+            // 画像が読み終わって長さが決まってから進める (待つのは長くて 1.5 秒)。
+            // その前に自分で動かし始めていたら邪魔をしない。
+            // 進め終わるまでは位置を記録しない (進める前の「頭」をしおりとして上書きしないため)
+            const pending = Array.from(overlay.querySelectorAll('img'))
+                .filter((img) => !img.complete && img.loading !== 'lazy')
+                .map((img) => new Promise((done) => {
+                    img.addEventListener('load', done, { once: true });
+                    img.addEventListener('error', done, { once: true });
+                }));
+            Promise.race([Promise.all(pending), new Promise((done) => setTimeout(done, 1500))]).then(() => {
+                if (resume > 0 && !touched && position() < 1) { seek(resume); }
+                ready = true;
+                setTimeout(checkFinished, 0);
+            });
+
+            window.__skyscraperReader = {
+                title: article.title || document.title,
+                isReady: () => ready,
+                progress: progress,
+                // 文字の設定を差し替えて、読んでいた位置 (割合) に戻す
+                apply: (vars) => {
+                    const max = maxScroll();
+                    const p = max > 0 ? position() / max : 0;
+                    Object.entries(vars || {}).forEach(([name, value]) => overlay.style.setProperty(name, value));
+                    if (p > 0) { seek(p); }
+                },
+                cleanup: () => {
+                    window.removeEventListener('keydown', onKey, true);
+                }
+            };
             return true;
         } catch (e) { return false; }
         """
     }
 
+    // ── しおり ──
+    // callAsyncJavaScript で呼ぶ。紙面が被さっていて、しおりの位置へ進め終わっていれば
+    // { progress, title } を、そうでなければ null を返す
+    static let progressBody = """
+    const reader = window.__skyscraperReader;
+    if (!reader || !document.getElementById('__skyscraper-reader') || !reader.isReady()) { return null; }
+    return { progress: reader.progress(), title: reader.title };
+    """
+
+    // ── 文字の設定の差し替え ──
+    // callAsyncJavaScript で呼ぶ。引数 vars は ReaderSettings.cssVariables
+    static let applySettingsBody = """
+    window.__skyscraperReader?.apply(vars);
+    """
+
+    // ── 本文の終わりの扇 (扇の印) ──
+    // 読み終わるまでは淡い罫の色、終わりまで読むと金に灯り、「FIN」が浮かぶ。
+    // 半円の弧が二重、放射線が七本、要 (かなめ) に小さな半円。Mezzanine の扇と同じ組み方。
+    // 横書き用 (要が下、上に開く) と縦書き用 (要が左、右に開く) を両方入れておき、CSS で出し分ける
+    private static let finaleHTML: String = {
+        // 横書き用の点 (120 × 61 の方眼)
+        let center = (x: 60.0, y: 60.0)
+        let radius = 56.0
+        let ends = (1...7).map { i -> (x: Double, y: Double) in
+            let angle = (180.0 + 180.0 * Double(i) / 8.0) * .pi / 180
+            return (center.x + radius * cos(angle), center.y + radius * sin(angle))
+        }
+        let raysH = ends.map { String(format: "M60 60 L%.2f %.2f", $0.x, $0.y) }.joined(separator: " ")
+        // 縦書き用は、横書き用を 90° 回す ((x, y) → (61 - y, x))。要が左辺に来て、右へ開く
+        let raysV = ends.map { String(format: "M1 60 L%.2f %.2f", 61 - $0.y, $0.x) }.joined(separator: " ")
+        return """
+        <div class="__sr-finale-row">\
+        <svg class="__sr-fan __sr-fan-h" viewBox="0 0 120 61">\
+        <path d="M4 60 A56 56 0 0 1 116 60" />\
+        <path d="M25 60 A35 35 0 0 1 95 60" />\
+        <path d="\(raysH)" />\
+        <path class="__sr-jewel" d="M52 60 A8 8 0 0 1 68 60 Z" />\
+        </svg>\
+        <svg class="__sr-fan __sr-fan-v" viewBox="0 0 61 120">\
+        <path d="M1 4 A56 56 0 0 1 1 116" />\
+        <path d="M1 25 A35 35 0 0 1 1 95" />\
+        <path d="\(raysV)" />\
+        <path class="__sr-jewel" d="M1 52 A8 8 0 0 1 1 68 Z" />\
+        </svg>\
+        </div>\
+        <p class="__sr-fin">FIN</p>
+        """
+    }()
+
     // ── 退場 ──
     static let exitJS = """
     (() => {
-        window.__skyscraperReaderCleanup?.();
-        delete window.__skyscraperReaderCleanup;
+        window.__skyscraperReader?.cleanup();
+        delete window.__skyscraperReader;
         document.getElementById('__skyscraper-reader')?.remove();
         document.getElementById('__skyscraper-reader-style')?.remove();
     })();
@@ -237,18 +366,19 @@ enum Reader {
             overscroll-behavior: contain;
         }
         #__skyscraper-reader:focus { outline: none; }
+        /* 文字の設定 (ReaderSettings.swift) は CSS 変数で届く。変数が無ければ従来の組み方 */
         .__sr-column {
-            max-inline-size: 680px;
+            max-inline-size: var(--sr-measure, 40em);
             margin-inline: auto;
             padding-block: 64px 96px;
             padding-inline: 32px;
-            font-family: Georgia, 'Times New Roman', 'Hiragino Mincho ProN', 'Yu Mincho', serif;
+            font-family: var(--sr-font, Georgia, 'Times New Roman', 'Hiragino Mincho ProN', 'Yu Mincho', serif);
             color: \(cream);
-            font-size: 17px;
-            line-height: 1.9;
+            font-size: calc(17px * var(--sr-scale, 1));
+            line-height: var(--sr-leading, 1.9);
         }
         .__sr-title {
-            font-size: 28px; line-height: 1.45;
+            font-size: calc(28px * var(--sr-scale, 1)); line-height: 1.45;
             color: \(cream); letter-spacing: 0.04em;
             margin-block: 0 12px; margin-inline: 0; font-weight: 600;
         }
@@ -383,6 +513,48 @@ enum Reader {
             color: \(gold);
         }
 
+        /* ---- 本文の終わりの扇 (扇の印) ---- */
+        .__sr-finale {
+            margin-block: 4em 0;
+            text-align: center;
+        }
+        .__sr-finale-row {
+            display: flex;
+            align-items: flex-end;
+            gap: 0.8em;
+        }
+        .__sr-finale-row::before, .__sr-finale-row::after {
+            content: ''; flex: 1;
+            block-size: 1px; background: \(faint);
+        }
+        .__sr-fan {
+            display: block; flex: none;
+            margin-block-end: -1px;
+            fill: none;
+            stroke: \(faint); stroke-width: 1;
+            transition: stroke 1.2s ease;
+        }
+        .__sr-fan .__sr-jewel {
+            fill: \(faint); stroke: none;
+            transition: fill 1.2s ease;
+        }
+        .__sr-fin {
+            margin-block: 1em 0; margin-inline: 0;
+            padding-inline-start: 0.5em; /* 字間の分だけ行の終わりへずれるのを戻す */
+            font-size: 0.7em; letter-spacing: 0.5em;
+            color: \(gold);
+            opacity: 0;
+            transition: opacity 1.6s ease 0.4s;
+        }
+        #__skyscraper-reader[data-finished] .__sr-fan { stroke: \(gold); }
+        #__skyscraper-reader[data-finished] .__sr-fan .__sr-jewel { fill: \(gold); }
+        #__skyscraper-reader[data-finished] .__sr-fin { opacity: 1; }
+        /* 扇の後ろにシリーズの移動が続くときは、間を詰める */
+        .__sr-finale + .__sr-series { margin-block-start: 2.5em; }
+        /* 扇は二枚入っている。横書きでは要が下の扇、縦書きでは要が左の扇だけを見せる */
+        .__sr-fan-h { width: 5.5em; height: calc(5.5em * 61 / 120); }
+        .__sr-fan-v { display: none; width: calc(5.5em * 61 / 120); height: 5.5em; }
+
         /* ---- 縦書き ----
            pixiv で作者が縦書きを勧めている小説は、紙面ごと縦に組む。右から左へ読み進める */
         #__skyscraper-reader.__sr-vertical {
@@ -402,6 +574,8 @@ enum Reader {
             inline-size: auto;
             block-size: auto;
         }
+        .__sr-vertical .__sr-fan-h { display: none; }
+        .__sr-vertical .__sr-fan-v { display: block; }
         /* シリーズの箱は縦長の六角形に。尖りを上下に */
         .__sr-vertical .__sr-body .__sr-series-links a,
         .__sr-vertical .__sr-series-links .__sr-face {
