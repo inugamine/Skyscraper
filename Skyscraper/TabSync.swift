@@ -76,7 +76,7 @@ final class TabSync: ObservableObject {
     private static let recordType = "OpenTabList"
     // この Mac の控え番号を覚えておく鍵
     private static let deviceKey = "skyscraper.tabs.sync.deviceID"
-    // 一台ぶんに載せるタブの上限。百枚あれば誰の用も足りる
+    // 一台分に載せるタブの上限。百枚あれば誰の用も足りる
     private static let tabLimit = 100
     // これより長く便りの無い Mac は、もう使っていないと見なして並べない
     private static let staleAfter: TimeInterval = 30 * 24 * 60 * 60
@@ -427,7 +427,7 @@ final class TabSync: ObservableObject {
                                 tabs: payload.tabs)
         }
         .sorted { $0.updatedAt > $1.updatedAt }
-        Self.log.debug("他の Mac \(self.devices.count) 台ぶんを受け取った")
+        Self.log.debug("他の Mac \(self.devices.count) 台分を受け取った")
     }
 
     // MARK: - 下ごしらえ
@@ -494,7 +494,7 @@ struct RemoteTabsSection: View {
     @State private var contentHeight: CGFloat = 0
     private static let maxHeight: CGFloat = 300
 
-    // 一台ぶんで最初に見せる枚数
+    // 一台分で最初に見せる枚数
     private static let collapsedCount = 6
 
     var body: some View {
