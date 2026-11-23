@@ -902,6 +902,12 @@ final class Tab: NSObject, ObservableObject, Identifiable {
     @Published var isReaderAvailable: Bool = false
     // リーダーモード表示中か
     @Published var isReaderActive: Bool = false
+    // リーダーの本文を用意している最中か (pixiv の本文や、続きのページを取りに行っている間)。ボタンを脈打たせる
+    @Published var isReaderPreparing: Bool = false
+    // リーダーを被せたページの鍵 (Reader.pageKey)。読み込み直さずに URL だけ変わったら畳むのに使う
+    private var readerPageKey: String?
+    // 読み込み直さずに URL が変わった後の、判定のやり直しの予約
+    private var readerRedetect: Task<Void, Never>?
     // ページ内検索バーを出しているか
     @Published var isFindBarVisible: Bool = false
     // 検索語
@@ -1843,6 +1849,7 @@ final class Tab: NSObject, ObservableObject, Identifiable {
         observers.append(webView.observe(\.url, options: [.new]) { [weak self] wv, _ in
             guard let self else { return }
             Task { @MainActor in
+                self.readerNoticeURLChange(wv.url)
                 guard let urlText = wv.url?.absoluteString,
                       self.urlText != urlText else { return }
                 self.urlText = urlText
@@ -2303,29 +2310,63 @@ final class Tab: NSObject, ObservableObject, Identifiable {
             if let error {
                 print("Reader detect error: \(error.localizedDescription)")
             }
-            let available = (result as? Bool)
-                ?? (result as? NSNumber)?.boolValue
-                ?? false
+            let answer = result as? [String: Any]
+            let available = (answer?["available"] as? Bool) ?? false
+            let resume = (answer?["resume"] as? Bool) ?? false
+            let active = (answer?["active"] as? Bool) ?? false
             Task { @MainActor in
-                guard let self, self.isReaderAvailable != available else { return }
-                self.isReaderAvailable = available
+                guard let self else { return }
+                if self.isReaderAvailable != available { self.isReaderAvailable = available }
+                // 戻る・進むでキャッシュから戻ったページには、紙面が被さったまま残っていることがある
+                if active, !self.isReaderActive {
+                    self.isReaderActive = true
+                    self.readerPageKey = Reader.pageKey(self.webView.url)
+                }
+                // pixiv のシリーズの移動をリーダーから辿ってきたなら、行き先もそのままリーダーで開く
+                if resume, !self.isReaderActive { self.toggleReader() }
             }
         }
     }
 
-    // リーダーモードの出入り。入場は本文抽出に成功したときだけ状態を立てる
+    // 読み込み直さずに URL が変わった時 (pixiv のような、画面を JS で描き替えるサイト)。
+    // 別のページへ移ったなら紙面を畳み、少し待ってから判定をやり直す (描き替えが済むのを待つ)
+    private func readerNoticeURLChange(_ url: URL?) {
+        if isReaderActive, let readerPageKey, Reader.pageKey(url) != readerPageKey {
+            webView.evaluateJavaScript(Reader.exitJS, completionHandler: nil)
+            isReaderActive = false
+        }
+        readerRedetect?.cancel()
+        // 普通の読み込みなら、読み込み完了の時に判定する
+        guard !webView.isLoading else { return }
+        readerRedetect = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(800))
+            guard let self, !Task.isCancelled, !self.webView.isLoading else { return }
+            self.detectReaderAvailability()
+        }
+    }
+
+    // リーダーモードの出入り。入場は本文抽出に成功したときだけ状態を立てる。
+    // 本文を取りに行くことがあるので (pixiv・複数ページの記事)、入場は待てる形で呼ぶ
     func toggleReader() {
         if isReaderActive {
             webView.evaluateJavaScript(Reader.exitJS, completionHandler: nil)
             isReaderActive = false
-        } else {
-            webView.evaluateJavaScript(Reader.enterJS) { [weak self] result, _ in
-                let ok = (result as? Bool)
-                    ?? (result as? NSNumber)?.boolValue
-                    ?? false
-                Task { @MainActor in
-                    if ok { self?.isReaderActive = true }
-                }
+            return
+        }
+        guard !isReaderPreparing else { return }
+        isReaderPreparing = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let result = try? await self.webView.callAsyncJavaScript(
+                Reader.enterBody,
+                arguments: [:],
+                in: nil,
+                contentWorld: .page
+            )
+            self.isReaderPreparing = false
+            if (result as? Bool) == true {
+                self.isReaderActive = true
+                self.readerPageKey = Reader.pageKey(self.webView.url)
             }
         }
     }
@@ -7450,6 +7491,8 @@ struct BrowserPane: View {
                 Image(systemName: tab.isReaderActive ? "book.fill" : "book")
                     .font(.system(size: 13))
                     .foregroundColor(tab.isReaderActive ? Deco.cream : Deco.gold)
+                    // 本文を用意している間 (pixiv や続きのページを取りに行っている間) は脈打たせる
+                    .symbolEffect(.pulse, isActive: tab.isReaderPreparing)
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(.plain)
