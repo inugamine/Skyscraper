@@ -7,6 +7,26 @@
     <language>en</language>
 
     <item>
+      <title>Version 1.41</title>
+      <pubDate>Mon, 23 Nov 2026 17:30:56 +0900</pubDate>
+      <sparkle:version>41</sparkle:version>
+      <sparkle:shortVersionString>1.41</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>Skyscraper 1.41</h2>
+        <ul>
+          <li>Split View の操作性を、より直感的なものに変更しました。</li>
+          <li>リーダーモードの機能を強化しました。  </li>
+          <li>We've made Split View more intuitive to use.</li>
+          <li>We've enhanced the Reader Mode features.</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://github.com/inugamine/Skyscraper/releases/download/v1.41/Skyscraper-1.41.zip"
+        sparkle:edSignature="aTmltUyFNgVgyAcSgNuHtnl0fDxJVVFOqCgQErTHjJVcqSxJ7NMnBmJCw+mgsX7t/hH41T+bUf4oW0ACrsaXBA=="
+        length="13823682"
+        type="application/octet-stream" />
+    </item>    <item>
       <title>Version 1.40</title>
       <pubDate>Sat, 14 Nov 2026 08:51:40 +0900</pubDate>
       <sparkle:version>40</sparkle:version>
