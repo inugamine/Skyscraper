@@ -105,6 +105,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         IncomingURL.receive(urls)
     }
 
+    // ── Handoff ── (HandoffPublisher.swift)
+    //
+    // iPad の中二階 Mezzanine で読んでいたページを、外から来た URL と同じ口で開く
+    func application(_ application: NSApplication,
+                     willContinueUserActivityWithType userActivityType: String) -> Bool {
+        userActivityType == HandoffPublisher.activityType
+    }
+
+    func application(_ application: NSApplication,
+                     continue userActivity: NSUserActivity,
+                     restorationHandler: @escaping ([any NSUserActivityRestoring]) -> Void) -> Bool {
+        guard userActivity.activityType == HandoffPublisher.activityType,
+              let url = userActivity.webpageURL else { return false }
+        IncomingURL.receive([url])
+        return true
+    }
+
     // ── プッシュ通知 ── (TabSync.swift)
     //
     // 他の Mac がタブを送ったら、iCloud が知らせを寄越す。

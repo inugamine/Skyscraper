@@ -3749,9 +3749,14 @@ final class TabManager: NSObject, ObservableObject {
             // 見張り側からは誰が選ばれているか分からないので、ここから告げる。
             // 窓を閉じた時 (tearDownTabs で nil になる) もここを通る
             SleepBlocker.shared.noteSelection(selectedTab?.webView, in: self)
+            // iPad の Mezzanine へ、見ているページを知らせ直す (HandoffPublisher.swift)
+            handoff.follow(selectedTab, isPrivate: isPrivate)
             scheduleSave()
         }
     }
+
+    // 見ているページを iPad (中二階 Mezzanine) へ知らせる係 (Handoff)。窓ごとに一人
+    let handoff = HandoffPublisher()
 
     // ── プライベートウィンドウ ──
     //
@@ -3974,6 +3979,8 @@ final class TabManager: NSObject, ObservableObject {
     // 窓を閉じても SwiftUI は @StateObject を温存するので、
     // ここで手を下さない限り WebView は永遠に生き残る
     private func tearDownTabs() {
+        // 窓を閉じたら、iPad への知らせも取り下げる (HandoffPublisher.swift)
+        handoff.stop()
         // この窓のタブが小窓に出ていたら戻しておく (下で一緒に片付く)
         FloatingPlayer.shared.release(manager: self)
         for tab in tabs {
@@ -8041,6 +8048,13 @@ struct ContentView: View {
         // openWindow は環境にしか無いので、窓を開くのはここの仕事だ
         .onChange(of: manager.newWindowRequests) { _, _ in
             openWindow(id: "browser")
+        }
+        // Handoff：この窓が手前に来たら、選んでいるタブを iPad (Mezzanine) に知らせ直す。
+        // 窓が何枚もあると最後に知らせた窓が勝つので、手前に来た窓で上書きする。
+        // 起動して最初の窓が手前に来た時も、ここで初めて知らせる (HandoffPublisher.swift)
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
+            guard let window = note.object as? NSWindow, window === manager.hostWindow else { return }
+            manager.handoff.follow(manager.selectedTab, isPrivate: manager.isPrivate)
         }
     }
 }

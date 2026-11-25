@@ -22,6 +22,10 @@
 	<array>
 		<string>_googlecast._tcp</string>
 	</array>
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>net.live-on.inugamine.browsing</string>
+	</array>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
